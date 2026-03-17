@@ -1,11 +1,12 @@
 import AppKit
 
-@main
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var store: WorkspaceStore?
     private var mainWindowController: MainWindowController?
     private var preferencesWindowController: PreferencesWindowController?
     private var statusItemController: StatusItemController?
+    private var hasPresentedInitialWindow = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
@@ -26,11 +27,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             store.updateManager.configure()
             store.updateManager.scheduleBackgroundUpdateCheck()
-            mainWindowController.present()
+            DispatchQueue.main.async { [weak self] in
+                self?.presentInitialMainWindowIfNeeded()
+            }
             runAutomationIfNeeded()
         } catch {
             presentFatalError(error)
         }
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        presentInitialMainWindowIfNeeded()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -59,7 +66,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openMainWindow(_ sender: Any?) {
-        mainWindowController?.present()
+        hasPresentedInitialWindow = true
+        guard let mainWindowController else { return }
+        present(mainWindowController: mainWindowController, sender: sender)
     }
 
     @objc private func refreshCapture(_ sender: Any?) {
@@ -137,12 +146,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func presentFatalError(_ error: Error) {
         NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
+        activateAppBringingAllWindowsForward()
         let alert = NSAlert(error: error)
         alert.messageText = "ViewScope could not launch"
         alert.informativeText = error.localizedDescription
         alert.runModal()
         NSApp.terminate(nil)
+    }
+
+    private func presentInitialMainWindowIfNeeded() {
+        guard !hasPresentedInitialWindow else { return }
+        guard let mainWindowController else { return }
+
+        hasPresentedInitialWindow = true
+        present(mainWindowController: mainWindowController, sender: nil)
+    }
+
+    private func present(mainWindowController: MainWindowController, sender: Any?) {
+        mainWindowController.present(sender)
+        activateAppBringingAllWindowsForward()
+    }
+
+    private func activateAppBringingAllWindowsForward() {
+        NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func runAutomationIfNeeded() {
