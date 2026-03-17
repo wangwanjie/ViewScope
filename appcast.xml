@@ -1,0 +1,25 @@
+<?xml version='1.0' encoding='utf-8'?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>ViewScope</title>
+        <item>
+            <title>1.0.0</title>
+            <pubDate>Wed, 18 Mar 2026 03:11:40 +0800</pubDate>
+            <link>https://github.com/wangwanjie/ViewScope/releases/tag/v1.0.0</link>
+            <sparkle:version>1</sparkle:version>
+            <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"># ViewScope 1.0.0
+
+- 首个可用版本：提供原生 macOS UI 层级树、属性面板、截图预览与节点高亮。
+- 新增 `ViewScopeServer`，通过 `DistributedNotificationCenter` + loopback TCP 在本机发现并连接调试宿主。
+- 支持 Swift Package Manager、CocoaPods、Carthage 三种集成方式，默认面向 Debug 构建使用。
+- 新增状态栏快捷入口、偏好设置、GRDB 捕获历史、Sparkle 更新通道，以及 DMG / appcast 发布脚本。
+</description>
+            <enclosure url="https://github.com/wangwanjie/ViewScope/releases/download/v1.0.0/ViewScope_V_1.0.0.dmg" length="9086655" type="application/octet-stream" sparkle:edSignature="E5bf3IUSnZBQOZ1i51xGCHZCfWPuZ5OJvUhOxDd1yonPb9ZXLJvyShyH1sxVB5cKer97ilJipzpCuGsIHI/PBg==" />
+        </item>
+        <link>https://github.com/wangwanjie/ViewScope</link>
+        <description>ViewScope release feed.</description>
+        <language>zh-CN</language>
+    </channel>
+</rss>
