@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDisplayName</key>
+    <string>ViewScope</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleName</key>
+    <string>$(PRODUCT_NAME)</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>$(MARKETING_VERSION)</string>
+    <key>CFBundleVersion</key>
+    <string>$(CURRENT_PROJECT_VERSION)</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2026 Wan Jie Wang. All rights reserved.</string>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>ViewScopeGitHubLatestReleaseAPIURL</key>
+    <string>https://api.github.com/repos/wangwanjie/ViewScope/releases/latest</string>
+    <key>ViewScopeGitHubURL</key>
+    <string>https://github.com/wangwanjie/ViewScope</string>
+    <key>SUAllowsAutomaticUpdates</key>
+    <true/>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUEnableInstallerLauncherService</key>
+    <true/>
+    <key>SUEnableSystemProfiling</key>
+    <true/>
+    <key>SUFeedURL</key>
+    <string>https://raw.githubusercontent.com/wangwanjie/ViewScope/main/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>6swJ0d9FxitDqslP3gdTK9HsZwBOYEwDRmwRRvqXz78=</string>
+    <key>SUVerifyUpdateBeforeExtraction</key>
+    <true/>
+</dict>
+</plist>

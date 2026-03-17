@@ -8,34 +8,47 @@
 import XCTest
 
 final class ViewScopeUITests: XCTestCase {
-
     override func setUpWithError() throws {
-        // Put setup code here. This method is called before the invocation of each test method in the class.
-
-        // In UI tests it is usually best to stop immediately when a failure occurs.
         continueAfterFailure = false
-
-        // In UI tests it’s important to set the initial state - such as interface orientation - required for your tests before they run. The setUp method is a good place to do this.
-    }
-
-    override func tearDownWithError() throws {
-        // Put teardown code here. This method is called after the invocation of each test method in the class.
     }
 
     @MainActor
-    func testExample() throws {
-        // UI tests must launch the application that they test.
+    func testPreviewWorkspaceRendersAndExportsScreenshots() throws {
         let app = XCUIApplication()
+        app.launchEnvironment["VIEWSCOPE_PREVIEW_FIXTURE"] = "1"
+        app.launchEnvironment["VIEWSCOPE_DISABLE_UPDATES"] = "1"
         app.launch()
 
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
+        let mainWindow = app.windows.element(boundBy: 0)
+        XCTAssertTrue(mainWindow.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Sample Notes"].waitForExistence(timeout: 5))
+        writeScreenshot(mainWindow.screenshot(), named: "main-window")
+
+        app.typeKey(",", modifierFlags: .command)
+        let preferencesWindow = app.windows["Preferences"]
+        XCTAssertTrue(preferencesWindow.waitForExistence(timeout: 5))
+        writeScreenshot(preferencesWindow.screenshot(), named: "preferences")
+
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "ViewScope Preview Workspace"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
-    @MainActor
-    func testLaunchPerformance() throws {
-        // This measures how long it takes to launch your application.
-        measure(metrics: [XCTApplicationLaunchMetric()]) {
-            XCUIApplication().launch()
-        }
+    private func writeScreenshot(_ screenshot: XCUIScreenshot, named name: String) {
+        let screenshotsDirectory = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("READMEAssets", isDirectory: true)
+
+        try? FileManager.default.createDirectory(
+            at: screenshotsDirectory,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+
+        let screenshotURL = screenshotsDirectory.appendingPathComponent("\(name).png")
+        try? screenshot.pngRepresentation.write(to: screenshotURL)
     }
 }
