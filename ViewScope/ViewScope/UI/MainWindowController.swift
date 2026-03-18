@@ -2,6 +2,7 @@ import AppKit
 import Combine
 
 @MainActor
+/// Owns the main application window and restores its frame between launches.
 final class MainWindowController: NSWindowController {
     private static let autosaveName = NSWindow.FrameAutosaveName("ViewScopeMainWindowFrame")
     let contentController: MainViewController
@@ -17,7 +18,6 @@ final class MainWindowController: NSWindowController {
         )
         window.title = L10n.appName
         window.subtitle = L10n.mainWindowSubtitle
-        window.appearance = NSAppearance(named: .aqua)
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         if #available(macOS 11.0, *) {
@@ -35,6 +35,7 @@ final class MainWindowController: NSWindowController {
         if !window.setFrameUsingName(Self.autosaveName) {
             window.center()
         }
+        normalizeWindowFrame(window)
         window.setFrameAutosaveName(Self.autosaveName)
         bindLocalization()
     }
@@ -88,5 +89,22 @@ final class MainWindowController: NSWindowController {
         }
 
         window.center()
+    }
+
+    private func normalizeWindowFrame(_ window: NSWindow) {
+        let targetScreen = NSScreen.screens.first(where: { $0.visibleFrame.intersects(window.frame) })
+            ?? NSScreen.main
+            ?? NSScreen.screens.first
+        guard let targetScreen else { return }
+
+        let visibleFrame = targetScreen.visibleFrame
+        var frame = window.frame
+        frame.size.width = min(max(frame.size.width, window.minSize.width), visibleFrame.width)
+        frame.size.height = min(max(frame.size.height, window.minSize.height), visibleFrame.height)
+        frame.origin.x = min(max(frame.origin.x, visibleFrame.minX), visibleFrame.maxX - frame.size.width)
+        frame.origin.y = min(max(frame.origin.y, visibleFrame.minY), visibleFrame.maxY - frame.size.height)
+
+        guard frame != window.frame else { return }
+        window.setFrame(frame, display: false)
     }
 }

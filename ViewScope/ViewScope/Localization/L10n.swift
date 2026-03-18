@@ -40,6 +40,10 @@ enum L10n {
     static var hierarchyBadgeWindow: String { tr("hierarchy.badge.window") }
     static var hierarchyBadgeHidden: String { tr("hierarchy.badge.hidden") }
     static var hierarchyBadgeView: String { tr("hierarchy.badge.view") }
+    static var hierarchyMenuShowView: String { tr("hierarchy.menu.show_view") }
+    static var hierarchyMenuHideView: String { tr("hierarchy.menu.hide_view") }
+    static var hierarchyMenuFocusSubtree: String { tr("hierarchy.menu.focus_subtree") }
+    static var hierarchyMenuClearFocus: String { tr("hierarchy.menu.clear_focus") }
     static var hierarchyMenuHighlight: String { tr("hierarchy.menu.highlight") }
     static var hierarchyMenuRefresh: String { tr("hierarchy.menu.refresh") }
     static var hierarchyMenuCopyTitle: String { tr("hierarchy.menu.copy_title") }
@@ -55,6 +59,15 @@ enum L10n {
     static var integrationCocoaPods: String { tr("integration.package.cocoapods") }
     static var integrationCarthage: String { tr("integration.package.carthage") }
     static var previewPlaceholder: String { tr("preview.placeholder") }
+    static var previewZoomOut: String { tr("preview.action.zoom_out") }
+    static var previewResetZoom: String { tr("preview.action.reset_zoom") }
+    static var previewZoomIn: String { tr("preview.action.zoom_in") }
+    static var previewDisplayFlat: String { tr("preview.action.display_flat") }
+    static var previewDisplayLayered: String { tr("preview.action.display_layered") }
+    static var previewFocusSelection: String { tr("preview.action.focus_selection") }
+    static var previewClearFocus: String { tr("preview.action.clear_focus") }
+    static var previewToggleVisibility: String { tr("preview.action.toggle_visibility") }
+    static var previewHighlightSelection: String { tr("preview.action.highlight_selection") }
 
     static var menuAbout: String { tr("menu.about") }
     static var menuPreferences: String { tr("menu.preferences") }

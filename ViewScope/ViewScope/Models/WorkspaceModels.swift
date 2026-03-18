@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import ViewScopeServer
 
@@ -36,6 +37,20 @@ enum WorkspaceConnectionState: Equatable {
     }
 }
 
+enum WorkspacePreviewDisplayMode: String, CaseIterable {
+    case flat
+    case layered
+
+    var symbolName: String {
+        switch self {
+        case .flat:
+            return "square.on.square"
+        case .layered:
+            return "square.stack.3d.up"
+        }
+    }
+}
+
 struct HostListItem: Identifiable, Equatable {
     var id: String
     var title: String
@@ -44,4 +59,16 @@ struct HostListItem: Identifiable, Equatable {
     var isRecent: Bool
     var announcement: ViewScopeHostAnnouncement?
     var recentRecord: RecentHostRecord?
+}
+
+extension ViewScopeRect {
+    var cgRect: CGRect {
+        CGRect(x: x, y: y, width: width, height: height)
+    }
+}
+
+extension ViewScopeSize {
+    var cgSize: CGSize {
+        CGSize(width: width, height: height)
+    }
 }

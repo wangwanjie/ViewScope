@@ -56,17 +56,31 @@ enum SampleFixture {
             ViewScopePropertySection(title: L10n.serverSectionTitle("identity"), items: [
                 ViewScopePropertyItem(title: "Node", value: nodeID),
                 ViewScopePropertyItem(title: L10n.serverItemTitle("class"), value: capture().nodes[nodeID]?.className ?? "NSView"),
-                ViewScopePropertyItem(title: L10n.serverItemTitle("address"), value: "0xfeedbeef")
+                ViewScopePropertyItem(title: L10n.serverItemTitle("address"), value: "0xfeedbeef"),
+                ViewScopePropertyItem(title: L10n.serverItemTitle("title"), value: capture().nodes[nodeID]?.title ?? "", editable: .text(key: "title", value: capture().nodes[nodeID]?.title ?? ""))
             ]),
             ViewScopePropertySection(title: L10n.serverSectionTitle("layout"), items: [
                 ViewScopePropertyItem(title: L10n.serverItemTitle("frame"), value: "x 292.0 y 152.0 w 760.0 h 408.0"),
+                ViewScopePropertyItem(title: L10n.serverItemTitle("x"), value: "292.0", editable: .number(key: "frame.x", value: 292)),
+                ViewScopePropertyItem(title: L10n.serverItemTitle("y"), value: "152.0", editable: .number(key: "frame.y", value: 152)),
+                ViewScopePropertyItem(title: L10n.serverItemTitle("width"), value: "760.0", editable: .number(key: "frame.width", value: 760)),
+                ViewScopePropertyItem(title: L10n.serverItemTitle("height"), value: "408.0", editable: .number(key: "frame.height", value: 408)),
+                ViewScopePropertyItem(title: L10n.serverItemTitle("bounds"), value: "x 0.0 y 0.0 w 760.0 h 408.0"),
+                ViewScopePropertyItem(title: "Bounds X", value: "0.0", editable: .number(key: "bounds.x", value: 0)),
+                ViewScopePropertyItem(title: "Bounds Y", value: "0.0", editable: .number(key: "bounds.y", value: 0)),
+                ViewScopePropertyItem(title: "Bounds W", value: "760.0", editable: .number(key: "bounds.width", value: 760)),
+                ViewScopePropertyItem(title: "Bounds H", value: "408.0", editable: .number(key: "bounds.height", value: 408)),
                 ViewScopePropertyItem(title: L10n.serverItemTitle("intrinsic_size"), value: L10n.serverNoIntrinsicSize),
                 ViewScopePropertyItem(title: L10n.serverItemTitle("translates_mask"), value: L10n.serverNo)
             ]),
             ViewScopePropertySection(title: L10n.serverSectionTitle("rendering"), items: [
-                ViewScopePropertyItem(title: L10n.serverItemTitle("hidden"), value: L10n.serverNo),
+                ViewScopePropertyItem(title: L10n.serverItemTitle("hidden"), value: L10n.serverNo, editable: .toggle(key: "hidden", value: false)),
                 ViewScopePropertyItem(title: L10n.serverItemTitle("alpha"), value: "1.00"),
+                ViewScopePropertyItem(title: L10n.serverItemTitle("background"), value: "#F6F8FBFF", editable: .text(key: "backgroundColor", value: "#F6F8FBFF")),
                 ViewScopePropertyItem(title: L10n.serverItemTitle("layer_backed"), value: L10n.serverYes)
+            ]),
+            ViewScopePropertySection(title: L10n.serverSectionTitle("control"), items: [
+                ViewScopePropertyItem(title: L10n.serverItemTitle("value"), value: capture().nodes[nodeID]?.title ?? "", editable: .text(key: "control.value", value: capture().nodes[nodeID]?.title ?? ""))
             ])
         ]
 
