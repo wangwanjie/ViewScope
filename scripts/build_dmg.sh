@@ -12,6 +12,8 @@ DMG_OUTPUT_DIR="$BUILD_DIR/dmg"
 KEYCHAIN_PROFILE="$DEFAULT_NOTARY_PROFILE"
 SKIP_NOTARIZE=false
 SIGNING_IDENTITY=""
+# Keep the Applications shortcut label visually blank in Finder while preserving drag-and-drop install.
+APPLICATIONS_SHORTCUT_NAME="   "
 
 generate_dmg_background() {
     local output_path="$1"
@@ -247,7 +249,7 @@ create_pretty_dmg() {
     rm -rf "$work_dir"
     mkdir -p "$staging_dir" "$background_dir" "$fsevents_dir"
     cp -R "$app_path" "$staging_dir/"
-    ln -s /Applications "$staging_dir/Applications"
+    ln -s /Applications "$staging_dir/$APPLICATIONS_SHORTCUT_NAME"
     generate_dmg_background "$background_path"
     touch "$fsevents_dir/no_log"
     chflags hidden "$background_dir" 2>/dev/null || true
@@ -277,6 +279,7 @@ create_pretty_dmg() {
     osascript <<EOF
 tell application "Finder"
     tell disk "$mounted_volume_name"
+        set applicationsShortcutName to "   "
         open
         set current view of container window to icon view
         set toolbar visible of container window to false
@@ -288,7 +291,7 @@ tell application "Finder"
         set text size of viewOptions to 13
         set background picture of viewOptions to file ".background:installer-background.png"
         set position of item "$app_name" of container window to {154, 180}
-        set position of item "Applications" of container window to {466, 180}
+        set position of item applicationsShortcutName of container window to {466, 180}
         try
             set position of item ".background" of container window to {860, 320}
         end try
