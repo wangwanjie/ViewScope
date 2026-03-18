@@ -4,7 +4,7 @@
         <title>ViewScope</title>
         <item>
             <title>1.0.0</title>
-            <pubDate>Wed, 18 Mar 2026 10:58:53 +0800</pubDate>
+            <pubDate>Wed, 18 Mar 2026 11:02:17 +0800</pubDate>
             <link>https://github.com/wangwanjie/ViewScope/releases/tag/v1.0.0</link>
             <sparkle:version>1</sparkle:version>
             <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
@@ -18,7 +18,7 @@
 - 支持简体中文、繁体中文、英语三种应用内语言切换，客户端与 inspector 文案同步切换。
 - 仓库根目录直接暴露 `Package.swift`，Xcode / SwiftPM 可直接依赖 `https://github.com/wangwanjie/ViewScope.git`。
 </description>
-            <enclosure url="https://github.com/wangwanjie/ViewScope/releases/download/v1.0.0/ViewScope_V_1.0.0.dmg" length="9257308" type="application/octet-stream" sparkle:edSignature="ex1IsgL2VhvPFeKa9ZyzY910j42geNiWwvisE6HippE58zckGc+Vy/+t0DC5d/5EYwHdTkNS3hohpSei8WcxDw==" />
+            <enclosure url="https://github.com/wangwanjie/ViewScope/releases/download/v1.0.0/ViewScope_V_1.0.0.dmg" length="9244142" type="application/octet-stream" sparkle:edSignature="sNN6fuiOKbm2u1GO9WeS7uL4XYVGABszI+1oFdf/Rq9eyvYqI72xDTLLudEqaLI8rDEjZTqftbNQf2esorFxDw==" />
         </item>
         <link>https://github.com/wangwanjie/ViewScope</link>
         <description>ViewScope release feed.</description>
