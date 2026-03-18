@@ -118,7 +118,6 @@ drawText(
 
 drawText("View", rect: NSRect(x: leftPanel.minX, y: leftPanel.maxY - 54, width: leftPanel.width, height: 24), font: .systemFont(ofSize: 22, weight: .semibold), color: accentColor)
 drawText("Scope", rect: NSRect(x: leftPanel.minX, y: leftPanel.maxY - 82, width: leftPanel.width, height: 24), font: .systemFont(ofSize: 22, weight: .semibold), color: textColor)
-drawText("Applications", rect: NSRect(x: rightPanel.minX, y: rightPanel.midY - 10, width: rightPanel.width, height: 28), font: .systemFont(ofSize: 22, weight: .semibold), color: accentColor)
 
 image.unlockFocus()
 
