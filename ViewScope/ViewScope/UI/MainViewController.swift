@@ -11,7 +11,7 @@ final class MainViewController: NSViewController {
     private let headerView = NSVisualEffectView()
     private let titleLabel = NSTextField(labelWithString: "ViewScope")
     private let subtitleLabel = NSTextField(labelWithString: "Inspect AppKit view hierarchies without leaving your desktop build.")
-    private let connectionBadge = NSTextField(labelWithString: "Idle")
+    private let connectionBadge = CapsuleBadgeView()
     private let searchField = NSSearchField(frame: .zero)
     private let refreshButton = NSButton(title: "Refresh", target: nil, action: nil)
     private let highlightButton = NSButton(title: "Highlight", target: nil, action: nil)
@@ -36,6 +36,7 @@ final class MainViewController: NSViewController {
     private let previewView = ScreenshotPreviewView()
     private let detailScrollView = NSScrollView()
     private let detailStackView = NSStackView()
+    private let previewHitTester = PreviewHitTester()
 
     private var outlineRoots: [OutlineItem] = []
     private var visibleOutlineRoots: [OutlineItem] = []
@@ -81,18 +82,17 @@ final class MainViewController: NSViewController {
         subtitleLabel.maximumNumberOfLines = 2
         subtitleLabel.lineBreakMode = .byWordWrapping
 
-        connectionBadge.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
-        connectionBadge.alignment = .center
-        connectionBadge.wantsLayer = true
-        connectionBadge.layer?.cornerRadius = 12
-        connectionBadge.layer?.masksToBounds = true
-        connectionBadge.textColor = NSColor(calibratedRed: 0.11, green: 0.43, blue: 0.63, alpha: 1)
-        connectionBadge.layer?.backgroundColor = NSColor(calibratedRed: 0.86, green: 0.94, blue: 0.98, alpha: 1).cgColor
-        connectionBadge.setContentHuggingPriority(.required, for: .horizontal)
-        connectionBadge.setContentCompressionResistancePriority(.required, for: .horizontal)
+        connectionBadge.text = "IDLE"
+        connectionBadge.applyStyle(
+            textColor: NSColor(calibratedRed: 0.11, green: 0.43, blue: 0.63, alpha: 1),
+            backgroundColor: NSColor(calibratedRed: 0.86, green: 0.94, blue: 0.98, alpha: 1)
+        )
 
         searchField.placeholderString = "Search class names, identifiers, and node titles"
         searchField.delegate = self
+        previewView.onCanvasClick = { [weak self] canvasPoint in
+            self?.selectNodeFromPreview(at: canvasPoint)
+        }
 
         refreshButton.target = self
         refreshButton.action = #selector(refreshCapture(_:))
@@ -414,22 +414,22 @@ final class MainViewController: NSViewController {
 
         guard let capture = store.capture else { return }
 
-        detailStackView.addArrangedSubview(summaryCard(capture: capture, insight: insight))
-        detailStackView.addArrangedSubview(previewCard(detail: detail))
+        addDetailSection(summaryCard(capture: capture, insight: insight))
+        addDetailSection(previewCard(detail: detail))
 
         if let detail {
-            detailStackView.addArrangedSubview(textListCard(title: "Ancestry", rows: detail.ancestry))
+            addDetailSection(textListCard(title: "Ancestry", rows: detail.ancestry))
             for section in detail.sections {
-                detailStackView.addArrangedSubview(propertyCard(section: section))
+                addDetailSection(propertyCard(section: section))
             }
-            detailStackView.addArrangedSubview(textListCard(title: "Constraints", rows: detail.constraints))
+            addDetailSection(textListCard(title: "Constraints", rows: detail.constraints))
         } else {
-            detailStackView.addArrangedSubview(placeholderCard())
+            addDetailSection(placeholderCard())
         }
     }
 
     private func updateChrome(connectionState: WorkspaceConnectionState, errorMessage: String?) {
-        connectionBadge.stringValue = {
+        connectionBadge.text = {
             switch connectionState {
             case .idle:
                 return "IDLE"
@@ -441,7 +441,7 @@ final class MainViewController: NSViewController {
                 return "ERROR"
             }
         }()
-        connectionBadge.textColor = {
+        let textColor: NSColor = {
             switch connectionState {
             case .connected:
                 return NSColor(calibratedRed: 0.06, green: 0.48, blue: 0.32, alpha: 1)
@@ -451,20 +451,28 @@ final class MainViewController: NSViewController {
                 return NSColor(calibratedRed: 0.11, green: 0.43, blue: 0.63, alpha: 1)
             }
         }()
-        connectionBadge.layer?.backgroundColor = {
+        let backgroundColor: NSColor = {
             switch connectionState {
             case .connected:
-                return NSColor(calibratedRed: 0.88, green: 0.96, blue: 0.91, alpha: 1).cgColor
+                return NSColor(calibratedRed: 0.88, green: 0.96, blue: 0.91, alpha: 1)
             case .failed:
-                return NSColor(calibratedRed: 0.99, green: 0.90, blue: 0.90, alpha: 1).cgColor
+                return NSColor(calibratedRed: 0.99, green: 0.90, blue: 0.90, alpha: 1)
             default:
-                return NSColor(calibratedRed: 0.86, green: 0.94, blue: 0.98, alpha: 1).cgColor
+                return NSColor(calibratedRed: 0.86, green: 0.94, blue: 0.98, alpha: 1)
             }
         }()
+        connectionBadge.applyStyle(textColor: textColor, backgroundColor: backgroundColor)
         statusLabel.stringValue = errorMessage ?? connectionState.statusText
         refreshButton.isEnabled = store.connectionState.activeHost != nil
         disconnectButton.isEnabled = store.connectionState.activeHost != nil
         highlightButton.isEnabled = store.selectedNodeDetail != nil
+    }
+
+    private func addDetailSection(_ view: NSView) {
+        detailStackView.addArrangedSubview(view)
+        view.snp.makeConstraints { make in
+            make.width.equalTo(detailStackView)
+        }
     }
 
     private func summaryCard(capture: ViewScopeCapturePayload, insight: CaptureHistoryInsight) -> NSView {
@@ -693,6 +701,44 @@ final class MainViewController: NSViewController {
         Task { await store.connect(using: recentHosts[row]) }
         recentHostsTableView.deselectAll(nil)
     }
+
+    private func selectNodeFromPreview(at canvasPoint: CGPoint) {
+        guard let capture = store.capture,
+              let nodeID = previewHitTester.deepestNodeID(at: canvasPoint, in: capture) else {
+            return
+        }
+
+        let selectionTriggered = revealNodeInHierarchy(nodeID, capture: capture)
+        guard selectionTriggered == false, store.selectedNodeID != nodeID else { return }
+        Task { await store.selectNode(withID: nodeID) }
+    }
+
+    @discardableResult
+    private func revealNodeInHierarchy(_ nodeID: String, capture: ViewScopeCapturePayload) -> Bool {
+        if let item = findItem(withID: nodeID, in: visibleOutlineRoots) {
+            return selectOutlineItem(item)
+        }
+
+        guard !searchQuery.isEmpty else { return false }
+        searchQuery = ""
+        searchField.stringValue = ""
+        rebuildOutlineTree(from: capture)
+
+        if let item = findItem(withID: nodeID, in: visibleOutlineRoots) {
+            return selectOutlineItem(item)
+        }
+        return false
+    }
+
+    private func selectOutlineItem(_ item: OutlineItem) -> Bool {
+        expandAncestors(of: item)
+        let row = hierarchyOutlineView.row(forItem: item)
+        guard row >= 0 else { return false }
+        let selectionChanged = hierarchyOutlineView.selectedRow != row
+        hierarchyOutlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        hierarchyOutlineView.scrollRowToVisible(row)
+        return selectionChanged
+    }
 }
 
 extension MainViewController: NSSearchFieldDelegate {
@@ -875,20 +921,17 @@ private final class SessionCellView: NSTableCellView {
 private final class HierarchyCellView: NSTableCellView {
     private let titleLabel = NSTextField(labelWithString: "")
     private let subtitleLabel = NSTextField(labelWithString: "")
-    private let badgeLabel = NSTextField(labelWithString: "")
+    private let badgeView = CapsuleBadgeView(fontSize: 10, horizontalInset: 8, verticalInset: 3, minimumHeight: 20)
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         subtitleLabel.textColor = .secondaryLabelColor
         subtitleLabel.font = NSFont.systemFont(ofSize: 11)
-        badgeLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold)
-        badgeLabel.alignment = .center
-        badgeLabel.textColor = NSColor(calibratedRed: 0.10, green: 0.45, blue: 0.60, alpha: 1)
-        badgeLabel.wantsLayer = true
-        badgeLabel.layer?.cornerRadius = 10
-        badgeLabel.layer?.masksToBounds = true
-        badgeLabel.layer?.backgroundColor = NSColor(calibratedRed: 0.89, green: 0.95, blue: 0.98, alpha: 1).cgColor
+        badgeView.applyStyle(
+            textColor: NSColor(calibratedRed: 0.10, green: 0.45, blue: 0.60, alpha: 1),
+            backgroundColor: NSColor(calibratedRed: 0.89, green: 0.95, blue: 0.98, alpha: 1)
+        )
 
         let labels = NSStackView(views: [titleLabel, subtitleLabel])
         labels.orientation = .vertical
@@ -896,13 +939,13 @@ private final class HierarchyCellView: NSTableCellView {
         labels.spacing = 2
 
         addSubview(labels)
-        addSubview(badgeLabel)
+        addSubview(badgeView)
         labels.snp.makeConstraints { make in
             make.leading.equalToSuperview().offset(8)
             make.centerY.equalToSuperview()
-            make.trailing.lessThanOrEqualTo(badgeLabel.snp.leading).offset(-10)
+            make.trailing.lessThanOrEqualTo(badgeView.snp.leading).offset(-10)
         }
-        badgeLabel.snp.makeConstraints { make in
+        badgeView.snp.makeConstraints { make in
             make.trailing.equalToSuperview().inset(8)
             make.centerY.equalToSuperview()
             make.width.greaterThanOrEqualTo(72)
@@ -919,7 +962,7 @@ private final class HierarchyCellView: NSTableCellView {
         titleLabel.stringValue = node.title
         let subtitle = [node.className.components(separatedBy: ".").last ?? node.className, node.subtitle].compactMap { $0 }.joined(separator: " • ")
         subtitleLabel.stringValue = subtitle
-        badgeLabel.stringValue = node.kind == .window ? "WINDOW" : node.isHidden ? "HIDDEN" : "VIEW"
+        badgeView.text = node.kind == .window ? "WINDOW" : node.isHidden ? "HIDDEN" : "VIEW"
     }
 }
 
@@ -937,11 +980,11 @@ private final class IntegrationGuideView: NSView {
         subtitleLabel.textColor = .secondaryLabelColor
         subtitleLabel.maximumNumberOfLines = 2
 
-        let stack = NSStackView(views: [
-            Self.codeCard(title: "Swift Package Manager", snippet: ".package(url: \"https://github.com/wangwanjie/ViewScope.git\", from: \"1.0.0\")\nimport ViewScopeServer\nViewScopeInspector.start()"),
-            Self.codeCard(title: "CocoaPods", snippet: "pod 'ViewScopeServer', :git => 'https://github.com/wangwanjie/ViewScope.git', :tag => 'v1.0.0', :configurations => ['Debug']"),
-            Self.codeCard(title: "Carthage", snippet: "github \"wangwanjie/ViewScope\" ~> 1.0")
-        ])
+        let swiftPackageCard = Self.codeCard(title: "Swift Package Manager", snippet: ".package(url: \"https://github.com/wangwanjie/ViewScope.git\", from: \"1.0.0\")\nimport ViewScopeServer\nViewScopeInspector.start()")
+        let cocoaPodsCard = Self.codeCard(title: "CocoaPods", snippet: "pod 'ViewScopeServer', :git => 'https://github.com/wangwanjie/ViewScope.git', :tag => 'v1.0.0', :configurations => ['Debug']")
+        let carthageCard = Self.codeCard(title: "Carthage", snippet: "github \"wangwanjie/ViewScope\" ~> 1.0")
+
+        let stack = NSStackView(views: [swiftPackageCard, cocoaPodsCard, carthageCard])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 14
@@ -960,6 +1003,11 @@ private final class IntegrationGuideView: NSView {
         stack.snp.makeConstraints { make in
             make.top.equalTo(subtitleLabel.snp.bottom).offset(20)
             make.leading.trailing.bottom.equalToSuperview().inset(28)
+        }
+        [swiftPackageCard, cocoaPodsCard, carthageCard].forEach { card in
+            card.snp.makeConstraints { make in
+                make.width.equalTo(stack)
+            }
         }
     }
 

@@ -2,6 +2,8 @@ import AppKit
 import ViewScopeServer
 
 final class ScreenshotPreviewView: NSView {
+    var onCanvasClick: ((CGPoint) -> Void)?
+
     var image: NSImage? {
         didSet { needsDisplay = true }
     }
@@ -16,6 +18,12 @@ final class ScreenshotPreviewView: NSView {
 
     override var isOpaque: Bool {
         false
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        guard image != nil, canvasSize.width > 0, canvasSize.height > 0 else { return }
+        addCursorRect(bounds, cursor: .crosshair)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -65,6 +73,13 @@ final class ScreenshotPreviewView: NSView {
         overlayPath.stroke()
     }
 
+    override func mouseDown(with event: NSEvent) {
+        guard let canvasPoint = canvasPoint(for: convert(event.locationInWindow, from: nil)) else {
+            return
+        }
+        onCanvasClick?(canvasPoint)
+    }
+
     private func aspectFitRect(for size: NSSize, inside container: NSRect) -> NSRect {
         guard size.width > 0, size.height > 0 else { return container }
         let widthRatio = container.width / size.width
@@ -83,5 +98,31 @@ final class ScreenshotPreviewView: NSView {
         let style = NSMutableParagraphStyle()
         style.alignment = .center
         return style
+    }
+
+    private func canvasPoint(for point: NSPoint) -> CGPoint? {
+        guard let image,
+              canvasSize.width > 0,
+              canvasSize.height > 0 else {
+            return nil
+        }
+
+        let insetBounds = bounds.insetBy(dx: 18, dy: 18)
+        let imageRect = aspectFitRect(for: image.size, inside: insetBounds)
+        guard imageRect.contains(point) else {
+            return nil
+        }
+
+        let scale = min(imageRect.width / canvasSize.width, imageRect.height / canvasSize.height)
+        guard scale > 0 else { return nil }
+
+        let relativeX = (point.x - imageRect.minX) / scale
+        let relativeY = (point.y - imageRect.minY) / scale
+        let canvasY = canvasSize.height - relativeY
+
+        return CGPoint(
+            x: max(0, min(canvasSize.width, relativeX)),
+            y: max(0, min(canvasSize.height, canvasY))
+        )
     }
 }

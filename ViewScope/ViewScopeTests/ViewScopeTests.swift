@@ -25,6 +25,18 @@ struct ViewScopeTests {
         #expect(CaptureHistoryInsight.empty.mostRecentDurationMilliseconds == 0)
     }
 
+    @Test func previewHitTestingFindsChartCard() async throws {
+        let capture = SampleFixture.capture()
+        let nodeID = PreviewHitTester().deepestNodeID(at: CGPoint(x: 600, y: 200), in: capture)
+        #expect(nodeID == "window-0-view-1-2")
+    }
+
+    @Test func previewHitTestingRespectsFlippedCoordinates() async throws {
+        let capture = SampleFixture.capture()
+        let nodeID = PreviewHitTester().deepestNodeID(at: CGPoint(x: 100, y: 590), in: capture)
+        #expect(nodeID == "window-0-view-0-0")
+    }
+
     @Test func renderReadmeScreenshots() async throws {
         let suiteName = "ViewScopeTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
