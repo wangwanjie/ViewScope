@@ -1,6 +1,7 @@
 import CoreGraphics
 import ViewScopeServer
 
+/// Resolves a click inside the screenshot preview back to the deepest captured node.
 struct PreviewHitTester {
     func deepestNodeID(at canvasPoint: CGPoint, in capture: ViewScopeCapturePayload) -> String? {
         for rootNodeID in capture.rootNodeIDs.reversed() {

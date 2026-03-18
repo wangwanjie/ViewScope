@@ -2,6 +2,7 @@ import Combine
 import Foundation
 
 @MainActor
+/// Persists user-configurable ViewScope preferences and keeps localization in sync.
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()
 
@@ -38,6 +39,12 @@ final class AppSettings: ObservableObject {
     @Published var showConnectedCountInStatusBar: Bool {
         didSet { defaults.set(showConnectedCountInStatusBar, forKey: Keys.showConnectedCountInStatusBar) }
     }
+    @Published var showsSessionSidebar: Bool {
+        didSet { defaults.set(showsSessionSidebar, forKey: Keys.showsSessionSidebar) }
+    }
+    @Published var showsInspector: Bool {
+        didSet { defaults.set(showsInspector, forKey: Keys.showsInspector) }
+    }
     @Published var updateCheckStrategy: UpdateCheckStrategy {
         didSet { defaults.set(updateCheckStrategy.rawValue, forKey: Keys.updateCheckStrategy) }
     }
@@ -50,6 +57,8 @@ final class AppSettings: ObservableObject {
         self.autoRefreshEnabled = defaults.object(forKey: Keys.autoRefreshEnabled) as? Bool ?? false
         self.autoHighlightSelection = defaults.object(forKey: Keys.autoHighlightSelection) as? Bool ?? false
         self.showConnectedCountInStatusBar = defaults.object(forKey: Keys.showConnectedCountInStatusBar) as? Bool ?? true
+        self.showsSessionSidebar = defaults.object(forKey: Keys.showsSessionSidebar) as? Bool ?? true
+        self.showsInspector = defaults.object(forKey: Keys.showsInspector) as? Bool ?? true
         if let rawValue = defaults.string(forKey: Keys.updateCheckStrategy),
            let strategy = UpdateCheckStrategy(rawValue: rawValue) {
             self.updateCheckStrategy = strategy
@@ -64,6 +73,8 @@ final class AppSettings: ObservableObject {
         static let autoRefreshEnabled = "ViewScope.autoRefreshEnabled"
         static let autoHighlightSelection = "ViewScope.autoHighlightSelection"
         static let showConnectedCountInStatusBar = "ViewScope.showConnectedCountInStatusBar"
+        static let showsSessionSidebar = "ViewScope.showsSessionSidebar"
+        static let showsInspector = "ViewScope.showsInspector"
         static let updateCheckStrategy = "ViewScope.updateCheckStrategy"
     }
 

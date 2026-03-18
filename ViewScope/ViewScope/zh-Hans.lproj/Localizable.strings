@@ -5,6 +5,10 @@
 "main.button.highlight" = "高亮";
 "main.button.disconnect" = "断开";
 "main.status.waiting_debug_host" = "等待 Debug 宿主中";
+"main.toggle.sidebar.show" = "显示会话侧边栏";
+"main.toggle.sidebar.hide" = "隐藏会话侧边栏";
+"main.toggle.inspector.show" = "显示检查器";
+"main.toggle.inspector.hide" = "隐藏检查器";
 "main.search.placeholder" = "搜索类名、标识符和节点标题";
 "sidebar.live_hosts" = "在线宿主";
 "sidebar.recent_sessions" = "最近会话";
@@ -39,6 +43,15 @@
 "hierarchy.badge.window" = "窗口";
 "hierarchy.badge.hidden" = "隐藏";
 "hierarchy.badge.view" = "视图";
+"hierarchy.menu.highlight" = "在宿主中高亮";
+"hierarchy.menu.refresh" = "刷新采集";
+"hierarchy.menu.copy_title" = "复制标题";
+"hierarchy.menu.copy_class_name" = "复制类名";
+"hierarchy.menu.copy_node_id" = "复制节点 ID";
+"hierarchy.menu.copy_identifier" = "复制标识符";
+"hierarchy.menu.copy_address" = "复制地址";
+"hierarchy.menu.expand_children" = "展开子节点";
+"hierarchy.menu.collapse_children" = "折叠子节点";
 "integration.title" = "先把 ViewScopeServer 集成到你的 Debug 宿主里";
 "integration.subtitle" = "ViewScope 会自动发现本机 Debug 构建，通过 loopback 连接，并确保采集数据只在你的 Mac 上流动。若宿主启用了 App Sandbox，请先关闭 Debug 配置里的沙盒，否则 1.0 版本无法发现它。";
 "integration.package.swiftpm" = "Swift Package Manager";
@@ -127,6 +140,10 @@
 "server.item.main" = "Main 窗口";
 "server.item.level" = "层级";
 "server.item.frame" = "Frame";
+"server.item.x" = "X";
+"server.item.y" = "Y";
+"server.item.width" = "宽度";
+"server.item.height" = "高度";
 "server.item.content_layout" = "内容布局";
 "server.item.bounds" = "Bounds";
 "server.item.intrinsic_size" = "固有尺寸";

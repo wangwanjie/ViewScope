@@ -3,6 +3,7 @@ import Foundation
 import ViewScopeServer
 
 @MainActor
+/// Coordinates discovery, connections, captures, and the current inspector selection.
 final class WorkspaceStore: NSObject {
     @Published private(set) var discoveredHosts: [ViewScopeHostAnnouncement] = []
     @Published private(set) var recentHosts: [RecentHostRecord] = []
@@ -167,6 +168,22 @@ final class WorkspaceStore: NSObject {
             try await session?.highlight(nodeID: selectedNodeID, duration: 1.25)
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    func applyMutation(nodeID: String, property: ViewScopeEditableProperty) async -> Bool {
+        guard previewFixtureEnabled == false else { return false }
+        guard let session else { return false }
+
+        selectedNodeID = nodeID
+
+        do {
+            try await session.applyMutation(nodeID: nodeID, property: property)
+            await refreshCapture()
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
         }
     }
 

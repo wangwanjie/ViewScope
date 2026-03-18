@@ -3,6 +3,7 @@ import Network
 import ViewScopeServer
 
 @MainActor
+/// Owns a single TCP session between the macOS client and an inspected host app.
 final class ViewScopeClientSession {
     enum SessionError: LocalizedError {
         case connectionFailed(String)
@@ -91,6 +92,18 @@ final class ViewScopeClientSession {
                 highlightRequest: ViewScopeHighlightRequestPayload(nodeID: nodeID, duration: duration)
             )
         )
+    }
+
+    func applyMutation(nodeID: String, property: ViewScopeEditableProperty) async throws {
+        let response = try await sendRequest(
+            ViewScopeMessage(
+                kind: .mutationRequest,
+                mutationRequest: ViewScopeMutationRequestPayload(nodeID: nodeID, property: property)
+            )
+        )
+        guard response.kind == .ack else {
+            throw SessionError.invalidResponse
+        }
     }
 
     func disconnect() {

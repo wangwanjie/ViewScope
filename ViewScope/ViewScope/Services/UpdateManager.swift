@@ -56,6 +56,7 @@ private struct GitHubRelease: Decodable {
 }
 
 @MainActor
+/// Checks for new ViewScope releases through Sparkle when available, with a GitHub fallback.
 final class UpdateManager: NSObject {
     private let lastUpdateCheckKey = "ViewScope.lastUpdateCheck"
     private let settings: AppSettings

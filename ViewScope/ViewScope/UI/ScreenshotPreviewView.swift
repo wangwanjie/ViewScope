@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import ViewScopeServer
 
+/// Renders the latest screenshot preview and forwards canvas-space hit tests to the controller.
 final class ScreenshotPreviewView: NSView {
     private var cancellables = Set<AnyCancellable>()
 

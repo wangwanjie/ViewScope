@@ -3,6 +3,7 @@ import Foundation
 import ViewScopeServer
 
 @MainActor
+/// Collects host announcements from `DistributedNotificationCenter` and keeps a pruned live list.
 final class DiscoveryCenter: NSObject {
     @Published private(set) var announcements: [ViewScopeHostAnnouncement] = []
 

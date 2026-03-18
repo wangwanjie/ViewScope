@@ -5,6 +5,10 @@
 "main.button.highlight" = "Highlight";
 "main.button.disconnect" = "Disconnect";
 "main.status.waiting_debug_host" = "Waiting for a debug host";
+"main.toggle.sidebar.show" = "Show Sessions Sidebar";
+"main.toggle.sidebar.hide" = "Hide Sessions Sidebar";
+"main.toggle.inspector.show" = "Show Inspector";
+"main.toggle.inspector.hide" = "Hide Inspector";
 "main.search.placeholder" = "Search class names, identifiers, and node titles";
 "sidebar.live_hosts" = "Live Hosts";
 "sidebar.recent_sessions" = "Recent Sessions";
@@ -39,6 +43,15 @@
 "hierarchy.badge.window" = "WINDOW";
 "hierarchy.badge.hidden" = "HIDDEN";
 "hierarchy.badge.view" = "VIEW";
+"hierarchy.menu.highlight" = "Highlight in Host";
+"hierarchy.menu.refresh" = "Refresh Capture";
+"hierarchy.menu.copy_title" = "Copy Title";
+"hierarchy.menu.copy_class_name" = "Copy Class Name";
+"hierarchy.menu.copy_node_id" = "Copy Node ID";
+"hierarchy.menu.copy_identifier" = "Copy Identifier";
+"hierarchy.menu.copy_address" = "Copy Address";
+"hierarchy.menu.expand_children" = "Expand Children";
+"hierarchy.menu.collapse_children" = "Collapse Children";
 "integration.title" = "Start by embedding ViewScopeServer in your debug host";
 "integration.subtitle" = "ViewScope discovers local debug builds, connects over loopback, and only keeps capture traffic on your Mac. If the host still has App Sandbox enabled, turn it off for Debug first or ViewScope 1.0 will not discover it.";
 "integration.package.swiftpm" = "Swift Package Manager";
@@ -127,6 +140,10 @@
 "server.item.main" = "Main";
 "server.item.level" = "Level";
 "server.item.frame" = "Frame";
+"server.item.x" = "X";
+"server.item.y" = "Y";
+"server.item.width" = "Width";
+"server.item.height" = "Height";
 "server.item.content_layout" = "Content Layout";
 "server.item.bounds" = "Bounds";
 "server.item.intrinsic_size" = "Intrinsic Size";

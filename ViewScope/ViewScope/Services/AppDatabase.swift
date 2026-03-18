@@ -27,6 +27,7 @@ struct CaptureHistoryRecord: Codable, FetchableRecord, PersistableRecord, Identi
     var captureDurationMilliseconds: Int
 }
 
+/// Stores recent host connections and lightweight capture history for the workspace.
 final class AppDatabase {
     private let dbQueue: DatabaseQueue
 

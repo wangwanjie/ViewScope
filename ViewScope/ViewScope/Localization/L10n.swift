@@ -9,6 +9,10 @@ enum L10n {
     static var disconnect: String { tr("main.button.disconnect") }
     static var waitingForDebugHost: String { tr("main.status.waiting_debug_host") }
     static var searchPlaceholder: String { tr("main.search.placeholder") }
+    static var showSidebar: String { tr("main.toggle.sidebar.show") }
+    static var hideSidebar: String { tr("main.toggle.sidebar.hide") }
+    static var showInspector: String { tr("main.toggle.inspector.show") }
+    static var hideInspector: String { tr("main.toggle.inspector.hide") }
     static var liveHosts: String { tr("sidebar.live_hosts") }
     static var recentSessions: String { tr("sidebar.recent_sessions") }
     static var hierarchy: String { tr("section.hierarchy") }
@@ -36,6 +40,15 @@ enum L10n {
     static var hierarchyBadgeWindow: String { tr("hierarchy.badge.window") }
     static var hierarchyBadgeHidden: String { tr("hierarchy.badge.hidden") }
     static var hierarchyBadgeView: String { tr("hierarchy.badge.view") }
+    static var hierarchyMenuHighlight: String { tr("hierarchy.menu.highlight") }
+    static var hierarchyMenuRefresh: String { tr("hierarchy.menu.refresh") }
+    static var hierarchyMenuCopyTitle: String { tr("hierarchy.menu.copy_title") }
+    static var hierarchyMenuCopyClassName: String { tr("hierarchy.menu.copy_class_name") }
+    static var hierarchyMenuCopyNodeID: String { tr("hierarchy.menu.copy_node_id") }
+    static var hierarchyMenuCopyIdentifier: String { tr("hierarchy.menu.copy_identifier") }
+    static var hierarchyMenuCopyAddress: String { tr("hierarchy.menu.copy_address") }
+    static var hierarchyMenuExpandChildren: String { tr("hierarchy.menu.expand_children") }
+    static var hierarchyMenuCollapseChildren: String { tr("hierarchy.menu.collapse_children") }
     static var integrationTitle: String { tr("integration.title") }
     static var integrationSubtitle: String { tr("integration.subtitle") }
     static var integrationSwiftPackageManager: String { tr("integration.package.swiftpm") }
