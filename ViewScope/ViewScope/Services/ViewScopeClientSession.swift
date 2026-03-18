@@ -15,9 +15,9 @@ final class ViewScopeClientSession {
             case .connectionFailed(let message):
                 return message
             case .disconnected:
-                return "The connection closed unexpectedly."
+                return AppLocalization.backgroundString("session.error.disconnected")
             case .invalidResponse:
-                return "The host returned an unexpected response."
+                return AppLocalization.backgroundString("session.error.invalid_response")
             case .server(let message):
                 return message
             }
@@ -55,7 +55,8 @@ final class ViewScopeClientSession {
                     authToken: announcement.authToken,
                     clientName: "ViewScope",
                     clientVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0",
-                    protocolVersion: viewScopeCurrentProtocolVersion
+                    protocolVersion: viewScopeCurrentProtocolVersion,
+                    preferredLanguage: AppLocalization.shared.language.rawValue
                 )
             )
         )

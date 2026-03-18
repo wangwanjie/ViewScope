@@ -37,10 +37,28 @@ struct ViewScopeTests {
         #expect(nodeID == "window-0-view-0-0")
     }
 
+    @Test func localizationSwitchesBetweenSupportedLanguages() async throws {
+        let suiteName = "ViewScopeLocalizationTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer {
+            UserDefaults().removePersistentDomain(forName: suiteName)
+        }
+
+        let settings = AppSettings(defaults: defaults, environment: ["VIEWSCOPE_LANGUAGE": AppLanguage.simplifiedChinese.rawValue])
+        #expect(settings.appLanguage == .simplifiedChinese)
+        #expect(L10n.preferencesTitle == "偏好设置")
+
+        settings.appLanguage = .traditionalChinese
+        #expect(L10n.preferencesTitle == "偏好設定")
+
+        settings.appLanguage = .english
+        #expect(L10n.preferencesTitle == "Preferences")
+    }
+
     @Test func renderReadmeScreenshots() async throws {
         let suiteName = "ViewScopeTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
-        let settings = AppSettings(defaults: defaults)
+        let settings = AppSettings(defaults: defaults, environment: ["VIEWSCOPE_LANGUAGE": AppLanguage.english.rawValue])
         let updateManager = UpdateManager(settings: settings)
 
         setenv("VIEWSCOPE_PREVIEW_FIXTURE", "1", 1)

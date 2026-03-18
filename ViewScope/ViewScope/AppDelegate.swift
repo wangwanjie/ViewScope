@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -7,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var preferencesWindowController: PreferencesWindowController?
     private var statusItemController: StatusItemController?
     private var hasPresentedInitialWindow = false
+    private var cancellables = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
@@ -15,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.store = store
 
             buildMainMenu()
+            bindLocalization()
 
             let mainWindowController = MainWindowController(store: store)
             self.mainWindowController = mainWindowController
@@ -93,62 +96,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
-        appMenu.addItem(NSMenuItem(title: "About ViewScope", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: ""))
-        let preferencesItem = NSMenuItem(title: "Preferences", action: #selector(openPreferencesWindow(_:)), keyEquivalent: ",")
+        appMenu.addItem(NSMenuItem(title: L10n.menuAbout, action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: ""))
+        let preferencesItem = NSMenuItem(title: L10n.menuPreferences, action: #selector(openPreferencesWindow(_:)), keyEquivalent: ",")
         preferencesItem.target = self
         appMenu.addItem(preferencesItem)
-        let updateItem = NSMenuItem(title: "Check for Updates", action: #selector(checkForUpdates(_:)), keyEquivalent: "")
+        let updateItem = NSMenuItem(title: L10n.menuCheckForUpdates, action: #selector(checkForUpdates(_:)), keyEquivalent: "")
         updateItem.target = self
         appMenu.addItem(updateItem)
         appMenu.addItem(NSMenuItem.separator())
-        appMenu.addItem(NSMenuItem(title: "Hide ViewScope", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h"))
-        appMenu.addItem(NSMenuItem(title: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h"))
-        appMenu.addItem(NSMenuItem(title: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: ""))
+        appMenu.addItem(NSMenuItem(title: L10n.menuHideApp, action: #selector(NSApplication.hide(_:)), keyEquivalent: "h"))
+        appMenu.addItem(NSMenuItem(title: L10n.menuHideOthers, action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h"))
+        appMenu.addItem(NSMenuItem(title: L10n.menuShowAll, action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: ""))
         appMenu.addItem(NSMenuItem.separator())
-        appMenu.addItem(NSMenuItem(title: "Quit ViewScope", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        appMenu.addItem(NSMenuItem(title: L10n.menuQuitApp, action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         appItem.submenu = appMenu
         mainMenu.addItem(appItem)
 
         let viewItem = NSMenuItem()
-        let viewMenu = NSMenu(title: "View")
-        let showWindowItem = NSMenuItem(title: "Show Main Window", action: #selector(openMainWindow(_:)), keyEquivalent: "1")
+        let viewMenu = NSMenu(title: L10n.menuView)
+        let showWindowItem = NSMenuItem(title: L10n.menuShowMainWindow, action: #selector(openMainWindow(_:)), keyEquivalent: "1")
         showWindowItem.keyEquivalentModifierMask = [.command]
         showWindowItem.target = self
         viewMenu.addItem(showWindowItem)
-        let refreshItem = NSMenuItem(title: "Refresh Capture", action: #selector(refreshCapture(_:)), keyEquivalent: "r")
+        let refreshItem = NSMenuItem(title: L10n.menuRefreshCapture, action: #selector(refreshCapture(_:)), keyEquivalent: "r")
         refreshItem.target = self
         refreshItem.keyEquivalentModifierMask = [.command]
         viewMenu.addItem(refreshItem)
-        viewItem.title = "View"
+        viewItem.title = L10n.menuView
         viewItem.submenu = viewMenu
         mainMenu.addItem(viewItem)
 
         let windowItem = NSMenuItem()
-        let windowMenu = NSMenu(title: "Window")
-        windowMenu.addItem(NSMenuItem(title: "Minimize", action: #selector(NSWindow.miniaturize(_:)), keyEquivalent: "m"))
-        windowMenu.addItem(NSMenuItem(title: "Zoom", action: #selector(NSWindow.zoom(_:)), keyEquivalent: ""))
+        let windowMenu = NSMenu(title: L10n.menuWindow)
+        windowMenu.addItem(NSMenuItem(title: L10n.menuMinimize, action: #selector(NSWindow.miniaturize(_:)), keyEquivalent: "m"))
+        windowMenu.addItem(NSMenuItem(title: L10n.menuZoom, action: #selector(NSWindow.zoom(_:)), keyEquivalent: ""))
         NSApp.windowsMenu = windowMenu
-        windowItem.title = "Window"
+        windowItem.title = L10n.menuWindow
         windowItem.submenu = windowMenu
         mainMenu.addItem(windowItem)
 
         let helpItem = NSMenuItem()
-        let helpMenu = NSMenu(title: "Help")
-        let githubItem = NSMenuItem(title: "ViewScope on GitHub", action: #selector(openGitHubHomepage(_:)), keyEquivalent: "?")
+        let helpMenu = NSMenu(title: L10n.menuHelp)
+        let githubItem = NSMenuItem(title: L10n.menuGitHub, action: #selector(openGitHubHomepage(_:)), keyEquivalent: "?")
         githubItem.target = self
         helpMenu.addItem(githubItem)
-        helpItem.title = "Help"
+        helpItem.title = L10n.menuHelp
         helpItem.submenu = helpMenu
         mainMenu.addItem(helpItem)
 
         NSApp.mainMenu = mainMenu
     }
 
+    private func bindLocalization() {
+        guard cancellables.isEmpty else { return }
+        AppLocalization.shared.$language
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.buildMainMenu()
+            }
+            .store(in: &cancellables)
+    }
+
     private func presentFatalError(_ error: Error) {
         NSApp.setActivationPolicy(.regular)
         activateAppBringingAllWindowsForward()
         let alert = NSAlert(error: error)
-        alert.messageText = "ViewScope could not launch"
+        alert.messageText = L10n.fatalLaunchTitle
         alert.informativeText = error.localizedDescription
         alert.runModal()
         NSApp.terminate(nil)

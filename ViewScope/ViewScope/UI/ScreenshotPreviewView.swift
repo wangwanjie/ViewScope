@@ -1,8 +1,14 @@
 import AppKit
+import Combine
 import ViewScopeServer
 
 final class ScreenshotPreviewView: NSView {
+    private var cancellables = Set<AnyCancellable>()
+
     var onCanvasClick: ((CGPoint) -> Void)?
+    var placeholderText: String = L10n.previewPlaceholder {
+        didSet { needsDisplay = true }
+    }
 
     var image: NSImage? {
         didSet { needsDisplay = true }
@@ -18,6 +24,16 @@ final class ScreenshotPreviewView: NSView {
 
     override var isOpaque: Bool {
         false
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        bindLocalization()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
     }
 
     override func resetCursorRects() {
@@ -38,13 +54,12 @@ final class ScreenshotPreviewView: NSView {
 
         let insetBounds = bounds.insetBy(dx: 18, dy: 18)
         guard let image else {
-            let text = "Select a node to render the latest screenshot preview."
             let attributes: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: 13, weight: .medium),
                 .foregroundColor: NSColor.secondaryLabelColor,
                 .paragraphStyle: centeredParagraphStyle
             ]
-            let attributed = NSAttributedString(string: text, attributes: attributes)
+            let attributed = NSAttributedString(string: placeholderText, attributes: attributes)
             attributed.draw(in: insetBounds)
             return
         }
@@ -124,5 +139,14 @@ final class ScreenshotPreviewView: NSView {
             x: max(0, min(canvasSize.width, relativeX)),
             y: max(0, min(canvasSize.height, canvasY))
         )
+    }
+
+    private func bindLocalization() {
+        AppLocalization.shared.$language
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.placeholderText = L10n.previewPlaceholder
+            }
+            .store(in: &cancellables)
     }
 }

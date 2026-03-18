@@ -5,11 +5,12 @@ import SnapKit
 @MainActor
 final class PreferencesWindowController: NSWindowController {
     private static let autosaveName = NSWindow.FrameAutosaveName("ViewScopePreferencesWindowFrame")
+    private var cancellables = Set<AnyCancellable>()
 
     init(store: WorkspaceStore) {
         let contentViewController = PreferencesViewController(store: store)
         let window = NSWindow(contentViewController: contentViewController)
-        window.title = "Preferences"
+        window.title = L10n.preferencesWindowTitle
         window.appearance = NSAppearance(named: .aqua)
         window.styleMask = [.titled, .closable, .miniaturizable]
         if #available(macOS 11.0, *) {
@@ -18,8 +19,8 @@ final class PreferencesWindowController: NSWindowController {
         window.isReleasedWhenClosed = false
         window.isRestorable = false
         window.tabbingMode = .disallowed
-        window.setContentSize(NSSize(width: 600, height: 360))
-        window.minSize = NSSize(width: 600, height: 360)
+        window.setContentSize(NSSize(width: 640, height: 420))
+        window.minSize = NSSize(width: 640, height: 420)
         super.init(window: window)
         shouldCascadeWindows = false
 
@@ -27,6 +28,7 @@ final class PreferencesWindowController: NSWindowController {
             window.center()
         }
         window.setFrameAutosaveName(Self.autosaveName)
+        bindLocalization()
     }
 
     @available(*, unavailable)
@@ -39,22 +41,50 @@ final class PreferencesWindowController: NSWindowController {
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
     }
+
+    private func bindLocalization() {
+        AppLocalization.shared.$language
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.window?.title = L10n.preferencesWindowTitle
+            }
+            .store(in: &cancellables)
+    }
 }
 
 @MainActor
 private final class PreferencesViewController: NSViewController {
+    private enum PreferencesPane: Int, CaseIterable {
+        case general
+        case updates
+    }
+
     private let store: WorkspaceStore
     private let settings: AppSettings
     private let updateManager: UpdateManager
     private var cancellables = Set<AnyCancellable>()
+    private var selectedPane: PreferencesPane = .general
 
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let descriptionLabel = NSTextField(wrappingLabelWithString: "")
+    private let sectionControl = NSSegmentedControl(labels: ["", ""], trackingMode: .selectOne, target: nil, action: nil)
+    private let card = NSView()
+    private let paneHostView = NSView()
+    private let generalPaneView = NSView()
+    private let updatesPaneView = NSView()
+    private let languageTitleLabel = NSTextField(labelWithString: "")
+    private let languagePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let languageHintLabel = NSTextField(wrappingLabelWithString: "")
+    private let updateChecksTitleLabel = NSTextField(labelWithString: "")
     private let updateStrategyPopup = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let autoRefreshCheckbox = NSButton(checkboxWithTitle: "Enable automatic refresh every 2.5 seconds", target: nil, action: nil)
-    private let autoHighlightCheckbox = NSButton(checkboxWithTitle: "Highlight the selected node in the host app", target: nil, action: nil)
-    private let statusBarCountCheckbox = NSButton(checkboxWithTitle: "Show connected count in the status bar item", target: nil, action: nil)
-    private let automaticDownloadsCheckbox = NSButton(checkboxWithTitle: "Automatically download updates", target: nil, action: nil)
+    private let autoRefreshCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let autoHighlightCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let statusBarCountCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let automaticDownloadsCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let automaticDownloadsHint = NSTextField(wrappingLabelWithString: "")
     private let versionLabel = NSTextField(labelWithString: "")
+    private let checkNowButton = NSButton(title: "", target: nil, action: nil)
+    private let openGitHubButton = NSButton(title: "", target: nil, action: nil)
 
     init(store: WorkspaceStore) {
         self.store = store
@@ -76,24 +106,29 @@ private final class PreferencesViewController: NSViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         bindSettings()
+        applyLocalization()
         syncControlsFromSettings()
     }
 
     private func buildUI() {
-        let titleLabel = NSTextField(labelWithString: "Preferences")
         titleLabel.font = NSFont(name: "Avenir Next Demi Bold", size: 28) ?? .systemFont(ofSize: 28, weight: .semibold)
 
-        let descriptionLabel = NSTextField(wrappingLabelWithString: "Tune how ViewScope refreshes captures, mirrors selection back to the host app, and checks for updates.")
         descriptionLabel.textColor = .secondaryLabelColor
 
-        let card = NSView()
         card.wantsLayer = true
         card.layer?.cornerRadius = 18
         card.layer?.backgroundColor = NSColor(calibratedRed: 0.97, green: 0.98, blue: 0.99, alpha: 1).cgColor
         card.layer?.borderWidth = 1
         card.layer?.borderColor = NSColor(calibratedRed: 0.86, green: 0.89, blue: 0.92, alpha: 1).cgColor
 
-        updateStrategyPopup.addItems(withTitles: AppSettings.UpdateCheckStrategy.allCases.map(\.title))
+        sectionControl.segmentStyle = .rounded
+        sectionControl.selectedSegment = selectedPane.rawValue
+        sectionControl.target = self
+        sectionControl.action = #selector(changePane(_:))
+
+        languagePopup.target = self
+        languagePopup.action = #selector(languageChanged(_:))
+
         updateStrategyPopup.target = self
         updateStrategyPopup.action = #selector(updateStrategyChanged(_:))
 
@@ -105,32 +140,55 @@ private final class PreferencesViewController: NSViewController {
         statusBarCountCheckbox.action = #selector(toggleStatusBarCount(_:))
         automaticDownloadsCheckbox.target = self
         automaticDownloadsCheckbox.action = #selector(toggleAutomaticDownloads(_:))
+        checkNowButton.target = self
+        checkNowButton.action = #selector(checkForUpdates(_:))
+        openGitHubButton.target = self
+        openGitHubButton.action = #selector(openGitHubHomepage(_:))
 
         automaticDownloadsHint.textColor = .secondaryLabelColor
         automaticDownloadsHint.maximumNumberOfLines = 2
+        languageHintLabel.textColor = .secondaryLabelColor
+        languageHintLabel.maximumNumberOfLines = 2
 
-        let strategyRow = labeledRow(title: "Update checks", control: updateStrategyPopup)
-        let contentStack = NSStackView(views: [
-            strategyRow,
+        let generalContentStack = NSStackView(views: [
+            labeledRow(titleLabel: languageTitleLabel, control: languagePopup),
+            indentedRow(content: languageHintLabel),
             autoRefreshCheckbox,
             autoHighlightCheckbox,
-            statusBarCountCheckbox,
+            statusBarCountCheckbox
+        ])
+        generalContentStack.orientation = .vertical
+        generalContentStack.alignment = .leading
+        generalContentStack.spacing = 14
+
+        generalPaneView.addSubview(generalContentStack)
+        generalContentStack.snp.makeConstraints { make in
+            make.edges.equalToSuperview()
+        }
+
+        let updatesContentStack = NSStackView(views: [
+            labeledRow(titleLabel: updateChecksTitleLabel, control: updateStrategyPopup),
             automaticDownloadsCheckbox,
             automaticDownloadsHint,
             actionsRow()
         ])
-        contentStack.orientation = .vertical
-        contentStack.alignment = .leading
-        contentStack.spacing = 14
+        updatesContentStack.orientation = .vertical
+        updatesContentStack.alignment = .leading
+        updatesContentStack.spacing = 14
 
-        card.addSubview(contentStack)
-        contentStack.snp.makeConstraints { make in
+        updatesPaneView.addSubview(updatesContentStack)
+        updatesContentStack.snp.makeConstraints { make in
+            make.edges.equalToSuperview()
+        }
+
+        card.addSubview(paneHostView)
+        paneHostView.snp.makeConstraints { make in
             make.edges.equalToSuperview().inset(22)
         }
 
         versionLabel.textColor = .secondaryLabelColor
 
-        let rootStack = NSStackView(views: [titleLabel, descriptionLabel, card, versionLabel])
+        let rootStack = NSStackView(views: [titleLabel, descriptionLabel, sectionControl, card, versionLabel])
         rootStack.orientation = .vertical
         rootStack.alignment = .leading
         rootStack.spacing = 18
@@ -143,21 +201,61 @@ private final class PreferencesViewController: NSViewController {
         card.snp.makeConstraints { make in
             make.width.equalTo(rootStack)
         }
+        sectionControl.snp.makeConstraints { make in
+            make.width.equalTo(280)
+        }
+
+        presentSelectedPane()
     }
 
     private func bindSettings() {
         settings.$autoRefreshEnabled
-            .combineLatest(settings.$autoHighlightSelection, settings.$showConnectedCountInStatusBar, settings.$updateCheckStrategy)
+            .combineLatest(
+                settings.$autoHighlightSelection,
+                settings.$showConnectedCountInStatusBar,
+                settings.$updateCheckStrategy
+            )
             .receive(on: RunLoop.main)
             .sink { [weak self] _, _, _, _ in
+                self?.applyLocalization()
+                self?.syncControlsFromSettings()
+            }
+            .store(in: &cancellables)
+
+        AppLocalization.shared.$language
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.applyLocalization()
                 self?.syncControlsFromSettings()
             }
             .store(in: &cancellables)
     }
 
+    private func applyLocalization() {
+        titleLabel.stringValue = L10n.preferencesTitle
+        descriptionLabel.stringValue = L10n.preferencesDescription
+        sectionControl.setLabel(L10n.preferencesSegmentGeneral, forSegment: PreferencesPane.general.rawValue)
+        sectionControl.setLabel(L10n.preferencesSegmentUpdates, forSegment: PreferencesPane.updates.rawValue)
+        sectionControl.selectedSegment = selectedPane.rawValue
+        languageTitleLabel.stringValue = L10n.preferencesLanguage
+        languageHintLabel.stringValue = L10n.preferencesLanguageHint
+        updateChecksTitleLabel.stringValue = L10n.preferencesUpdateChecks
+        autoRefreshCheckbox.title = L10n.preferencesAutoRefresh
+        autoHighlightCheckbox.title = L10n.preferencesAutoHighlight
+        statusBarCountCheckbox.title = L10n.preferencesStatusCount
+        automaticDownloadsCheckbox.title = L10n.preferencesAutoDownloads
+        checkNowButton.title = L10n.preferencesCheckForUpdates
+        openGitHubButton.title = L10n.preferencesOpenGitHub
+        rebuildLanguagePopup()
+        rebuildUpdateStrategyPopup()
+    }
+
     private func syncControlsFromSettings() {
-        if let index = AppSettings.UpdateCheckStrategy.allCases.firstIndex(of: settings.updateCheckStrategy) {
-            updateStrategyPopup.selectItem(at: index)
+        if let languageIndex = AppLanguage.allCases.firstIndex(of: settings.appLanguage) {
+            languagePopup.selectItem(at: languageIndex)
+        }
+        if let strategyIndex = AppSettings.UpdateCheckStrategy.allCases.firstIndex(of: settings.updateCheckStrategy) {
+            updateStrategyPopup.selectItem(at: strategyIndex)
         }
         autoRefreshCheckbox.state = settings.autoRefreshEnabled ? .on : .off
         autoHighlightCheckbox.state = settings.autoHighlightSelection ? .on : .off
@@ -165,16 +263,51 @@ private final class PreferencesViewController: NSViewController {
         automaticDownloadsCheckbox.state = updateManager.automaticallyDownloadsUpdates ? .on : .off
         automaticDownloadsCheckbox.isEnabled = updateManager.supportsAutomaticUpdateDownloads
         automaticDownloadsHint.stringValue = updateManager.supportsAutomaticUpdateDownloads
-            ? "Sparkle can fetch the next release in the background and install it after restart."
-            : "Sparkle automatic downloads are unavailable until a signed appcast feed is configured."
+            ? L10n.preferencesAutoDownloadsAvailable
+            : L10n.preferencesAutoDownloadsUnavailable
 
         let shortVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
         let buildVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
-        versionLabel.stringValue = "Current version \(shortVersion) (\(buildVersion))"
+        versionLabel.stringValue = L10n.currentVersion(shortVersion, buildVersion)
     }
 
-    private func labeledRow(title: String, control: NSView) -> NSView {
-        let titleLabel = NSTextField(labelWithString: title)
+    private func rebuildLanguagePopup() {
+        let selectedLanguage = settings.appLanguage
+        languagePopup.removeAllItems()
+        languagePopup.addItems(withTitles: AppLanguage.allCases.map(L10n.languageName))
+        if let index = AppLanguage.allCases.firstIndex(of: selectedLanguage) {
+            languagePopup.selectItem(at: index)
+        }
+    }
+
+    private func rebuildUpdateStrategyPopup() {
+        let selectedStrategy = settings.updateCheckStrategy
+        updateStrategyPopup.removeAllItems()
+        updateStrategyPopup.addItems(withTitles: AppSettings.UpdateCheckStrategy.allCases.map(\.title))
+        if let index = AppSettings.UpdateCheckStrategy.allCases.firstIndex(of: selectedStrategy) {
+            updateStrategyPopup.selectItem(at: index)
+        }
+    }
+
+    private func presentSelectedPane() {
+        let paneView: NSView
+        switch selectedPane {
+        case .general:
+            paneView = generalPaneView
+        case .updates:
+            paneView = updatesPaneView
+        }
+
+        guard paneHostView.subviews.first !== paneView else { return }
+        paneHostView.subviews.forEach { $0.removeFromSuperview() }
+        paneHostView.addSubview(paneView)
+        paneView.snp.remakeConstraints { make in
+            make.edges.equalToSuperview()
+        }
+        view.layoutSubtreeIfNeeded()
+    }
+
+    private func labeledRow(titleLabel: NSTextField, control: NSView) -> NSView {
         titleLabel.alignment = .right
         titleLabel.font = .systemFont(ofSize: NSFont.systemFontSize)
         titleLabel.snp.makeConstraints { make in
@@ -188,24 +321,37 @@ private final class PreferencesViewController: NSViewController {
         return row
     }
 
-    private func actionsRow() -> NSView {
-        let checkNowButton = NSButton(title: "Check for Updates", target: self, action: #selector(checkForUpdates(_:)))
-        let openGitHubButton = NSButton(title: "Open GitHub", target: self, action: #selector(openGitHubHomepage(_:)))
-        let buttons = NSStackView(views: [checkNowButton, openGitHubButton])
-        buttons.orientation = .horizontal
-        buttons.alignment = .centerY
-        buttons.spacing = 10
-
+    private func indentedRow(content: NSView) -> NSView {
         let spacer = NSView()
         spacer.snp.makeConstraints { make in
             make.width.equalTo(112)
         }
 
-        let row = NSStackView(views: [spacer, buttons])
+        let row = NSStackView(views: [spacer, content])
         row.orientation = .horizontal
-        row.alignment = .centerY
+        row.alignment = .top
         row.spacing = 12
         return row
+    }
+
+    private func actionsRow() -> NSView {
+        let buttons = NSStackView(views: [checkNowButton, openGitHubButton])
+        buttons.orientation = .horizontal
+        buttons.alignment = .centerY
+        buttons.spacing = 10
+
+        return indentedRow(content: buttons)
+    }
+
+    @objc private func languageChanged(_ sender: NSPopUpButton) {
+        let index = max(0, sender.indexOfSelectedItem)
+        settings.appLanguage = AppLanguage.allCases[index]
+    }
+
+    @objc private func changePane(_ sender: NSSegmentedControl) {
+        let selectedIndex = max(0, sender.selectedSegment)
+        selectedPane = PreferencesPane(rawValue: selectedIndex) ?? .general
+        presentSelectedPane()
     }
 
     @objc private func updateStrategyChanged(_ sender: NSPopUpButton) {

@@ -9,14 +9,18 @@ final class MainViewController: NSViewController {
     private var cancellables = Set<AnyCancellable>()
 
     private let headerView = NSVisualEffectView()
-    private let titleLabel = NSTextField(labelWithString: "ViewScope")
-    private let subtitleLabel = NSTextField(labelWithString: "Inspect AppKit view hierarchies without leaving your desktop build.")
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let subtitleLabel = NSTextField(labelWithString: "")
     private let connectionBadge = CapsuleBadgeView()
     private let searchField = NSSearchField(frame: .zero)
-    private let refreshButton = NSButton(title: "Refresh", target: nil, action: nil)
-    private let highlightButton = NSButton(title: "Highlight", target: nil, action: nil)
-    private let disconnectButton = NSButton(title: "Disconnect", target: nil, action: nil)
-    private let statusLabel = NSTextField(labelWithString: "Waiting for a debug host")
+    private let refreshButton = NSButton(title: "", target: nil, action: nil)
+    private let highlightButton = NSButton(title: "", target: nil, action: nil)
+    private let disconnectButton = NSButton(title: "", target: nil, action: nil)
+    private let statusLabel = NSTextField(labelWithString: "")
+    private let liveHostsLabel = NSTextField(labelWithString: "")
+    private let recentHostsLabel = NSTextField(labelWithString: "")
+    private let hierarchyTitleLabel = NSTextField(labelWithString: "")
+    private let inspectorTitleLabel = NSTextField(labelWithString: "")
 
     private let contentContainer = NSView()
     private let workspaceSplitView = NSSplitView()
@@ -61,6 +65,7 @@ final class MainViewController: NSViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         buildUI()
+        applyLocalization()
         bindStore()
         store.start()
         applyCurrentStoreState()
@@ -82,13 +87,12 @@ final class MainViewController: NSViewController {
         subtitleLabel.maximumNumberOfLines = 2
         subtitleLabel.lineBreakMode = .byWordWrapping
 
-        connectionBadge.text = "IDLE"
+        connectionBadge.text = L10n.idleBadge
         connectionBadge.applyStyle(
             textColor: NSColor(calibratedRed: 0.11, green: 0.43, blue: 0.63, alpha: 1),
             backgroundColor: NSColor(calibratedRed: 0.86, green: 0.94, blue: 0.98, alpha: 1)
         )
 
-        searchField.placeholderString = "Search class names, identifiers, and node titles"
         searchField.delegate = self
         previewView.onCanvasClick = { [weak self] canvasPoint in
             self?.selectNodeFromPreview(at: canvasPoint)
@@ -201,8 +205,8 @@ final class MainViewController: NSViewController {
         sidebarView.layer?.cornerRadius = 24
         sidebarView.layer?.backgroundColor = NSColor(calibratedRed: 0.12, green: 0.17, blue: 0.24, alpha: 1).cgColor
 
-        let liveLabel = sidebarSectionLabel("Live Hosts")
-        let recentLabel = sidebarSectionLabel("Recent Sessions")
+        configureSidebarSectionLabel(liveHostsLabel)
+        configureSidebarSectionLabel(recentHostsLabel)
 
         configure(tableView: liveHostsTableView, action: #selector(handleLiveHostSelection(_:)))
         configure(tableView: recentHostsTableView, action: #selector(handleRecentHostSelection(_:)))
@@ -220,26 +224,27 @@ final class MainViewController: NSViewController {
         let liveCard = sidebarCardView(containing: liveHostsScrollView)
         let recentCard = sidebarCardView(containing: recentHostsScrollView)
 
-        sidebarView.addSubview(liveLabel)
+        sidebarView.addSubview(liveHostsLabel)
         sidebarView.addSubview(liveCard)
-        sidebarView.addSubview(recentLabel)
+        sidebarView.addSubview(recentHostsLabel)
         sidebarView.addSubview(recentCard)
 
-        liveLabel.snp.makeConstraints { make in
+        liveHostsLabel.snp.makeConstraints { make in
             make.top.leading.trailing.equalToSuperview().inset(18)
         }
         liveCard.snp.makeConstraints { make in
-            make.top.equalTo(liveLabel.snp.bottom).offset(10)
+            make.top.equalTo(liveHostsLabel.snp.bottom).offset(10)
             make.leading.trailing.equalToSuperview().inset(16)
-            make.height.equalTo(260)
+            make.height.equalTo(228)
         }
-        recentLabel.snp.makeConstraints { make in
+        recentHostsLabel.snp.makeConstraints { make in
             make.top.equalTo(liveCard.snp.bottom).offset(18)
             make.leading.trailing.equalToSuperview().inset(18)
         }
         recentCard.snp.makeConstraints { make in
-            make.top.equalTo(recentLabel.snp.bottom).offset(10)
+            make.top.equalTo(recentHostsLabel.snp.bottom).offset(10)
             make.leading.trailing.bottom.equalToSuperview().inset(16)
+            make.height.greaterThanOrEqualTo(320)
         }
     }
 
@@ -248,10 +253,10 @@ final class MainViewController: NSViewController {
         hierarchyView.layer?.cornerRadius = 24
         hierarchyView.layer?.backgroundColor = NSColor.white.cgColor
 
-        let title = sectionTitleLabel("Hierarchy")
+        configureSectionTitleLabel(hierarchyTitleLabel)
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("HierarchyColumn"))
-        column.title = "Hierarchy"
+        column.title = L10n.hierarchy
         hierarchyOutlineView.addTableColumn(column)
         hierarchyOutlineView.outlineTableColumn = column
         hierarchyOutlineView.headerView = nil
@@ -266,14 +271,14 @@ final class MainViewController: NSViewController {
         hierarchyScrollView.hasVerticalScroller = true
         hierarchyScrollView.documentView = hierarchyOutlineView
 
-        hierarchyView.addSubview(title)
+        hierarchyView.addSubview(hierarchyTitleLabel)
         hierarchyView.addSubview(hierarchyScrollView)
 
-        title.snp.makeConstraints { make in
+        hierarchyTitleLabel.snp.makeConstraints { make in
             make.top.leading.trailing.equalToSuperview().inset(18)
         }
         hierarchyScrollView.snp.makeConstraints { make in
-            make.top.equalTo(title.snp.bottom).offset(12)
+            make.top.equalTo(hierarchyTitleLabel.snp.bottom).offset(12)
             make.leading.trailing.bottom.equalToSuperview().inset(12)
         }
         hierarchyView.snp.makeConstraints { make in
@@ -286,7 +291,7 @@ final class MainViewController: NSViewController {
         detailView.layer?.cornerRadius = 24
         detailView.layer?.backgroundColor = NSColor.white.cgColor
 
-        let title = sectionTitleLabel("Inspector")
+        configureSectionTitleLabel(inspectorTitleLabel)
         detailStackView.orientation = .vertical
         detailStackView.alignment = .leading
         detailStackView.spacing = 14
@@ -296,14 +301,14 @@ final class MainViewController: NSViewController {
         detailScrollView.hasVerticalScroller = true
         detailScrollView.documentView = detailStackView
 
-        detailView.addSubview(title)
+        detailView.addSubview(inspectorTitleLabel)
         detailView.addSubview(detailScrollView)
 
-        title.snp.makeConstraints { make in
+        inspectorTitleLabel.snp.makeConstraints { make in
             make.top.leading.trailing.equalToSuperview().inset(18)
         }
         detailScrollView.snp.makeConstraints { make in
-            make.top.equalTo(title.snp.bottom).offset(10)
+            make.top.equalTo(inspectorTitleLabel.snp.bottom).offset(10)
             make.leading.trailing.bottom.equalToSuperview().inset(12)
         }
         detailStackView.snp.makeConstraints { make in
@@ -359,7 +364,34 @@ final class MainViewController: NSViewController {
             }
             .store(in: &cancellables)
 
+        AppLocalization.shared.$language
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.applyLocalization()
+                self.renderDetail(detail: self.store.selectedNodeDetail, insight: self.store.captureInsight)
+                self.updateChrome(connectionState: self.store.connectionState, errorMessage: self.store.errorMessage)
+                self.liveHostsTableView.reloadData()
+                self.recentHostsTableView.reloadData()
+                self.hierarchyOutlineView.reloadData()
+            }
+            .store(in: &cancellables)
+
         applyCurrentStoreState()
+    }
+
+    private func applyLocalization() {
+        titleLabel.stringValue = L10n.appName
+        subtitleLabel.stringValue = L10n.mainSubtitle
+        refreshButton.title = L10n.refresh
+        highlightButton.title = L10n.highlight
+        disconnectButton.title = L10n.disconnect
+        searchField.placeholderString = L10n.searchPlaceholder
+        liveHostsLabel.stringValue = L10n.liveHosts
+        recentHostsLabel.stringValue = L10n.recentSessions
+        hierarchyTitleLabel.stringValue = L10n.hierarchy
+        inspectorTitleLabel.stringValue = L10n.inspector
+        previewView.placeholderText = L10n.previewPlaceholder
     }
 
     private func applyCurrentStoreState() {
@@ -418,11 +450,11 @@ final class MainViewController: NSViewController {
         addDetailSection(previewCard(detail: detail))
 
         if let detail {
-            addDetailSection(textListCard(title: "Ancestry", rows: detail.ancestry))
+            addDetailSection(textListCard(title: L10n.ancestry, rows: detail.ancestry))
             for section in detail.sections {
                 addDetailSection(propertyCard(section: section))
             }
-            addDetailSection(textListCard(title: "Constraints", rows: detail.constraints))
+            addDetailSection(textListCard(title: L10n.constraints, rows: detail.constraints))
         } else {
             addDetailSection(placeholderCard())
         }
@@ -432,13 +464,13 @@ final class MainViewController: NSViewController {
         connectionBadge.text = {
             switch connectionState {
             case .idle:
-                return "IDLE"
+                return L10n.idleBadge
             case .connecting:
-                return "LINK"
+                return L10n.linkingBadge
             case .connected:
-                return "LIVE"
+                return L10n.liveBadge
             case .failed:
-                return "ERROR"
+                return L10n.errorBadge
             }
         }()
         let textColor: NSColor = {
@@ -477,15 +509,15 @@ final class MainViewController: NSViewController {
 
     private func summaryCard(capture: ViewScopeCapturePayload, insight: CaptureHistoryInsight) -> NSView {
         let card = makeCardView()
-        let title = cardHeaderLabel("Session Summary")
+        let title = cardHeaderLabel(L10n.sessionSummary)
         let rows = [
-            infoRow(title: "Host", value: capture.host.displayName),
-            infoRow(title: "Bundle", value: capture.host.bundleIdentifier),
-            infoRow(title: "Version", value: "\(capture.host.version) (\(capture.host.build))"),
-            infoRow(title: "Nodes", value: String(capture.summary.nodeCount)),
-            infoRow(title: "Windows", value: String(capture.summary.windowCount)),
-            infoRow(title: "Capture", value: "\(capture.summary.captureDurationMilliseconds) ms"),
-            infoRow(title: "History", value: insight.totalCaptures == 0 ? "First capture in this workspace" : "\(insight.totalCaptures) captures, avg \(insight.averageDurationMilliseconds) ms")
+            infoRow(title: L10n.detailHost, value: capture.host.displayName),
+            infoRow(title: L10n.detailBundle, value: capture.host.bundleIdentifier),
+            infoRow(title: L10n.detailVersion, value: L10n.hostVersionAndBuild(capture.host.version, capture.host.build)),
+            infoRow(title: L10n.detailNodes, value: String(capture.summary.nodeCount)),
+            infoRow(title: L10n.detailWindows, value: String(capture.summary.windowCount)),
+            infoRow(title: L10n.detailCapture, value: L10n.captureDuration(capture.summary.captureDurationMilliseconds)),
+            infoRow(title: L10n.detailHistory, value: L10n.historySummary(count: insight.totalCaptures, averageMilliseconds: insight.averageDurationMilliseconds))
         ]
         let stack = NSStackView(views: rows)
         stack.orientation = .vertical
@@ -506,7 +538,7 @@ final class MainViewController: NSViewController {
 
     private func previewCard(detail: ViewScopeNodeDetailPayload?) -> NSView {
         let card = makeCardView()
-        let title = cardHeaderLabel("Canvas Preview")
+        let title = cardHeaderLabel(L10n.canvasPreview)
         previewView.image = detail.flatMap { payload in
             guard let base64 = payload.screenshotPNGBase64,
                   let data = Data(base64Encoded: base64) else { return nil }
@@ -580,7 +612,7 @@ final class MainViewController: NSViewController {
 
     private func placeholderCard() -> NSView {
         let card = makeCardView()
-        let label = NSTextField(wrappingLabelWithString: "Pick a node from the hierarchy to inspect its properties, constraints, and live screenshot preview.")
+        let label = NSTextField(wrappingLabelWithString: L10n.pickNodePlaceholder)
         label.textColor = .secondaryLabelColor
         card.addSubview(label)
         label.snp.makeConstraints { make in
@@ -599,11 +631,9 @@ final class MainViewController: NSViewController {
         return card
     }
 
-    private func sidebarSectionLabel(_ text: String) -> NSTextField {
-        let label = NSTextField(labelWithString: text)
+    private func configureSidebarSectionLabel(_ label: NSTextField) {
         label.font = NSFont(name: "Avenir Next Demi Bold", size: 13) ?? .systemFont(ofSize: 13, weight: .semibold)
         label.textColor = NSColor(calibratedRed: 0.83, green: 0.88, blue: 0.91, alpha: 1)
-        return label
     }
 
     private func sidebarCardView(containing contentView: NSView) -> NSView {
@@ -618,10 +648,8 @@ final class MainViewController: NSViewController {
         return card
     }
 
-    private func sectionTitleLabel(_ text: String) -> NSTextField {
-        let label = NSTextField(labelWithString: text)
+    private func configureSectionTitleLabel(_ label: NSTextField) {
         label.font = NSFont(name: "Avenir Next Demi Bold", size: 16) ?? .systemFont(ofSize: 16, weight: .semibold)
-        return label
     }
 
     private func cardHeaderLabel(_ text: String) -> NSTextField {
@@ -771,18 +799,24 @@ extension MainViewController: NSTableViewDataSource, NSTableViewDelegate {
 
         if tableView == liveHostsTableView {
             if liveHosts.isEmpty {
-                cellView.configure(title: "No hosts online", subtitle: "Start ViewScopeServer in a debug app to discover it here.", detail: nil, accentColor: .systemBlue)
+                cellView.configure(title: L10n.noHostsOnlineTitle, subtitle: L10n.noHostsOnlineSubtitle, detail: nil, accentColor: .systemBlue)
             } else {
                 let host = liveHosts[row]
-                cellView.configure(title: host.displayName, subtitle: host.bundleIdentifier, detail: "v\(host.version) • pid \(host.processIdentifier)", accentColor: .systemTeal)
+                cellView.configure(
+                    title: host.displayName,
+                    subtitle: host.bundleIdentifier,
+                    detail: L10n.recentHostDetail(version: host.version, processIdentifier: host.processIdentifier),
+                    accentColor: .systemTeal
+                )
             }
         } else {
             if recentHosts.isEmpty {
-                cellView.configure(title: "No recent sessions", subtitle: "Connected hosts appear here for quick reconnects.", detail: nil, accentColor: .systemOrange)
+                cellView.configure(title: L10n.noRecentSessionsTitle, subtitle: L10n.noRecentSessionsSubtitle, detail: nil, accentColor: .systemOrange)
             } else {
                 let record = recentHosts[row]
                 let formatter = RelativeDateTimeFormatter()
                 formatter.unitsStyle = .abbreviated
+                formatter.locale = AppLocalization.shared.locale
                 let detail = formatter.localizedString(for: record.lastConnectedAt, relativeTo: Date())
                 cellView.configure(title: record.displayName, subtitle: record.bundleIdentifier, detail: detail, accentColor: .systemOrange)
             }
@@ -962,27 +996,28 @@ private final class HierarchyCellView: NSTableCellView {
         titleLabel.stringValue = node.title
         let subtitle = [node.className.components(separatedBy: ".").last ?? node.className, node.subtitle].compactMap { $0 }.joined(separator: " • ")
         subtitleLabel.stringValue = subtitle
-        badgeView.text = node.kind == .window ? "WINDOW" : node.isHidden ? "HIDDEN" : "VIEW"
+        badgeView.text = node.kind == .window ? L10n.hierarchyBadgeWindow : node.isHidden ? L10n.hierarchyBadgeHidden : L10n.hierarchyBadgeView
     }
 }
 
 private final class IntegrationGuideView: NSView {
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let subtitleLabel = NSTextField(wrappingLabelWithString: "")
+    private let swiftPackageCard = CodeCardView()
+    private let cocoaPodsCard = CodeCardView()
+    private let carthageCard = CodeCardView()
+    private var cancellables = Set<AnyCancellable>()
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.cornerRadius = 24
         layer?.backgroundColor = NSColor.white.cgColor
 
-        let titleLabel = NSTextField(labelWithString: "Start by embedding ViewScopeServer in your debug host")
         titleLabel.font = NSFont(name: "Avenir Next Demi Bold", size: 24) ?? .systemFont(ofSize: 24, weight: .semibold)
 
-        let subtitleLabel = NSTextField(wrappingLabelWithString: "ViewScope discovers local debug builds, connects over loopback, and only keeps capture traffic on your Mac.")
         subtitleLabel.textColor = .secondaryLabelColor
         subtitleLabel.maximumNumberOfLines = 2
-
-        let swiftPackageCard = Self.codeCard(title: "Swift Package Manager", snippet: ".package(url: \"https://github.com/wangwanjie/ViewScope.git\", from: \"1.0.0\")\nimport ViewScopeServer\nViewScopeInspector.start()")
-        let cocoaPodsCard = Self.codeCard(title: "CocoaPods", snippet: "pod 'ViewScopeServer', :git => 'https://github.com/wangwanjie/ViewScope.git', :tag => 'v1.0.0', :configurations => ['Debug']")
-        let carthageCard = Self.codeCard(title: "Carthage", snippet: "github \"wangwanjie/ViewScope\" ~> 1.0")
 
         let stack = NSStackView(views: [swiftPackageCard, cocoaPodsCard, carthageCard])
         stack.orientation = .vertical
@@ -1009,6 +1044,9 @@ private final class IntegrationGuideView: NSView {
                 make.width.equalTo(stack)
             }
         }
+
+        applyLocalization()
+        bindLocalization()
     }
 
     @available(*, unavailable)
@@ -1016,24 +1054,52 @@ private final class IntegrationGuideView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    private static func codeCard(title: String, snippet: String) -> NSView {
-        let card = NSView()
-        card.wantsLayer = true
-        card.layer?.cornerRadius = 18
-        card.layer?.backgroundColor = NSColor(calibratedRed: 0.97, green: 0.98, blue: 0.99, alpha: 1).cgColor
-        card.layer?.borderWidth = 1
-        card.layer?.borderColor = NSColor(calibratedRed: 0.88, green: 0.90, blue: 0.92, alpha: 1).cgColor
+    private func applyLocalization() {
+        titleLabel.stringValue = L10n.integrationTitle
+        subtitleLabel.stringValue = L10n.integrationSubtitle
+        swiftPackageCard.configure(
+            title: L10n.integrationSwiftPackageManager,
+            snippet: ".package(url: \"https://github.com/wangwanjie/ViewScope.git\", from: \"1.0.0\")\nimport ViewScopeServer\nViewScopeInspector.start()"
+        )
+        cocoaPodsCard.configure(
+            title: L10n.integrationCocoaPods,
+            snippet: "pod 'ViewScopeServer', :git => 'https://github.com/wangwanjie/ViewScope.git', :tag => 'v1.0.0', :configurations => ['Debug']"
+        )
+        carthageCard.configure(
+            title: L10n.integrationCarthage,
+            snippet: "github \"wangwanjie/ViewScope\" ~> 1.0"
+        )
+    }
 
-        let titleLabel = NSTextField(labelWithString: title)
+    private func bindLocalization() {
+        AppLocalization.shared.$language
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.applyLocalization()
+            }
+            .store(in: &cancellables)
+    }
+}
+
+private final class CodeCardView: NSView {
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let codeLabel = NSTextField(wrappingLabelWithString: "")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 18
+        layer?.backgroundColor = NSColor(calibratedRed: 0.97, green: 0.98, blue: 0.99, alpha: 1).cgColor
+        layer?.borderWidth = 1
+        layer?.borderColor = NSColor(calibratedRed: 0.88, green: 0.90, blue: 0.92, alpha: 1).cgColor
+
         titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-
-        let codeLabel = NSTextField(wrappingLabelWithString: snippet)
         codeLabel.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         codeLabel.lineBreakMode = .byCharWrapping
         codeLabel.textColor = NSColor(calibratedRed: 0.18, green: 0.24, blue: 0.31, alpha: 1)
 
-        card.addSubview(titleLabel)
-        card.addSubview(codeLabel)
+        addSubview(titleLabel)
+        addSubview(codeLabel)
         titleLabel.snp.makeConstraints { make in
             make.top.leading.trailing.equalToSuperview().inset(16)
         }
@@ -1041,6 +1107,15 @@ private final class IntegrationGuideView: NSView {
             make.top.equalTo(titleLabel.snp.bottom).offset(10)
             make.leading.trailing.bottom.equalToSuperview().inset(16)
         }
-        return card
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func configure(title: String, snippet: String) {
+        titleLabel.stringValue = title
+        codeLabel.stringValue = snippet
     }
 }

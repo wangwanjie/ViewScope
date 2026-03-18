@@ -13,12 +13,19 @@ final class AppSettings: ObservableObject {
         var title: String {
             switch self {
             case .manual:
-                return "Manual"
+                return L10n.updateStrategyManual
             case .daily:
-                return "Daily"
+                return L10n.updateStrategyDaily
             case .onLaunch:
-                return "On Launch"
+                return L10n.updateStrategyOnLaunch
             }
+        }
+    }
+
+    @Published var appLanguage: AppLanguage {
+        didSet {
+            defaults.set(appLanguage.rawValue, forKey: Keys.appLanguage)
+            AppLocalization.shared.setLanguage(appLanguage)
         }
     }
 
@@ -37,8 +44,9 @@ final class AppSettings: ObservableObject {
 
     private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, environment: [String: String] = ProcessInfo.processInfo.environment) {
         self.defaults = defaults
+        self.appLanguage = Self.resolveLanguage(defaults: defaults, environment: environment)
         self.autoRefreshEnabled = defaults.object(forKey: Keys.autoRefreshEnabled) as? Bool ?? false
         self.autoHighlightSelection = defaults.object(forKey: Keys.autoHighlightSelection) as? Bool ?? true
         self.showConnectedCountInStatusBar = defaults.object(forKey: Keys.showConnectedCountInStatusBar) as? Bool ?? true
@@ -48,12 +56,24 @@ final class AppSettings: ObservableObject {
         } else {
             self.updateCheckStrategy = .daily
         }
+        AppLocalization.shared.setLanguage(appLanguage)
     }
 
     private enum Keys {
+        static let appLanguage = "ViewScope.appLanguage"
         static let autoRefreshEnabled = "ViewScope.autoRefreshEnabled"
         static let autoHighlightSelection = "ViewScope.autoHighlightSelection"
         static let showConnectedCountInStatusBar = "ViewScope.showConnectedCountInStatusBar"
         static let updateCheckStrategy = "ViewScope.updateCheckStrategy"
+    }
+
+    private static func resolveLanguage(defaults: UserDefaults, environment: [String: String]) -> AppLanguage {
+        if let language = AppLanguage.resolve(environment["VIEWSCOPE_LANGUAGE"]) {
+            return language
+        }
+        if let language = AppLanguage.resolve(defaults.string(forKey: Keys.appLanguage)) {
+            return language
+        }
+        return AppLanguage.preferred(from: Locale.preferredLanguages)
     }
 }

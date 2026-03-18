@@ -229,18 +229,18 @@ final class UpdateManager: NSObject {
         guard latest > current else {
             if interactive {
                 let alert = NSAlert()
-                alert.messageText = "You are up to date"
-                alert.informativeText = "Current version \(currentVersion), latest GitHub release \(release.tagName)."
+                alert.messageText = L10n.updateUpToDateTitle
+                alert.informativeText = L10n.updateUpToDateBody(current: currentVersion, latest: release.tagName)
                 alert.runModal()
             }
             return
         }
 
         let alert = NSAlert()
-        alert.messageText = "ViewScope \(release.tagName) is available"
-        alert.informativeText = release.body?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? "Open the release page in GitHub?"
-        alert.addButton(withTitle: "Open GitHub")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = L10n.updateAvailableTitle(release.tagName)
+        alert.informativeText = release.body?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? L10n.updateAvailableFallback
+        alert.addButton(withTitle: L10n.updateButtonOpenGitHub)
+        alert.addButton(withTitle: L10n.cancel)
         if alert.runModal() == .alertFirstButtonReturn {
             NSWorkspace.shared.open(release.htmlURL)
         }
@@ -248,7 +248,7 @@ final class UpdateManager: NSObject {
 
     private func presentFailureAlert(message: String) {
         let alert = NSAlert()
-        alert.messageText = "Unable to check for updates"
+        alert.messageText = L10n.updateFailureTitle
         alert.informativeText = message
         alert.runModal()
     }

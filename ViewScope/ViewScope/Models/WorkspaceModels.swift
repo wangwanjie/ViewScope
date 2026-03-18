@@ -18,11 +18,11 @@ enum WorkspaceConnectionState: Equatable {
     var statusText: String {
         switch self {
         case .idle:
-            return "Waiting for a debug host"
+            return L10n.waitingForDebugHost
         case .connecting(let name):
-            return "Connecting to \(name)..."
+            return L10n.connecting(name)
         case .connected(let host):
-            return "Connected to \(host.displayName)"
+            return L10n.connected(host.displayName)
         case .failed(let message):
             return message
         }

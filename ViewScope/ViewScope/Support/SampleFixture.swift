@@ -53,20 +53,20 @@ enum SampleFixture {
         ]
 
         let sections = [
-            ViewScopePropertySection(title: "Identity", items: [
+            ViewScopePropertySection(title: L10n.serverSectionTitle("identity"), items: [
                 ViewScopePropertyItem(title: "Node", value: nodeID),
-                ViewScopePropertyItem(title: "Class", value: capture().nodes[nodeID]?.className ?? "NSView"),
-                ViewScopePropertyItem(title: "Address", value: "0xfeedbeef")
+                ViewScopePropertyItem(title: L10n.serverItemTitle("class"), value: capture().nodes[nodeID]?.className ?? "NSView"),
+                ViewScopePropertyItem(title: L10n.serverItemTitle("address"), value: "0xfeedbeef")
             ]),
-            ViewScopePropertySection(title: "Layout", items: [
-                ViewScopePropertyItem(title: "Frame", value: "x 292.0 y 152.0 w 760.0 h 408.0"),
-                ViewScopePropertyItem(title: "Intrinsic Size", value: "No intrinsic size"),
-                ViewScopePropertyItem(title: "Translates Mask", value: "No")
+            ViewScopePropertySection(title: L10n.serverSectionTitle("layout"), items: [
+                ViewScopePropertyItem(title: L10n.serverItemTitle("frame"), value: "x 292.0 y 152.0 w 760.0 h 408.0"),
+                ViewScopePropertyItem(title: L10n.serverItemTitle("intrinsic_size"), value: L10n.serverNoIntrinsicSize),
+                ViewScopePropertyItem(title: L10n.serverItemTitle("translates_mask"), value: L10n.serverNo)
             ]),
-            ViewScopePropertySection(title: "Rendering", items: [
-                ViewScopePropertyItem(title: "Hidden", value: "No"),
-                ViewScopePropertyItem(title: "Alpha", value: "1.00"),
-                ViewScopePropertyItem(title: "Layer Backed", value: "Yes")
+            ViewScopePropertySection(title: L10n.serverSectionTitle("rendering"), items: [
+                ViewScopePropertyItem(title: L10n.serverItemTitle("hidden"), value: L10n.serverNo),
+                ViewScopePropertyItem(title: L10n.serverItemTitle("alpha"), value: "1.00"),
+                ViewScopePropertyItem(title: L10n.serverItemTitle("layer_backed"), value: L10n.serverYes)
             ])
         ]
 

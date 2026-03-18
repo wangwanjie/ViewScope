@@ -32,6 +32,13 @@ final class StatusItemController: NSObject {
                 self?.rebuildMenu()
             }
             .store(in: &cancellables)
+
+        AppLocalization.shared.$language
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.rebuildMenu()
+            }
+            .store(in: &cancellables)
     }
 
     private func rebuildMenu() {
@@ -43,28 +50,28 @@ final class StatusItemController: NSObject {
         menu.addItem(summary)
         menu.addItem(NSMenuItem.separator())
 
-        let openItem = NSMenuItem(title: "Open ViewScope", action: #selector(openMainWindow), keyEquivalent: "")
+        let openItem = NSMenuItem(title: L10n.statusOpen, action: #selector(openMainWindow), keyEquivalent: "")
         openItem.target = self
         menu.addItem(openItem)
 
-        let refreshItem = NSMenuItem(title: "Refresh Capture", action: #selector(refreshCapture), keyEquivalent: "")
+        let refreshItem = NSMenuItem(title: L10n.statusRefresh, action: #selector(refreshCapture), keyEquivalent: "")
         refreshItem.target = self
         refreshItem.isEnabled = store.capture != nil
         menu.addItem(refreshItem)
 
-        let autoRefreshItem = NSMenuItem(title: "Auto Refresh", action: #selector(toggleAutoRefresh), keyEquivalent: "")
+        let autoRefreshItem = NSMenuItem(title: L10n.statusAutoRefresh, action: #selector(toggleAutoRefresh), keyEquivalent: "")
         autoRefreshItem.target = self
         autoRefreshItem.state = store.settings.autoRefreshEnabled ? .on : .off
         menu.addItem(autoRefreshItem)
 
-        let autoHighlightItem = NSMenuItem(title: "Auto Highlight Selection", action: #selector(toggleAutoHighlight), keyEquivalent: "")
+        let autoHighlightItem = NSMenuItem(title: L10n.statusAutoHighlight, action: #selector(toggleAutoHighlight), keyEquivalent: "")
         autoHighlightItem.target = self
         autoHighlightItem.state = store.settings.autoHighlightSelection ? .on : .off
         menu.addItem(autoHighlightItem)
 
         if !store.discoveredHosts.isEmpty {
             menu.addItem(NSMenuItem.separator())
-            let header = NSMenuItem(title: "Live Hosts", action: nil, keyEquivalent: "")
+            let header = NSMenuItem(title: L10n.liveHosts, action: nil, keyEquivalent: "")
             header.isEnabled = false
             menu.addItem(header)
             for host in store.discoveredHosts.prefix(5) {
@@ -76,16 +83,16 @@ final class StatusItemController: NSObject {
         }
 
         menu.addItem(NSMenuItem.separator())
-        let preferencesItem = NSMenuItem(title: "Preferences", action: #selector(openPreferences), keyEquivalent: "")
+        let preferencesItem = NSMenuItem(title: L10n.statusPreferences, action: #selector(openPreferences), keyEquivalent: "")
         preferencesItem.target = self
         menu.addItem(preferencesItem)
 
-        let updatesItem = NSMenuItem(title: "Check for Updates", action: #selector(checkForUpdates), keyEquivalent: "")
+        let updatesItem = NSMenuItem(title: L10n.statusCheckForUpdates, action: #selector(checkForUpdates), keyEquivalent: "")
         updatesItem.target = self
         menu.addItem(updatesItem)
 
         menu.addItem(NSMenuItem.separator())
-        let quitItem = NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+        let quitItem = NSMenuItem(title: L10n.statusQuit, action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
         quitItem.target = NSApp
         menu.addItem(quitItem)
 
@@ -101,11 +108,11 @@ final class StatusItemController: NSObject {
     private var statusSummary: String {
         switch store.connectionState {
         case .idle:
-            return store.discoveredHosts.isEmpty ? "Waiting for local debug hosts" : "\(store.discoveredHosts.count) host(s) available"
+            return store.discoveredHosts.isEmpty ? L10n.statusWaitingForLocalHosts : L10n.hostsAvailable(store.discoveredHosts.count)
         case .connecting(let name):
-            return "Connecting to \(name)..."
+            return L10n.connecting(name)
         case .connected(let host):
-            return "Connected to \(host.displayName)"
+            return L10n.connected(host.displayName)
         case .failed(let message):
             return message
         }

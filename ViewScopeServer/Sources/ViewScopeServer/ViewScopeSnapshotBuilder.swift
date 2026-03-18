@@ -9,9 +9,11 @@ final class ViewScopeSnapshotBuilder {
     }
 
     private let hostInfo: ViewScopeHostInfo
+    private let interfaceLanguage: ViewScopeInterfaceLanguage
 
-    init(hostInfo: ViewScopeHostInfo) {
+    init(hostInfo: ViewScopeHostInfo, interfaceLanguage: ViewScopeInterfaceLanguage = .english) {
         self.hostInfo = hostInfo
+        self.interfaceLanguage = interfaceLanguage
     }
 
     func makeCapture() -> (ViewScopeCapturePayload, ReferenceContext) {
@@ -42,7 +44,7 @@ final class ViewScopeSnapshotBuilder {
                 parentID: nil,
                 kind: .window,
                 className: NSStringFromClass(type(of: window)),
-                title: window.title.isEmpty ? "Untitled Window" : window.title,
+                title: window.title.isEmpty ? interfaceLanguage.text("server.value.window_fallback") : window.title,
                 subtitle: "#\(window.windowNumber)",
                 frame: contentFrame.viewScopeRect,
                 bounds: contentFrame.viewScopeRect,
@@ -102,7 +104,7 @@ final class ViewScopeSnapshotBuilder {
                 host: hostInfo,
                 sections: windowSections(for: window),
                 constraints: [],
-                ancestry: [window.title.isEmpty ? "Window" : window.title],
+                ancestry: [window.title.isEmpty ? interfaceLanguage.text("server.value.window_fallback") : window.title],
                 screenshotPNGBase64: image.flatMap(ViewScopeImageEncoder().base64PNG),
                 screenshotSize: image?.size.viewScopeSize ?? .zero,
                 highlightedRect: window.contentView?.bounds.viewScopeRect ?? .zero
@@ -143,8 +145,8 @@ final class ViewScopeSnapshotBuilder {
                 parentID: parentID,
                 kind: .view,
                 className: NSStringFromClass(type(of: child)),
-                title: child.viewScopeTitle,
-                subtitle: child.viewScopeSubtitle,
+                title: child.viewScopeTitle(interfaceLanguage: interfaceLanguage),
+                subtitle: child.viewScopeSubtitle(interfaceLanguage: interfaceLanguage),
                 frame: child.frame.viewScopeRect,
                 bounds: child.bounds.viewScopeRect,
                 childIDs: [],
@@ -191,31 +193,35 @@ final class ViewScopeSnapshotBuilder {
         return makeViewScreenshot(view: contentView)
     }
 
+    private func text(_ key: String, _ arguments: CVarArg...) -> String {
+        interfaceLanguage.text(key, arguments: arguments)
+    }
+
     private func windowSections(for window: NSWindow) -> [ViewScopePropertySection] {
         [
             ViewScopePropertySection(
-                title: "Identity",
+                title: text("server.section.identity"),
                 items: [
-                    ViewScopePropertyItem(title: "Class", value: NSStringFromClass(type(of: window))),
-                    ViewScopePropertyItem(title: "Title", value: window.title),
-                    ViewScopePropertyItem(title: "Window Number", value: String(window.windowNumber)),
-                    ViewScopePropertyItem(title: "Address", value: window.viewScopeAddress)
+                    ViewScopePropertyItem(title: text("server.item.class"), value: NSStringFromClass(type(of: window))),
+                    ViewScopePropertyItem(title: text("server.item.title"), value: window.title),
+                    ViewScopePropertyItem(title: text("server.item.window_number"), value: String(window.windowNumber)),
+                    ViewScopePropertyItem(title: text("server.item.address"), value: window.viewScopeAddress)
                 ]
             ),
             ViewScopePropertySection(
-                title: "State",
+                title: text("server.section.state"),
                 items: [
-                    ViewScopePropertyItem(title: "Visible", value: window.isVisible.viewScopeBoolText),
-                    ViewScopePropertyItem(title: "Key", value: window.isKeyWindow.viewScopeBoolText),
-                    ViewScopePropertyItem(title: "Main", value: window.isMainWindow.viewScopeBoolText),
-                    ViewScopePropertyItem(title: "Level", value: String(window.level.rawValue))
+                    ViewScopePropertyItem(title: text("server.item.visible"), value: window.isVisible.viewScopeBoolText(interfaceLanguage: interfaceLanguage)),
+                    ViewScopePropertyItem(title: text("server.item.key"), value: window.isKeyWindow.viewScopeBoolText(interfaceLanguage: interfaceLanguage)),
+                    ViewScopePropertyItem(title: text("server.item.main"), value: window.isMainWindow.viewScopeBoolText(interfaceLanguage: interfaceLanguage)),
+                    ViewScopePropertyItem(title: text("server.item.level"), value: String(window.level.rawValue))
                 ]
             ),
             ViewScopePropertySection(
-                title: "Geometry",
+                title: text("server.section.geometry"),
                 items: [
-                    ViewScopePropertyItem(title: "Frame", value: window.frame.viewScopeString),
-                    ViewScopePropertyItem(title: "Content Layout", value: window.contentLayoutRect.viewScopeString)
+                    ViewScopePropertyItem(title: text("server.item.frame"), value: window.frame.viewScopeString),
+                    ViewScopePropertyItem(title: text("server.item.content_layout"), value: window.contentLayoutRect.viewScopeString)
                 ]
             )
         ]
@@ -223,63 +229,63 @@ final class ViewScopeSnapshotBuilder {
 
     private func viewSections(for view: NSView) -> [ViewScopePropertySection] {
         var identityItems = [
-            ViewScopePropertyItem(title: "Class", value: NSStringFromClass(type(of: view))),
-            ViewScopePropertyItem(title: "Address", value: view.viewScopeAddress)
+            ViewScopePropertyItem(title: text("server.item.class"), value: NSStringFromClass(type(of: view))),
+            ViewScopePropertyItem(title: text("server.item.address"), value: view.viewScopeAddress)
         ]
         if let identifier = view.identifier?.rawValue, !identifier.isEmpty {
-            identityItems.append(ViewScopePropertyItem(title: "Identifier", value: identifier))
+            identityItems.append(ViewScopePropertyItem(title: text("server.item.identifier"), value: identifier))
         }
         if let tooltip = view.toolTip, !tooltip.isEmpty {
-            identityItems.append(ViewScopePropertyItem(title: "Tool Tip", value: tooltip))
+            identityItems.append(ViewScopePropertyItem(title: text("server.item.tooltip"), value: tooltip))
         }
 
         let layoutItems = [
-            ViewScopePropertyItem(title: "Frame", value: view.frame.viewScopeString),
-            ViewScopePropertyItem(title: "Bounds", value: view.bounds.viewScopeString),
-            ViewScopePropertyItem(title: "Intrinsic Size", value: view.intrinsicContentSize.viewScopeString),
-            ViewScopePropertyItem(title: "Translates Mask", value: view.translatesAutoresizingMaskIntoConstraints.viewScopeBoolText),
+            ViewScopePropertyItem(title: text("server.item.frame"), value: view.frame.viewScopeString),
+            ViewScopePropertyItem(title: text("server.item.bounds"), value: view.bounds.viewScopeString),
+            ViewScopePropertyItem(title: text("server.item.intrinsic_size"), value: view.intrinsicContentSize.viewScopeString(interfaceLanguage: interfaceLanguage)),
+            ViewScopePropertyItem(title: text("server.item.translates_mask"), value: view.translatesAutoresizingMaskIntoConstraints.viewScopeBoolText(interfaceLanguage: interfaceLanguage)),
             ViewScopePropertyItem(
-                title: "Hugging H",
-                value: String(format: "%.1f", view.contentHuggingPriority(for: .horizontal).rawValue)
+                title: text("server.item.hugging_h"),
+                value: String(format: "%.1f", locale: interfaceLanguage.locale, view.contentHuggingPriority(for: .horizontal).rawValue)
             ),
             ViewScopePropertyItem(
-                title: "Hugging V",
-                value: String(format: "%.1f", view.contentHuggingPriority(for: .vertical).rawValue)
+                title: text("server.item.hugging_v"),
+                value: String(format: "%.1f", locale: interfaceLanguage.locale, view.contentHuggingPriority(for: .vertical).rawValue)
             ),
             ViewScopePropertyItem(
-                title: "Compression H",
-                value: String(format: "%.1f", view.contentCompressionResistancePriority(for: .horizontal).rawValue)
+                title: text("server.item.compression_h"),
+                value: String(format: "%.1f", locale: interfaceLanguage.locale, view.contentCompressionResistancePriority(for: .horizontal).rawValue)
             ),
             ViewScopePropertyItem(
-                title: "Compression V",
-                value: String(format: "%.1f", view.contentCompressionResistancePriority(for: .vertical).rawValue)
+                title: text("server.item.compression_v"),
+                value: String(format: "%.1f", locale: interfaceLanguage.locale, view.contentCompressionResistancePriority(for: .vertical).rawValue)
             )
         ]
 
         var renderingItems = [
-            ViewScopePropertyItem(title: "Hidden", value: view.isHidden.viewScopeBoolText),
-            ViewScopePropertyItem(title: "Alpha", value: String(format: "%.2f", view.alphaValue)),
-            ViewScopePropertyItem(title: "Layer Backed", value: view.wantsLayer.viewScopeBoolText),
-            ViewScopePropertyItem(title: "Flipped", value: view.isFlipped.viewScopeBoolText),
-            ViewScopePropertyItem(title: "Subviews", value: String(view.subviews.count))
+            ViewScopePropertyItem(title: text("server.item.hidden"), value: view.isHidden.viewScopeBoolText(interfaceLanguage: interfaceLanguage)),
+            ViewScopePropertyItem(title: text("server.item.alpha"), value: String(format: "%.2f", locale: interfaceLanguage.locale, view.alphaValue)),
+            ViewScopePropertyItem(title: text("server.item.layer_backed"), value: view.wantsLayer.viewScopeBoolText(interfaceLanguage: interfaceLanguage)),
+            ViewScopePropertyItem(title: text("server.item.flipped"), value: view.isFlipped.viewScopeBoolText(interfaceLanguage: interfaceLanguage)),
+            ViewScopePropertyItem(title: text("server.item.subviews"), value: String(view.subviews.count))
         ]
         if let background = view.layer?.backgroundColor?.viewScopeDescription {
-            renderingItems.append(ViewScopePropertyItem(title: "Background", value: background))
+            renderingItems.append(ViewScopePropertyItem(title: text("server.item.background"), value: background))
         }
 
         var sections = [
-            ViewScopePropertySection(title: "Identity", items: identityItems),
-            ViewScopePropertySection(title: "Layout", items: layoutItems),
-            ViewScopePropertySection(title: "Rendering", items: renderingItems)
+            ViewScopePropertySection(title: text("server.section.identity"), items: identityItems),
+            ViewScopePropertySection(title: text("server.section.layout"), items: layoutItems),
+            ViewScopePropertySection(title: text("server.section.rendering"), items: renderingItems)
         ]
 
         if let control = view as? NSControl {
             sections.append(
                 ViewScopePropertySection(
-                    title: "Control",
+                    title: text("server.section.control"),
                     items: [
-                        ViewScopePropertyItem(title: "Enabled", value: control.isEnabled.viewScopeBoolText),
-                        ViewScopePropertyItem(title: "Value", value: control.viewScopeControlValue)
+                        ViewScopePropertyItem(title: text("server.item.enabled"), value: control.isEnabled.viewScopeBoolText(interfaceLanguage: interfaceLanguage)),
+                        ViewScopePropertyItem(title: text("server.item.value"), value: control.viewScopeControlValue)
                     ]
                 )
             )
@@ -292,7 +298,7 @@ final class ViewScopeSnapshotBuilder {
         var chain: [String] = []
         var cursor: NSView? = view
         while let current = cursor {
-            chain.append(current.viewScopeTitle)
+            chain.append(current.viewScopeTitle(interfaceLanguage: interfaceLanguage))
             cursor = current.superview
         }
         if let title = view.window?.title, !title.isEmpty {
@@ -313,12 +319,12 @@ final class ViewScopeSnapshotBuilder {
             let first = (constraint.firstItem as? NSObject).map { NSStringFromClass(type(of: $0)) } ?? "nil"
             let second = (constraint.secondItem as? NSObject).map { NSStringFromClass(type(of: $0)) } ?? "nil"
             let relation = constraint.relation.viewScopeSymbol
-            let multiplier = String(format: "%.2f", constraint.multiplier)
-            let constant = String(format: "%.2f", constraint.constant)
+            let multiplier = String(format: "%.2f", locale: interfaceLanguage.locale, constraint.multiplier)
+            let constant = String(format: "%.2f", locale: interfaceLanguage.locale, constraint.constant)
             return "\(first).\(constraint.firstAttribute.rawValue) \(relation) \(second).\(constraint.secondAttribute.rawValue) * \(multiplier) + \(constant)"
         }
 
-        return descriptions.isEmpty ? ["No active constraints on the selected node."] : descriptions
+        return descriptions.isEmpty ? [text("server.value.no_active_constraints")] : descriptions
     }
 }
 
@@ -328,23 +334,23 @@ enum ViewScopeInspectableReference {
 }
 
 private extension NSView {
-    var viewScopeTitle: String {
+    func viewScopeTitle(interfaceLanguage: ViewScopeInterfaceLanguage) -> String {
         if let tabView = self as? NSTabView,
            let selectedItem = tabView.selectedTabViewItem,
            !selectedItem.label.isEmpty {
             return selectedItem.label
         }
-        if let outlineView = self as? NSOutlineView {
-            return identifier?.rawValue ?? "OutlineView"
+        if self is NSOutlineView {
+            return identifier?.rawValue ?? interfaceLanguage.text("server.value.outline_view")
         }
-        if let tableView = self as? NSTableView {
-            return identifier?.rawValue ?? "TableView"
+        if self is NSTableView {
+            return identifier?.rawValue ?? interfaceLanguage.text("server.value.table_view")
         }
         if let rowView = self as? NSTableRowView,
            let tableView = rowView.viewScopeEnclosingTableView {
             let row = tableView.row(for: rowView)
             if row >= 0 {
-                return "Row \(row)"
+                return interfaceLanguage.text("server.value.row_format", row)
             }
         }
         if let cellView = self as? NSTableCellView,
@@ -367,24 +373,24 @@ private extension NSView {
         return NSStringFromClass(type(of: self)).components(separatedBy: ".").last ?? NSStringFromClass(type(of: self))
     }
 
-    var viewScopeSubtitle: String? {
+    func viewScopeSubtitle(interfaceLanguage: ViewScopeInterfaceLanguage) -> String? {
         if let outlineView = self as? NSOutlineView {
-            return "\(outlineView.numberOfRows) visible rows"
+            return interfaceLanguage.text("server.subtitle.visible_rows", outlineView.numberOfRows)
         }
         if let tableView = self as? NSTableView {
-            return "\(tableView.numberOfRows) rows • \(tableView.numberOfColumns) cols"
+            return interfaceLanguage.text("server.subtitle.rows_cols", tableView.numberOfRows, tableView.numberOfColumns)
         }
         if let tabView = self as? NSTabView {
-            return "\(tabView.numberOfTabViewItems) tabs"
+            return interfaceLanguage.text("server.subtitle.tabs", tabView.numberOfTabViewItems)
         }
         if let imageView = self as? NSImageView, imageView.image != nil {
-            return "Image"
+            return interfaceLanguage.text("server.value.image")
         }
         if let stack = self as? NSStackView {
-            return "\(stack.arrangedSubviews.count) arranged"
+            return interfaceLanguage.text("server.subtitle.arranged", stack.arrangedSubviews.count)
         }
         if let scroll = self as? NSScrollView, scroll.hasVerticalScroller || scroll.hasHorizontalScroller {
-            return "Scrollable"
+            return interfaceLanguage.text("server.value.scrollable")
         }
         return nil
     }
@@ -439,18 +445,18 @@ private extension NSSize {
         ViewScopeSize(width: Double(width), height: Double(height))
     }
 
-    var viewScopeString: String {
+    func viewScopeString(interfaceLanguage: ViewScopeInterfaceLanguage) -> String {
         let noIntrinsicMetric = CGFloat(-1)
         if width == noIntrinsicMetric || height == noIntrinsicMetric {
-            return "No intrinsic size"
+            return interfaceLanguage.text("server.value.no_intrinsic_size")
         }
         return String(format: "w %.1f h %.1f", width, height)
     }
 }
 
 private extension Bool {
-    var viewScopeBoolText: String {
-        self ? "Yes" : "No"
+    func viewScopeBoolText(interfaceLanguage: ViewScopeInterfaceLanguage) -> String {
+        self ? interfaceLanguage.text("server.value.yes") : interfaceLanguage.text("server.value.no")
     }
 }
 

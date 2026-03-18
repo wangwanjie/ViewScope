@@ -248,12 +248,14 @@ public struct ViewScopeClientHelloPayload: Codable, Sendable, Hashable {
     public var clientName: String
     public var clientVersion: String
     public var protocolVersion: Int
+    public var preferredLanguage: String?
 
-    public init(authToken: String, clientName: String, clientVersion: String, protocolVersion: Int) {
+    public init(authToken: String, clientName: String, clientVersion: String, protocolVersion: Int, preferredLanguage: String? = nil) {
         self.authToken = authToken
         self.clientName = clientName
         self.clientVersion = clientVersion
         self.protocolVersion = protocolVersion
+        self.preferredLanguage = preferredLanguage
     }
 }
 

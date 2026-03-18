@@ -44,6 +44,7 @@ private final class Inspector {
     private var heartbeatTimer: Timer?
     private var announcement: ViewScopeHostAnnouncement?
     private var lastReferenceContext = ViewScopeSnapshotBuilder.ReferenceContext(nodeReferences: [:], rootNodeIDs: [])
+    private var clientInterfaceLanguage = ViewScopeInterfaceLanguage.english
     private var discoveryRequestObserver: NSObjectProtocol?
 
     private init() {}
@@ -108,6 +109,7 @@ private final class Inspector {
         }
         announcement = nil
         lastReferenceContext = .init(nodeReferences: [:], rootNodeIDs: [])
+        clientInterfaceLanguage = .english
     }
 
     private func shouldStartServer(allowInReleaseBuilds: Bool) -> Bool {
@@ -235,6 +237,8 @@ private final class Inspector {
             return
         }
 
+        clientInterfaceLanguage = ViewScopeInterfaceLanguage(identifier: hello.preferredLanguage)
+
         activeConnection?.send(
             ViewScopeMessage(
                 kind: .serverHello,
@@ -249,7 +253,7 @@ private final class Inspector {
 
     private func handleCaptureRequest(_ message: ViewScopeMessage) {
         guard let announcement else { return }
-        let builder = ViewScopeSnapshotBuilder(hostInfo: hostInfo(from: announcement))
+        let builder = ViewScopeSnapshotBuilder(hostInfo: hostInfo(from: announcement), interfaceLanguage: clientInterfaceLanguage)
         let (capture, context) = builder.makeCapture()
         lastReferenceContext = context
         activeConnection?.send(
@@ -260,13 +264,13 @@ private final class Inspector {
     private func handleNodeDetailRequest(_ message: ViewScopeMessage) {
         guard let announcement,
               let request = message.nodeRequest else { return }
-        let builder = ViewScopeSnapshotBuilder(hostInfo: hostInfo(from: announcement))
+        let builder = ViewScopeSnapshotBuilder(hostInfo: hostInfo(from: announcement), interfaceLanguage: clientInterfaceLanguage)
         guard let detail = builder.makeDetail(for: request.nodeID, in: lastReferenceContext) else {
             activeConnection?.send(
                 ViewScopeMessage(
                     kind: .error,
                     requestID: message.requestID,
-                    error: ViewScopeErrorPayload(message: "The selected node is no longer available. Refresh the capture and try again.")
+                    error: ViewScopeErrorPayload(message: clientInterfaceLanguage.text("server.error.selected_node_gone"))
                 )
             )
             return

@@ -84,7 +84,7 @@ final class WorkspaceStore: NSObject {
 
     func connect(using record: RecentHostRecord) async {
         guard let host = discoveredHosts.first(where: { $0.bundleIdentifier == record.bundleIdentifier }) else {
-            connectionState = .failed("The recent host is not currently running.")
+            connectionState = .failed(L10n.recentHostNotRunning)
             return
         }
         await connect(to: host)
@@ -180,7 +180,7 @@ final class WorkspaceStore: NSObject {
                 self.discoveredHosts = announcements
                 if case .connected(let host) = self.connectionState,
                    announcements.contains(where: { $0.identifier == host.identifier }) == false {
-                    self.connectionState = .failed("The connected host disappeared.")
+                    self.connectionState = .failed(L10n.connectedHostDisappeared)
                     self.session = nil
                 }
             }

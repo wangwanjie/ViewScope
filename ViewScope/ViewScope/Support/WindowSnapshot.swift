@@ -9,13 +9,13 @@ enum WindowSnapshotError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingWindow:
-            return "The window is not available for snapshot export."
+            return AppLocalization.backgroundString("snapshot.error.missing_window")
         case .missingSnapshotView:
-            return "The window does not have a snapshot-ready content view."
+            return AppLocalization.backgroundString("snapshot.error.missing_snapshot_view")
         case .bitmapCreationFailed:
-            return "ViewScope could not create a bitmap for the requested snapshot."
+            return AppLocalization.backgroundString("snapshot.error.bitmap_creation_failed")
         case .pngEncodingFailed:
-            return "ViewScope could not encode the snapshot as PNG."
+            return AppLocalization.backgroundString("snapshot.error.png_encoding_failed")
         }
     }
 }

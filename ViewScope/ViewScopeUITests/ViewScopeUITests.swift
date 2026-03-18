@@ -17,6 +17,7 @@ final class ViewScopeUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["VIEWSCOPE_PREVIEW_FIXTURE"] = "1"
         app.launchEnvironment["VIEWSCOPE_DISABLE_UPDATES"] = "1"
+        app.launchEnvironment["VIEWSCOPE_LANGUAGE"] = "en"
         app.launch()
 
         let mainWindow = app.windows.element(boundBy: 0)

@@ -1,9 +1,11 @@
 import AppKit
+import Combine
 
 @MainActor
 final class MainWindowController: NSWindowController {
     private static let autosaveName = NSWindow.FrameAutosaveName("ViewScopeMainWindowFrame")
     let contentController: MainViewController
+    private var cancellables = Set<AnyCancellable>()
 
     init(store: WorkspaceStore) {
         contentController = MainViewController(store: store)
@@ -13,8 +15,8 @@ final class MainWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "ViewScope"
-        window.subtitle = "Native AppKit UI inspection"
+        window.title = L10n.appName
+        window.subtitle = L10n.mainWindowSubtitle
         window.appearance = NSAppearance(named: .aqua)
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
@@ -34,6 +36,7 @@ final class MainWindowController: NSWindowController {
             window.center()
         }
         window.setFrameAutosaveName(Self.autosaveName)
+        bindLocalization()
     }
 
     @available(*, unavailable)
@@ -55,6 +58,16 @@ final class MainWindowController: NSWindowController {
 
     func present(_ sender: Any? = nil) {
         showWindow(sender)
+    }
+
+    private func bindLocalization() {
+        AppLocalization.shared.$language
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.window?.title = L10n.appName
+                self?.window?.subtitle = L10n.mainWindowSubtitle
+            }
+            .store(in: &cancellables)
     }
 
     private func recenterWindowIfNeeded(_ window: NSWindow) {
