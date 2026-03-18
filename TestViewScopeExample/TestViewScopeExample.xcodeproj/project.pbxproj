@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A11E00012F6B1000000C0E71 /* ViewScopeServer in Frameworks */ = {isa = PBXBuildFile; productRef = A11E00032F6B1000000C0E71 /* ViewScopeServer */; };
+		9580FBC52F6A2C23000C0E71 /* ViewScopeServer in Frameworks */ = {isa = PBXBuildFile; productRef = 9580FBC42F6A2C23000C0E71 /* ViewScopeServer */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -56,7 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A11E00012F6B1000000C0E71 /* ViewScopeServer in Frameworks */,
+				9580FBC52F6A2C23000C0E71 /* ViewScopeServer in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -117,7 +117,7 @@
 			);
 			name = TestViewScopeExample;
 			packageProductDependencies = (
-				A11E00032F6B1000000C0E71 /* ViewScopeServer */,
+				9580FBC42F6A2C23000C0E71 /* ViewScopeServer */,
 			);
 			productName = TestViewScopeExample;
 			productReference = 9580FB5E2F6A1930000C0E71 /* TestViewScopeExample.app */;
@@ -202,7 +202,7 @@
 			mainGroup = 9580FB552F6A1930000C0E71;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				A11E00022F6B1000000C0E71 /* XCLocalSwiftPackageReference "../ViewScopeServer" */,
+				9580FBC32F6A2C23000C0E71 /* XCLocalSwiftPackageReference "../ViewScopeServer" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 9580FB5F2F6A1930000C0E71 /* Products */;
@@ -335,7 +335,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 26.2;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
-				ONLY_ACTIVE_ARCH = YES;
+				ONLY_ACTIVE_ARCH = NO;
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -588,16 +588,15 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		A11E00022F6B1000000C0E71 /* XCLocalSwiftPackageReference "../ViewScopeServer" */ = {
+		9580FBC32F6A2C23000C0E71 /* XCLocalSwiftPackageReference "../ViewScopeServer" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../ViewScopeServer;
 		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		A11E00032F6B1000000C0E71 /* ViewScopeServer */ = {
+		9580FBC42F6A2C23000C0E71 /* ViewScopeServer */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = A11E00022F6B1000000C0E71 /* XCLocalSwiftPackageReference "../ViewScopeServer" */;
 			productName = ViewScopeServer;
 		};
 /* End XCSwiftPackageProductDependency section */
