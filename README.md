@@ -70,6 +70,8 @@ xcodebuild \
 .package(url: "https://github.com/wangwanjie/ViewScope.git", from: "1.0.0")
 ```
 
+仓库根目录直接提供 `Package.swift`，Xcode / SwiftPM 可以直接依赖整个仓库 URL，无需指向 `ViewScopeServer/` 子目录。
+
 把 `ViewScopeServer` product 加到 Debug 宿主 target，并在启动阶段调用：
 
 ```swift
