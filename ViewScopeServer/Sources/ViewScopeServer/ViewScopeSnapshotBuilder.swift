@@ -329,6 +329,29 @@ enum ViewScopeInspectableReference {
 
 private extension NSView {
     var viewScopeTitle: String {
+        if let tabView = self as? NSTabView,
+           let selectedItem = tabView.selectedTabViewItem,
+           !selectedItem.label.isEmpty {
+            return selectedItem.label
+        }
+        if let outlineView = self as? NSOutlineView {
+            return identifier?.rawValue ?? "OutlineView"
+        }
+        if let tableView = self as? NSTableView {
+            return identifier?.rawValue ?? "TableView"
+        }
+        if let rowView = self as? NSTableRowView,
+           let tableView = rowView.viewScopeEnclosingTableView {
+            let row = tableView.row(for: rowView)
+            if row >= 0 {
+                return "Row \(row)"
+            }
+        }
+        if let cellView = self as? NSTableCellView,
+           let text = cellView.textField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines),
+           !text.isEmpty {
+            return text
+        }
         if let button = self as? NSButton, !button.title.isEmpty {
             return button.title
         }
@@ -345,6 +368,15 @@ private extension NSView {
     }
 
     var viewScopeSubtitle: String? {
+        if let outlineView = self as? NSOutlineView {
+            return "\(outlineView.numberOfRows) visible rows"
+        }
+        if let tableView = self as? NSTableView {
+            return "\(tableView.numberOfRows) rows • \(tableView.numberOfColumns) cols"
+        }
+        if let tabView = self as? NSTabView {
+            return "\(tabView.numberOfTabViewItems) tabs"
+        }
         if let imageView = self as? NSImageView, imageView.image != nil {
             return "Image"
         }
@@ -359,6 +391,17 @@ private extension NSView {
 
     var viewScopeAddress: String {
         String(describing: Unmanaged.passUnretained(self).toOpaque())
+    }
+
+    var viewScopeEnclosingTableView: NSTableView? {
+        var candidate = superview
+        while let current = candidate {
+            if let tableView = current as? NSTableView {
+                return tableView
+            }
+            candidate = current.superview
+        }
+        return nil
     }
 }
 

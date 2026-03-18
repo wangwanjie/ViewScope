@@ -13,6 +13,8 @@ final class ViewController: NSViewController {
     private let sidebarStack = NSStackView()
     private let detailStack = NSStackView()
     private let tableView = NSTableView()
+    private let pageSelector = NSSegmentedControl(labels: ["Playground", "Data Browser"], trackingMode: .selectOne, target: nil, action: nil)
+    private let pageTabs = NSTabView()
     private let statusField = NSTextField(labelWithString: "Ready for ViewScope inspection")
     private let syncProgress = NSProgressIndicator()
     private var hasConfiguredWindow = false
@@ -186,15 +188,14 @@ final class ViewController: NSViewController {
         heroControls.spacing = 12
         let searchField = identify(NSSearchField(), "hero-search-field")
         searchField.placeholderString = "Search view ids, titles, or classes"
-        let modeSelector = identify(
-            NSSegmentedControl(labels: ["Overview", "Layers", "Metrics"], trackingMode: .selectOne, target: nil, action: nil),
-            "hero-mode-selector"
-        )
-        modeSelector.selectedSegment = 0
+        pageSelector.target = self
+        pageSelector.action = #selector(changePage(_:))
+        pageSelector.selectedSegment = 0
+        identify(pageSelector, "hero-page-selector")
         let refreshButton = identify(NSButton(title: "Refresh Snapshot", target: self, action: #selector(refreshSnapshot(_:))), "refresh-snapshot-button")
         let highlightButton = identify(NSButton(title: "Ping Overlay", target: self, action: #selector(pingOverlay(_:))), "ping-overlay-button")
         heroControls.addArrangedSubview(searchField)
-        heroControls.addArrangedSubview(modeSelector)
+        heroControls.addArrangedSubview(pageSelector)
         heroControls.addArrangedSubview(refreshButton)
         heroControls.addArrangedSubview(highlightButton)
         searchField.widthAnchor.constraint(greaterThanOrEqualToConstant: 280).isActive = true
@@ -212,31 +213,19 @@ final class ViewController: NSViewController {
         metricsRow.addArrangedSubview(MetricCardView(title: "Last Capture", value: "42 ms", accentColor: NSColor(calibratedRed: 0.89, green: 0.53, blue: 0.22, alpha: 1)))
         addDetailView(metricsRow)
 
-        let mainRow = NSStackView()
-        mainRow.orientation = .horizontal
-        mainRow.alignment = .top
-        mainRow.spacing = 16
-        identify(mainRow, "main-row")
-
-        let controlsCard = makeControlsCard()
-        controlsCard.widthAnchor.constraint(equalToConstant: 390).isActive = true
-        let previewCard = makePreviewCard()
-        mainRow.addArrangedSubview(controlsCard)
-        mainRow.addArrangedSubview(previewCard)
-        addDetailView(mainRow)
-
-        let bottomRow = NSStackView()
-        bottomRow.orientation = .horizontal
-        bottomRow.alignment = .top
-        bottomRow.spacing = 16
-        identify(bottomRow, "bottom-row")
-
-        let tableCard = makeTableCard()
-        let activityCard = makeActivityCard()
-        activityCard.widthAnchor.constraint(equalToConstant: 320).isActive = true
-        bottomRow.addArrangedSubview(tableCard)
-        bottomRow.addArrangedSubview(activityCard)
-        addDetailView(bottomRow)
+        pageTabs.tabViewType = .noTabsNoBorder
+        identify(pageTabs, "detail-page-tabs")
+        let overviewItem = NSTabViewItem(identifier: "playground-page")
+        overviewItem.label = "Playground"
+        overviewItem.view = makeOverviewPage()
+        let browserItem = NSTabViewItem(identifier: "browser-page")
+        browserItem.label = "Data Browser"
+        browserItem.view = makeBrowserPage()
+        pageTabs.addTabViewItem(overviewItem)
+        pageTabs.addTabViewItem(browserItem)
+        pageTabs.selectTabViewItem(at: 0)
+        pageTabs.heightAnchor.constraint(equalToConstant: 660).isActive = true
+        addDetailView(pageTabs)
 
         let footerCard = PanelView(
             title: "Sync Status",
@@ -264,6 +253,60 @@ final class ViewController: NSViewController {
         addDetailView(footerCard)
 
         return container
+    }
+
+    private func makeOverviewPage() -> NSView {
+        let container = NSView()
+        identify(container, "playground-page")
+
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 16
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        identify(stack, "playground-page-stack")
+        container.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            stack.topAnchor.constraint(equalTo: container.topAnchor),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor)
+        ])
+
+        let mainRow = NSStackView()
+        mainRow.orientation = .horizontal
+        mainRow.alignment = .top
+        mainRow.spacing = 16
+        identify(mainRow, "main-row")
+
+        let controlsCard = makeControlsCard()
+        controlsCard.widthAnchor.constraint(equalToConstant: 390).isActive = true
+        let previewCard = makePreviewCard()
+        mainRow.addArrangedSubview(controlsCard)
+        mainRow.addArrangedSubview(previewCard)
+        addArranged(mainRow, to: stack)
+
+        let bottomRow = NSStackView()
+        bottomRow.orientation = .horizontal
+        bottomRow.alignment = .top
+        bottomRow.spacing = 16
+        identify(bottomRow, "bottom-row")
+
+        let tableCard = makeTableCard()
+        let activityCard = makeActivityCard()
+        activityCard.widthAnchor.constraint(equalToConstant: 320).isActive = true
+        bottomRow.addArrangedSubview(tableCard)
+        bottomRow.addArrangedSubview(activityCard)
+        addArranged(bottomRow, to: stack)
+
+        return container
+    }
+
+    private func makeBrowserPage() -> NSView {
+        let browserPage = ComplexBrowserPageView()
+        identify(browserPage, "browser-page-view")
+        return browserPage
     }
 
     private func makeControlsCard() -> PanelView {
@@ -517,6 +560,14 @@ final class ViewController: NSViewController {
         syncProgress.doubleValue = min(syncProgress.doubleValue + 9, syncProgress.maxValue)
     }
 
+    @objc private func changePage(_ sender: Any?) {
+        let selectedIndex = max(pageSelector.selectedSegment, 0)
+        pageTabs.selectTabViewItem(at: selectedIndex)
+        statusField.stringValue = selectedIndex == 0
+            ? "Switched to the Playground page"
+            : "Switched to the Data Browser page"
+    }
+
     @objc private func pingOverlay(_ sender: Any?) {
         statusField.stringValue = "Overlay ping sent at \(Self.timeFormatter.string(from: Date()))"
     }
@@ -539,6 +590,12 @@ final class ViewController: NSViewController {
         child.translatesAutoresizingMaskIntoConstraints = false
         child.widthAnchor.constraint(equalTo: detailStack.widthAnchor).isActive = true
         detailStack.addArrangedSubview(child)
+    }
+
+    private func addArranged(_ child: NSView, to stackView: NSStackView) {
+        child.translatesAutoresizingMaskIntoConstraints = false
+        child.widthAnchor.constraint(equalTo: stackView.widthAnchor).isActive = true
+        stackView.addArrangedSubview(child)
     }
 
     private func makeSidebarCard(title: String, subtitle: String) -> PanelView {
