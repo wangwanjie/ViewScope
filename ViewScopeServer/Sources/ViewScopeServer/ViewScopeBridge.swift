@@ -6,6 +6,7 @@ public let viewScopeDiscoveryRequestNotification = Notification.Name("cn.vanjay.
 public let viewScopeCurrentProtocolVersion = 1
 public let viewScopeServerRuntimeVersion = "1.0.0"
 
+/// Advertises a locally running debug host that can be inspected by the ViewScope app.
 public struct ViewScopeHostAnnouncement: Codable, Sendable, Hashable {
     public var identifier: String
     public var authToken: String
@@ -117,6 +118,8 @@ public struct ViewScopeHierarchyNode: Codable, Sendable, Hashable, Identifiable 
     public var className: String
     public var title: String
     public var subtitle: String?
+    public var identifier: String?
+    public var address: String?
     public var frame: ViewScopeRect
     public var bounds: ViewScopeRect
     public var childIDs: [String]
@@ -134,6 +137,8 @@ public struct ViewScopeHierarchyNode: Codable, Sendable, Hashable, Identifiable 
         className: String,
         title: String,
         subtitle: String?,
+        identifier: String? = nil,
+        address: String? = nil,
         frame: ViewScopeRect,
         bounds: ViewScopeRect,
         childIDs: [String],
@@ -150,6 +155,8 @@ public struct ViewScopeHierarchyNode: Codable, Sendable, Hashable, Identifiable 
         self.className = className
         self.title = title
         self.subtitle = subtitle
+        self.identifier = identifier
+        self.address = address
         self.frame = frame
         self.bounds = bounds
         self.childIDs = childIDs
@@ -176,6 +183,7 @@ public struct ViewScopeCaptureSummary: Codable, Sendable, Hashable {
     }
 }
 
+/// Contains a full hierarchy snapshot for the current host capture.
 public struct ViewScopeCapturePayload: Codable, Sendable, Hashable {
     public var host: ViewScopeHostInfo
     public var capturedAt: Date
@@ -192,13 +200,57 @@ public struct ViewScopeCapturePayload: Codable, Sendable, Hashable {
     }
 }
 
+/// Describes which editor the client should use for a live-editable property.
+public enum ViewScopeEditableValueKind: String, Codable, Sendable {
+    case toggle
+    case number
+    case text
+}
+
+/// Describes a property that can be edited live from the inspector.
+public struct ViewScopeEditableProperty: Codable, Sendable, Hashable {
+    public var key: String
+    public var kind: ViewScopeEditableValueKind
+    public var boolValue: Bool?
+    public var numberValue: Double?
+    public var textValue: String?
+
+    public init(
+        key: String,
+        kind: ViewScopeEditableValueKind,
+        boolValue: Bool? = nil,
+        numberValue: Double? = nil,
+        textValue: String? = nil
+    ) {
+        self.key = key
+        self.kind = kind
+        self.boolValue = boolValue
+        self.numberValue = numberValue
+        self.textValue = textValue
+    }
+
+    public static func toggle(key: String, value: Bool) -> ViewScopeEditableProperty {
+        ViewScopeEditableProperty(key: key, kind: .toggle, boolValue: value)
+    }
+
+    public static func number(key: String, value: Double) -> ViewScopeEditableProperty {
+        ViewScopeEditableProperty(key: key, kind: .number, numberValue: value)
+    }
+
+    public static func text(key: String, value: String) -> ViewScopeEditableProperty {
+        ViewScopeEditableProperty(key: key, kind: .text, textValue: value)
+    }
+}
+
 public struct ViewScopePropertyItem: Codable, Sendable, Hashable {
     public var title: String
     public var value: String
+    public var editable: ViewScopeEditableProperty?
 
-    public init(title: String, value: String) {
+    public init(title: String, value: String, editable: ViewScopeEditableProperty? = nil) {
         self.title = title
         self.value = value
+        self.editable = editable
     }
 }
 
@@ -212,6 +264,7 @@ public struct ViewScopePropertySection: Codable, Sendable, Hashable {
     }
 }
 
+/// Contains the inspector data and preview image for a selected hierarchy node.
 public struct ViewScopeNodeDetailPayload: Codable, Sendable, Hashable {
     public var nodeID: String
     public var host: ViewScopeHostInfo
@@ -287,6 +340,17 @@ public struct ViewScopeHighlightRequestPayload: Codable, Sendable, Hashable {
     }
 }
 
+/// Carries a single live-edit mutation request from the client to the host.
+public struct ViewScopeMutationRequestPayload: Codable, Sendable, Hashable {
+    public var nodeID: String
+    public var property: ViewScopeEditableProperty
+
+    public init(nodeID: String, property: ViewScopeEditableProperty) {
+        self.nodeID = nodeID
+        self.property = property
+    }
+}
+
 public struct ViewScopeErrorPayload: Codable, Sendable, Hashable {
     public var message: String
 
@@ -299,6 +363,7 @@ public struct ViewScopeAckPayload: Codable, Sendable, Hashable {
     public init() {}
 }
 
+/// Wraps every protocol message exchanged between the ViewScope client and host.
 public struct ViewScopeMessage: Codable, Sendable, Hashable {
     public enum Kind: String, Codable, Sendable {
         case clientHello
@@ -308,6 +373,7 @@ public struct ViewScopeMessage: Codable, Sendable, Hashable {
         case nodeDetailRequest
         case nodeDetailResponse
         case highlightRequest
+        case mutationRequest
         case ack
         case error
     }
@@ -320,6 +386,7 @@ public struct ViewScopeMessage: Codable, Sendable, Hashable {
     public var nodeDetail: ViewScopeNodeDetailPayload?
     public var nodeRequest: ViewScopeNodeRequestPayload?
     public var highlightRequest: ViewScopeHighlightRequestPayload?
+    public var mutationRequest: ViewScopeMutationRequestPayload?
     public var ack: ViewScopeAckPayload?
     public var error: ViewScopeErrorPayload?
 
@@ -332,6 +399,7 @@ public struct ViewScopeMessage: Codable, Sendable, Hashable {
         nodeDetail: ViewScopeNodeDetailPayload? = nil,
         nodeRequest: ViewScopeNodeRequestPayload? = nil,
         highlightRequest: ViewScopeHighlightRequestPayload? = nil,
+        mutationRequest: ViewScopeMutationRequestPayload? = nil,
         ack: ViewScopeAckPayload? = nil,
         error: ViewScopeErrorPayload? = nil
     ) {
@@ -343,6 +411,7 @@ public struct ViewScopeMessage: Codable, Sendable, Hashable {
         self.nodeDetail = nodeDetail
         self.nodeRequest = nodeRequest
         self.highlightRequest = highlightRequest
+        self.mutationRequest = mutationRequest
         self.ack = ack
         self.error = error
     }

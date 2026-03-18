@@ -27,6 +27,30 @@ final class ViewScopeServerTests: XCTestCase {
         XCTAssertEqual(decoded.clientHello?.authToken, "token")
     }
 
+    func testMutationMessageRoundTrip() throws {
+        let message = ViewScopeMessage(
+            kind: .mutationRequest,
+            requestID: "mutation",
+            mutationRequest: ViewScopeMutationRequestPayload(
+                nodeID: "node-1",
+                property: .number(key: "frame.x", value: 42)
+            )
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let data = try encoder.encode(message)
+        let decoded = try decoder.decode(ViewScopeMessage.self, from: data)
+
+        XCTAssertEqual(decoded.kind, .mutationRequest)
+        XCTAssertEqual(decoded.mutationRequest?.nodeID, "node-1")
+        XCTAssertEqual(decoded.mutationRequest?.property.key, "frame.x")
+        XCTAssertEqual(decoded.mutationRequest?.property.numberValue, 42)
+    }
+
     @MainActor
     func testSnapshotBuilderCollectsSubviews() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
@@ -149,6 +173,54 @@ final class ViewScopeServerTests: XCTestCase {
         let expectedY = Double(root.bounds.height - child.frame.maxY)
 
         XCTAssertEqual(detail.highlightedRect, ViewScopeRect(x: 12, y: expectedY, width: 60, height: 24))
+    }
+
+    @MainActor
+    func testDetailSanitizesMultilineTitlesAndExposesEditableItems() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 280, height: 180), styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "Editable Fixture"
+        defer {
+            window.orderOut(nil)
+            window.close()
+        }
+
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 240, height: 140))
+        let label = NSTextField(labelWithString: "First\nSecond")
+        label.frame = NSRect(x: 20, y: 30, width: 120, height: 22)
+        root.addSubview(label)
+        window.contentView = root
+        window.orderFrontRegardless()
+
+        let builder = ViewScopeSnapshotBuilder(
+            hostInfo: ViewScopeHostInfo(
+                displayName: "Fixture",
+                bundleIdentifier: "fixture.tests",
+                version: "1.0",
+                build: "1",
+                processIdentifier: 1,
+                runtimeVersion: viewScopeServerRuntimeVersion,
+                supportsHighlighting: true
+            )
+        )
+
+        let (capture, context) = builder.makeCapture()
+        guard let node = capture.nodes.values.first(where: { $0.className.contains("NSTextField") }) else {
+            return XCTFail("Expected an NSTextField node")
+        }
+        XCTAssertEqual(node.title, "First Second")
+
+        guard let detail = builder.makeDetail(for: node.id, in: context) else {
+            return XCTFail("Expected detail payload")
+        }
+
+        let editableKeys = detail.sections
+            .flatMap(\.items)
+            .compactMap { $0.editable?.key }
+
+        XCTAssertTrue(editableKeys.contains("hidden"))
+        XCTAssertTrue(editableKeys.contains("alpha"))
+        XCTAssertTrue(editableKeys.contains("frame.x"))
+        XCTAssertTrue(editableKeys.contains("frame.width"))
     }
 }
 

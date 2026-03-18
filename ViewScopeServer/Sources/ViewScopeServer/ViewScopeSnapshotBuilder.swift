@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 
 @MainActor
+/// Builds hierarchy captures, detail payloads, and live object references for an inspected host.
 final class ViewScopeSnapshotBuilder {
     struct ReferenceContext {
         var nodeReferences: [String: ViewScopeInspectableReference]
@@ -45,8 +46,9 @@ final class ViewScopeSnapshotBuilder {
                 parentID: nil,
                 kind: .window,
                 className: NSStringFromClass(type(of: window)),
-                title: window.title.isEmpty ? interfaceLanguage.text("server.value.window_fallback") : window.title,
+                title: sanitizedDisplayText(window.title) ?? interfaceLanguage.text("server.value.window_fallback"),
                 subtitle: "#\(window.windowNumber)",
+                address: window.viewScopeAddress,
                 frame: contentBounds.viewScopeRect,
                 bounds: contentBounds.viewScopeRect,
                 childIDs: [],
@@ -141,13 +143,18 @@ final class ViewScopeSnapshotBuilder {
 
         for (index, child) in view.subviews.enumerated() {
             let nodeID = "\(prefix)-\(index)"
+            let title = sanitizedDisplayText(child.viewScopeTitle(interfaceLanguage: interfaceLanguage))
+                ?? NSStringFromClass(type(of: child)).components(separatedBy: ".").last
+                ?? NSStringFromClass(type(of: child))
             nodes[nodeID] = ViewScopeHierarchyNode(
                 id: nodeID,
                 parentID: parentID,
                 kind: .view,
                 className: NSStringFromClass(type(of: child)),
-                title: child.viewScopeTitle(interfaceLanguage: interfaceLanguage),
-                subtitle: child.viewScopeSubtitle(interfaceLanguage: interfaceLanguage),
+                title: title,
+                subtitle: sanitizedDisplayText(child.viewScopeSubtitle(interfaceLanguage: interfaceLanguage)),
+                identifier: sanitizedDisplayText(child.identifier?.rawValue),
+                address: child.viewScopeAddress,
                 frame: child.frame.viewScopeRect,
                 bounds: child.bounds.viewScopeRect,
                 childIDs: [],
@@ -212,13 +219,52 @@ final class ViewScopeSnapshotBuilder {
         interfaceLanguage.text(key, arguments: arguments)
     }
 
+    private func sanitizedDisplayText(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let sanitized = value.viewScopeSanitizedSingleLine
+        return sanitized.isEmpty ? nil : sanitized
+    }
+
+    private func formattedNumber(_ value: Double, decimals: Int) -> String {
+        let format = "%.\(decimals)f"
+        return String(format: format, locale: interfaceLanguage.locale, value)
+    }
+
+    private func editableToggleItem(title: String, key: String, value: Bool) -> ViewScopePropertyItem {
+        ViewScopePropertyItem(
+            title: title,
+            value: value.viewScopeBoolText(interfaceLanguage: interfaceLanguage),
+            editable: .toggle(key: key, value: value)
+        )
+    }
+
+    private func editableNumberItem(title: String, key: String, value: Double, decimals: Int) -> ViewScopePropertyItem {
+        ViewScopePropertyItem(
+            title: title,
+            value: formattedNumber(value, decimals: decimals),
+            editable: .number(key: key, value: value)
+        )
+    }
+
+    private func editableTextItem(title: String, key: String, value: String) -> ViewScopePropertyItem {
+        ViewScopePropertyItem(
+            title: title,
+            value: value,
+            editable: .text(key: key, value: value)
+        )
+    }
+
     private func windowSections(for window: NSWindow) -> [ViewScopePropertySection] {
         [
             ViewScopePropertySection(
                 title: text("server.section.identity"),
                 items: [
                     ViewScopePropertyItem(title: text("server.item.class"), value: NSStringFromClass(type(of: window))),
-                    ViewScopePropertyItem(title: text("server.item.title"), value: window.title),
+                    editableTextItem(
+                        title: text("server.item.title"),
+                        key: "title",
+                        value: sanitizedDisplayText(window.title) ?? ""
+                    ),
                     ViewScopePropertyItem(title: text("server.item.window_number"), value: String(window.windowNumber)),
                     ViewScopePropertyItem(title: text("server.item.address"), value: window.viewScopeAddress)
                 ]
@@ -229,13 +275,18 @@ final class ViewScopeSnapshotBuilder {
                     ViewScopePropertyItem(title: text("server.item.visible"), value: window.isVisible.viewScopeBoolText(interfaceLanguage: interfaceLanguage)),
                     ViewScopePropertyItem(title: text("server.item.key"), value: window.isKeyWindow.viewScopeBoolText(interfaceLanguage: interfaceLanguage)),
                     ViewScopePropertyItem(title: text("server.item.main"), value: window.isMainWindow.viewScopeBoolText(interfaceLanguage: interfaceLanguage)),
-                    ViewScopePropertyItem(title: text("server.item.level"), value: String(window.level.rawValue))
+                    ViewScopePropertyItem(title: text("server.item.level"), value: String(window.level.rawValue)),
+                    editableNumberItem(title: text("server.item.alpha"), key: "alpha", value: Double(window.alphaValue), decimals: 2)
                 ]
             ),
             ViewScopePropertySection(
                 title: text("server.section.geometry"),
                 items: [
                     ViewScopePropertyItem(title: text("server.item.frame"), value: window.frame.viewScopeString),
+                    editableNumberItem(title: text("server.item.x"), key: "frame.x", value: Double(window.frame.origin.x), decimals: 1),
+                    editableNumberItem(title: text("server.item.y"), key: "frame.y", value: Double(window.frame.origin.y), decimals: 1),
+                    editableNumberItem(title: text("server.item.width"), key: "frame.width", value: Double(window.frame.width), decimals: 1),
+                    editableNumberItem(title: text("server.item.height"), key: "frame.height", value: Double(window.frame.height), decimals: 1),
                     ViewScopePropertyItem(title: text("server.item.content_layout"), value: window.contentLayoutRect.viewScopeString)
                 ]
             )
@@ -247,6 +298,9 @@ final class ViewScopeSnapshotBuilder {
             ViewScopePropertyItem(title: text("server.item.class"), value: NSStringFromClass(type(of: view))),
             ViewScopePropertyItem(title: text("server.item.address"), value: view.viewScopeAddress)
         ]
+        if let title = sanitizedDisplayText(view.viewScopeTitle(interfaceLanguage: interfaceLanguage)) {
+            identityItems.append(ViewScopePropertyItem(title: text("server.item.title"), value: title))
+        }
         if let identifier = view.identifier?.rawValue, !identifier.isEmpty {
             identityItems.append(ViewScopePropertyItem(title: text("server.item.identifier"), value: identifier))
         }
@@ -256,6 +310,10 @@ final class ViewScopeSnapshotBuilder {
 
         let layoutItems = [
             ViewScopePropertyItem(title: text("server.item.frame"), value: view.frame.viewScopeString),
+            editableNumberItem(title: text("server.item.x"), key: "frame.x", value: Double(view.frame.origin.x), decimals: 1),
+            editableNumberItem(title: text("server.item.y"), key: "frame.y", value: Double(view.frame.origin.y), decimals: 1),
+            editableNumberItem(title: text("server.item.width"), key: "frame.width", value: Double(view.frame.width), decimals: 1),
+            editableNumberItem(title: text("server.item.height"), key: "frame.height", value: Double(view.frame.height), decimals: 1),
             ViewScopePropertyItem(title: text("server.item.bounds"), value: view.bounds.viewScopeString),
             ViewScopePropertyItem(title: text("server.item.intrinsic_size"), value: view.intrinsicContentSize.viewScopeString(interfaceLanguage: interfaceLanguage)),
             ViewScopePropertyItem(title: text("server.item.translates_mask"), value: view.translatesAutoresizingMaskIntoConstraints.viewScopeBoolText(interfaceLanguage: interfaceLanguage)),
@@ -278,8 +336,8 @@ final class ViewScopeSnapshotBuilder {
         ]
 
         var renderingItems = [
-            ViewScopePropertyItem(title: text("server.item.hidden"), value: view.isHidden.viewScopeBoolText(interfaceLanguage: interfaceLanguage)),
-            ViewScopePropertyItem(title: text("server.item.alpha"), value: String(format: "%.2f", locale: interfaceLanguage.locale, view.alphaValue)),
+            editableToggleItem(title: text("server.item.hidden"), key: "hidden", value: view.isHidden),
+            editableNumberItem(title: text("server.item.alpha"), key: "alpha", value: Double(view.alphaValue), decimals: 2),
             ViewScopePropertyItem(title: text("server.item.layer_backed"), value: view.wantsLayer.viewScopeBoolText(interfaceLanguage: interfaceLanguage)),
             ViewScopePropertyItem(title: text("server.item.flipped"), value: view.isFlipped.viewScopeBoolText(interfaceLanguage: interfaceLanguage)),
             ViewScopePropertyItem(title: text("server.item.subviews"), value: String(view.subviews.count))
@@ -295,12 +353,18 @@ final class ViewScopeSnapshotBuilder {
         ]
 
         if let control = view as? NSControl {
+            let editableControlValue: ViewScopeEditableProperty? = {
+                if control is NSButton || control is NSTextField || control is NSSegmentedControl {
+                    return .text(key: "control.value", value: control.viewScopeControlValue)
+                }
+                return .text(key: "control.value", value: control.stringValue)
+            }()
             sections.append(
                 ViewScopePropertySection(
                     title: text("server.section.control"),
                     items: [
                         ViewScopePropertyItem(title: text("server.item.enabled"), value: control.isEnabled.viewScopeBoolText(interfaceLanguage: interfaceLanguage)),
-                        ViewScopePropertyItem(title: text("server.item.value"), value: control.viewScopeControlValue)
+                        ViewScopePropertyItem(title: text("server.item.value"), value: control.viewScopeControlValue, editable: editableControlValue)
                     ]
                 )
             )
@@ -316,7 +380,7 @@ final class ViewScopeSnapshotBuilder {
             chain.append(current.viewScopeTitle(interfaceLanguage: interfaceLanguage))
             cursor = current.superview
         }
-        if let title = view.window?.title, !title.isEmpty {
+        if let title = sanitizedDisplayText(view.window?.title), !title.isEmpty {
             chain.append(title)
         }
         return chain.reversed()
@@ -353,7 +417,7 @@ private extension NSView {
         if let tabView = self as? NSTabView,
            let selectedItem = tabView.selectedTabViewItem,
            !selectedItem.label.isEmpty {
-            return selectedItem.label
+            return selectedItem.label.viewScopeSanitizedSingleLine
         }
         if self is NSOutlineView {
             return identifier?.rawValue ?? interfaceLanguage.text("server.value.outline_view")
@@ -371,19 +435,20 @@ private extension NSView {
         if let cellView = self as? NSTableCellView,
            let text = cellView.textField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines),
            !text.isEmpty {
-            return text
+            return text.viewScopeSanitizedSingleLine
         }
         if let button = self as? NSButton, !button.title.isEmpty {
-            return button.title
+            return button.title.viewScopeSanitizedSingleLine
         }
         if let textField = self as? NSTextField, !textField.stringValue.isEmpty {
-            return textField.stringValue
+            return textField.stringValue.viewScopeSanitizedSingleLine
         }
         if let segmented = self as? NSSegmentedControl, segmented.segmentCount > 0 {
-            return segmented.label(forSegment: max(segmented.selectedSegment, 0)) ?? NSStringFromClass(type(of: self))
+            return segmented.label(forSegment: max(segmented.selectedSegment, 0))?.viewScopeSanitizedSingleLine
+                ?? NSStringFromClass(type(of: self))
         }
         if let identifier = identifier?.rawValue, !identifier.isEmpty {
-            return identifier
+            return identifier.viewScopeSanitizedSingleLine
         }
         return NSStringFromClass(type(of: self)).components(separatedBy: ".").last ?? NSStringFromClass(type(of: self))
     }
@@ -497,5 +562,11 @@ private extension CGColor {
         }
         let values = components.map { String(format: "%.2f", $0) }.joined(separator: ", ")
         return "[\(values)]"
+    }
+}
+
+private extension String {
+    var viewScopeSanitizedSingleLine: String {
+        split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 }

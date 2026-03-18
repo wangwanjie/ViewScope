@@ -1,10 +1,12 @@
 import AppKit
 
 @MainActor
+/// Presents the transient highlight overlay on top of the inspected host window.
 final class ViewScopeOverlayController {
     private let window: NSWindow
     private let highlightView = ViewScopeHighlightView(frame: .zero)
     private var hideWorkItem: DispatchWorkItem?
+    private weak var attachedHostWindow: NSWindow?
 
     init() {
         let panel = NSPanel(
@@ -14,12 +16,12 @@ final class ViewScopeOverlayController {
             defer: false
         )
         panel.isReleasedWhenClosed = false
-        panel.level = .statusBar
+        panel.level = .floating
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = false
         panel.ignoresMouseEvents = true
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.collectionBehavior = [.fullScreenAuxiliary]
         panel.contentView = highlightView
         panel.orderOut(nil)
         window = panel
@@ -27,14 +29,18 @@ final class ViewScopeOverlayController {
 
     func show(highlight rect: NSRect, in hostWindow: NSWindow, duration: TimeInterval) {
         hideWorkItem?.cancel()
+        attach(to: hostWindow)
 
         let windowFrame = hostWindow.convertToScreen(rect)
         window.setFrame(windowFrame.insetBy(dx: -6, dy: -6), display: true)
-        highlightView.highlightRect = NSRect(origin: NSPoint(x: 6, y: 6), size: windowFrame.size)
-        window.orderFrontRegardless()
+        highlightView.highlightRect = NSRect(
+            origin: NSPoint(x: 6, y: 6),
+            size: NSSize(width: max(window.frame.width - 12, 0), height: max(window.frame.height - 12, 0))
+        )
+        window.orderFront(nil)
 
         let workItem = DispatchWorkItem { [weak self] in
-            self?.window.orderOut(nil)
+            self?.hide()
         }
         hideWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + max(duration, 0.25), execute: workItem)
@@ -43,7 +49,22 @@ final class ViewScopeOverlayController {
     func hide() {
         hideWorkItem?.cancel()
         hideWorkItem = nil
+        detach()
         window.orderOut(nil)
+    }
+
+    private func attach(to hostWindow: NSWindow) {
+        guard attachedHostWindow !== hostWindow else { return }
+        detach()
+        hostWindow.addChildWindow(window, ordered: .above)
+        attachedHostWindow = hostWindow
+    }
+
+    private func detach() {
+        if let parent = window.parent {
+            parent.removeChildWindow(window)
+        }
+        attachedHostWindow = nil
     }
 }
 

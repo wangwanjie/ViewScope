@@ -3,6 +3,7 @@ import Foundation
 import Network
 import Security
 
+/// Starts and stops the embedded inspection server inside a debug host app.
 public enum ViewScopeInspector {
     @MainActor
     public static func start(configuration: Configuration = .init()) {
@@ -35,6 +36,7 @@ public enum ViewScopeInspector {
 }
 
 @MainActor
+/// Manages the listener, active connection, discovery announcements, and live mutations.
 private final class Inspector {
     static let shared = Inspector()
 
@@ -237,6 +239,8 @@ private final class Inspector {
             handleNodeDetailRequest(message)
         case .highlightRequest:
             handleHighlightRequest(message)
+        case .mutationRequest:
+            handleMutationRequest(message)
         default:
             break
         }
@@ -328,6 +332,203 @@ private final class Inspector {
         activeConnection?.send(ViewScopeMessage(kind: .ack, requestID: message.requestID, ack: ViewScopeAckPayload()))
     }
 
+    private func handleMutationRequest(_ message: ViewScopeMessage) {
+        guard let request = message.mutationRequest,
+              let reference = lastReferenceContext.nodeReferences[request.nodeID] else {
+            activeConnection?.send(
+                ViewScopeMessage(
+                    kind: .error,
+                    requestID: message.requestID,
+                    error: ViewScopeErrorPayload(message: clientInterfaceLanguage.text("server.error.selected_node_gone"))
+                )
+            )
+            return
+        }
+
+        do {
+            try applyMutation(request.property, to: reference)
+            activeConnection?.send(
+                ViewScopeMessage(kind: .ack, requestID: message.requestID, ack: ViewScopeAckPayload())
+            )
+        } catch let error as MutationError {
+            activeConnection?.send(
+                ViewScopeMessage(
+                    kind: .error,
+                    requestID: message.requestID,
+                    error: ViewScopeErrorPayload(message: error.message(in: clientInterfaceLanguage))
+                )
+            )
+        } catch {
+            activeConnection?.send(
+                ViewScopeMessage(
+                    kind: .error,
+                    requestID: message.requestID,
+                    error: ViewScopeErrorPayload(message: error.localizedDescription)
+                )
+            )
+        }
+    }
+
+    private func applyMutation(_ property: ViewScopeEditableProperty, to reference: ViewScopeInspectableReference) throws {
+        switch reference {
+        case .window(let window):
+            try applyMutation(property, to: window)
+        case .view(let view):
+            try applyMutation(property, to: view)
+        }
+    }
+
+    private func applyMutation(_ property: ViewScopeEditableProperty, to window: NSWindow) throws {
+        switch property.key {
+        case "title":
+            guard let value = property.textValue else {
+                throw MutationError.invalidValue
+            }
+            window.title = value
+        case "alpha":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            window.alphaValue = CGFloat(max(0, min(1, value)))
+        case "frame.x":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateWindowFrame(window, x: value)
+        case "frame.y":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateWindowFrame(window, y: value)
+        case "frame.width":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateWindowFrame(window, width: value)
+        case "frame.height":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateWindowFrame(window, height: value)
+        default:
+            throw MutationError.unsupportedProperty
+        }
+    }
+
+    private func applyMutation(_ property: ViewScopeEditableProperty, to view: NSView) throws {
+        switch property.key {
+        case "hidden":
+            guard let value = property.boolValue else {
+                throw MutationError.invalidValue
+            }
+            view.isHidden = value
+        case "alpha":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            view.alphaValue = CGFloat(max(0, min(1, value)))
+        case "frame.x":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateViewFrame(view, x: value)
+        case "frame.y":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateViewFrame(view, y: value)
+        case "frame.width":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateViewFrame(view, width: value)
+        case "frame.height":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateViewFrame(view, height: value)
+        case "control.value":
+            guard let value = property.textValue else {
+                throw MutationError.invalidValue
+            }
+            try applyControlValue(value, to: view)
+        default:
+            throw MutationError.unsupportedProperty
+        }
+    }
+
+    private func mutateWindowFrame(
+        _ window: NSWindow,
+        x: Double? = nil,
+        y: Double? = nil,
+        width: Double? = nil,
+        height: Double? = nil
+    ) throws {
+        var frame = window.frame
+        if let x {
+            frame.origin.x = CGFloat(x)
+        }
+        if let y {
+            frame.origin.y = CGFloat(y)
+        }
+        if let width {
+            frame.size.width = CGFloat(max(0, width))
+        }
+        if let height {
+            frame.size.height = CGFloat(max(0, height))
+        }
+        guard frame.width >= 0, frame.height >= 0 else {
+            throw MutationError.invalidValue
+        }
+        window.setFrame(frame, display: true)
+    }
+
+    private func mutateViewFrame(
+        _ view: NSView,
+        x: Double? = nil,
+        y: Double? = nil,
+        width: Double? = nil,
+        height: Double? = nil
+    ) throws {
+        var frame = view.frame
+        if let x {
+            frame.origin.x = CGFloat(x)
+        }
+        if let y {
+            frame.origin.y = CGFloat(y)
+        }
+        if let width {
+            frame.size.width = CGFloat(max(0, width))
+        }
+        if let height {
+            frame.size.height = CGFloat(max(0, height))
+        }
+        guard frame.width >= 0, frame.height >= 0 else {
+            throw MutationError.invalidValue
+        }
+        view.frame = frame
+        view.needsLayout = true
+        view.layoutSubtreeIfNeeded()
+        view.superview?.needsLayout = true
+        view.superview?.layoutSubtreeIfNeeded()
+    }
+
+    private func applyControlValue(_ value: String, to view: NSView) throws {
+        if let button = view as? NSButton {
+            button.title = value
+            return
+        }
+        if let textField = view as? NSTextField {
+            textField.stringValue = value
+            return
+        }
+        if let control = view as? NSControl {
+            control.stringValue = value
+            return
+        }
+        throw MutationError.unsupportedProperty
+    }
+
     private func hostInfo(from announcement: ViewScopeHostAnnouncement) -> ViewScopeHostInfo {
         ViewScopeHostInfo(
             displayName: announcement.displayName,
@@ -338,6 +539,20 @@ private final class Inspector {
             runtimeVersion: announcement.runtimeVersion,
             supportsHighlighting: announcement.supportsHighlighting
         )
+    }
+}
+
+private enum MutationError: Error {
+    case unsupportedProperty
+    case invalidValue
+
+    func message(in language: ViewScopeInterfaceLanguage) -> String {
+        switch self {
+        case .unsupportedProperty:
+            return language.text("server.error.unsupported_mutation")
+        case .invalidValue:
+            return language.text("server.error.invalid_mutation_value")
+        }
     }
 }
 
