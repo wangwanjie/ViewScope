@@ -30,6 +30,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 ```
 
+If your macOS debug host enables `App Sandbox`, turn `ENABLE_APP_SANDBOX` off for the Debug configuration first. `ViewScope 1.0` discovers hosts through `DistributedNotificationCenter`, and the default macOS app sandbox does not allow a regular app to publish those discovery notifications, so the host never appears in `Live Hosts`.
+
 ### CocoaPods
 
 ```ruby
@@ -51,5 +53,5 @@ carthage update --use-xcframeworks --platform macOS
 ## Notes
 
 - keep `ViewScopeServer` in debug-style configurations only
-- sandboxed hosts should enable loopback client/server networking in debug if needed
+- sandboxed hosts should disable `App Sandbox` for their Debug configuration in `ViewScope 1.0`
 - all capture data stays on the local machine and the server requires a short-lived auth token

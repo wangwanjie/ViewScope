@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Network
+import Security
 
 public enum ViewScopeInspector {
     @MainActor
@@ -53,6 +54,10 @@ private final class Inspector {
         guard shouldStartServer(allowInReleaseBuilds: configuration.allowInReleaseBuilds) else { return }
         guard listener == nil else { return }
         self.configuration = configuration
+
+        if isSandboxedHost() {
+            NSLog("ViewScopeServer warning: this host is sandboxed. ViewScope 1.0 discovery uses DistributedNotificationCenter only, so disable App Sandbox for the Debug configuration if you want it to appear in Live Hosts.")
+        }
 
         do {
             let parameters = NWParameters.tcp
@@ -118,6 +123,23 @@ private final class Inspector {
         #else
         return allowInReleaseBuilds || ProcessInfo.processInfo.environment["VIEWSCOPE_SERVER_ENABLE_IN_RELEASE"] == "1"
         #endif
+    }
+
+    private func isSandboxedHost() -> Bool {
+        guard let task = SecTaskCreateFromSelf(nil),
+              let rawValue = SecTaskCopyValueForEntitlement(task, "com.apple.security.app-sandbox" as CFString, nil) else {
+            return false
+        }
+
+        if let value = rawValue as? Bool {
+            return value
+        }
+
+        if let value = rawValue as? NSNumber {
+            return value.boolValue
+        }
+
+        return false
     }
 
     private func handle(listenerState state: NWListener.State, listener: NWListener) {

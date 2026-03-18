@@ -79,6 +79,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 ```
 
+如果你的 macOS Debug 宿主启用了 `App Sandbox`，请先把 Debug 配置里的 `ENABLE_APP_SANDBOX` 关掉。`ViewScope 1.0` 的发现层只用了 `DistributedNotificationCenter`，而系统默认的 app sandbox 不允许普通应用发送这类 discovery 广播，所以客户端会一直看不到 `Live Hosts`。
+
 ### CocoaPods
 
 ```ruby
@@ -121,6 +123,7 @@ ViewScope 会常驻一个 `VS` 状态栏入口：
 - 发现和采集数据默认只在本机传输，不依赖远端服务
 - 宿主监听地址固定在 `127.0.0.1`，并使用一次性 token 完成握手
 - 默认只建议在 Debug 构建里启用 `ViewScopeServer`
+- 对于 sandboxed 的 macOS 宿主，建议专门准备一个关闭 `App Sandbox` 的 Debug 配置
 - 捕获历史限制为最近 250 条，避免数据库持续膨胀
 
 ## 发布

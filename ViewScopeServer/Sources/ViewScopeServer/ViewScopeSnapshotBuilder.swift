@@ -38,7 +38,8 @@ final class ViewScopeSnapshotBuilder {
 
         for (index, window) in windows.enumerated() {
             let windowID = "window-\(index)"
-            let contentFrame = window.contentView?.frame ?? .zero
+            let contentBounds = window.contentView?.bounds ?? .zero
+            let contentIsFlipped = window.contentView?.isFlipped ?? false
             nodes[windowID] = ViewScopeHierarchyNode(
                 id: windowID,
                 parentID: nil,
@@ -46,13 +47,13 @@ final class ViewScopeSnapshotBuilder {
                 className: NSStringFromClass(type(of: window)),
                 title: window.title.isEmpty ? interfaceLanguage.text("server.value.window_fallback") : window.title,
                 subtitle: "#\(window.windowNumber)",
-                frame: contentFrame.viewScopeRect,
-                bounds: contentFrame.viewScopeRect,
+                frame: contentBounds.viewScopeRect,
+                bounds: contentBounds.viewScopeRect,
                 childIDs: [],
                 isHidden: !window.isVisible,
                 alphaValue: Double(window.alphaValue),
                 wantsLayer: true,
-                isFlipped: false,
+                isFlipped: contentIsFlipped,
                 clippingEnabled: true,
                 depth: 0
             )
@@ -113,7 +114,7 @@ final class ViewScopeSnapshotBuilder {
             let rootView = view.window?.contentView
             let image = rootView.flatMap(makeViewScreenshot)
             let highlightRect = rootView.map { root in
-                view.convert(view.bounds, to: root).viewScopeRect
+                normalizedCanvasRect(for: view, in: root).viewScopeRect
             } ?? .zero
             return ViewScopeNodeDetailPayload(
                 nodeID: nodeID,
@@ -191,6 +192,20 @@ final class ViewScopeSnapshotBuilder {
             return nil
         }
         return makeViewScreenshot(view: contentView)
+    }
+
+    private func normalizedCanvasRect(for view: NSView, in rootView: NSView) -> NSRect {
+        let rect = view.convert(view.bounds, to: rootView)
+        guard rootView.isFlipped == false else {
+            return rect
+        }
+
+        return NSRect(
+            x: rect.origin.x,
+            y: rootView.bounds.height - rect.maxY,
+            width: rect.width,
+            height: rect.height
+        )
     }
 
     private func text(_ key: String, _ arguments: CVarArg...) -> String {

@@ -69,9 +69,9 @@ struct PreviewHitTester {
         let x = parentOrigin.x + CGFloat(node.frame.x)
         let y: CGFloat
         if parentIsFlipped {
-            y = parentOrigin.y + parentBoundsHeight - CGFloat(node.frame.y) - CGFloat(node.frame.height)
-        } else {
             y = parentOrigin.y + CGFloat(node.frame.y)
+        } else {
+            y = parentOrigin.y + parentBoundsHeight - CGFloat(node.frame.y) - CGFloat(node.frame.height)
         }
 
         return CGRect(

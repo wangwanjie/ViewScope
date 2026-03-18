@@ -40,7 +40,7 @@
 "hierarchy.badge.hidden" = "隐藏";
 "hierarchy.badge.view" = "视图";
 "integration.title" = "先把 ViewScopeServer 集成到你的 Debug 宿主里";
-"integration.subtitle" = "ViewScope 会自动发现本机 Debug 构建，通过 loopback 连接，并确保采集数据只在你的 Mac 上流动。";
+"integration.subtitle" = "ViewScope 会自动发现本机 Debug 构建，通过 loopback 连接，并确保采集数据只在你的 Mac 上流动。若宿主启用了 App Sandbox，请先关闭 Debug 配置里的沙盒，否则 1.0 版本无法发现它。";
 "integration.package.swiftpm" = "Swift Package Manager";
 "integration.package.cocoapods" = "CocoaPods";
 "integration.package.carthage" = "Carthage";

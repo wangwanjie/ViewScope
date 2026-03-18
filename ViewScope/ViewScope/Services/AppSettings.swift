@@ -48,7 +48,7 @@ final class AppSettings: ObservableObject {
         self.defaults = defaults
         self.appLanguage = Self.resolveLanguage(defaults: defaults, environment: environment)
         self.autoRefreshEnabled = defaults.object(forKey: Keys.autoRefreshEnabled) as? Bool ?? false
-        self.autoHighlightSelection = defaults.object(forKey: Keys.autoHighlightSelection) as? Bool ?? true
+        self.autoHighlightSelection = defaults.object(forKey: Keys.autoHighlightSelection) as? Bool ?? false
         self.showConnectedCountInStatusBar = defaults.object(forKey: Keys.showConnectedCountInStatusBar) as? Bool ?? true
         if let rawValue = defaults.string(forKey: Keys.updateCheckStrategy),
            let strategy = UpdateCheckStrategy(rawValue: rawValue) {

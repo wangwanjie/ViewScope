@@ -40,7 +40,7 @@
 "hierarchy.badge.hidden" = "HIDDEN";
 "hierarchy.badge.view" = "VIEW";
 "integration.title" = "Start by embedding ViewScopeServer in your debug host";
-"integration.subtitle" = "ViewScope discovers local debug builds, connects over loopback, and only keeps capture traffic on your Mac.";
+"integration.subtitle" = "ViewScope discovers local debug builds, connects over loopback, and only keeps capture traffic on your Mac. If the host still has App Sandbox enabled, turn it off for Debug first or ViewScope 1.0 will not discover it.";
 "integration.package.swiftpm" = "Swift Package Manager";
 "integration.package.cocoapods" = "CocoaPods";
 "integration.package.carthage" = "Carthage";

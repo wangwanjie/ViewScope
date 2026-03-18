@@ -39,7 +39,7 @@ final class MainViewController: NSViewController {
     private let hierarchyScrollView = NSScrollView()
     private let previewView = ScreenshotPreviewView()
     private let detailScrollView = NSScrollView()
-    private let detailStackView = NSStackView()
+    private let detailStackView = FlippedStackView()
     private let previewHitTester = PreviewHitTester()
 
     private var outlineRoots: [OutlineItem] = []
@@ -312,7 +312,7 @@ final class MainViewController: NSViewController {
             make.leading.trailing.bottom.equalToSuperview().inset(12)
         }
         detailStackView.snp.makeConstraints { make in
-            make.edges.equalToSuperview()
+            make.top.leading.trailing.equalToSuperview()
             make.width.equalTo(detailScrollView.contentView)
         }
     }
@@ -458,6 +458,9 @@ final class MainViewController: NSViewController {
         } else {
             addDetailSection(placeholderCard())
         }
+
+        detailStackView.needsLayout = true
+        detailStackView.layoutSubtreeIfNeeded()
     }
 
     private func updateChrome(connectionState: WorkspaceConnectionState, errorMessage: String?) {
@@ -584,28 +587,20 @@ final class MainViewController: NSViewController {
     private func textListCard(title: String, rows: [String]) -> NSView {
         let card = makeCardView()
         let heading = cardHeaderLabel(title)
-        let textView = NSTextView(frame: .zero)
-        textView.isEditable = false
-        textView.drawsBackground = false
-        textView.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-        textView.textColor = NSColor(calibratedRed: 0.18, green: 0.24, blue: 0.31, alpha: 1)
-        textView.string = rows.joined(separator: "\n")
-        textView.textContainerInset = NSSize(width: 0, height: 6)
-        let scrollView = NSScrollView()
-        scrollView.drawsBackground = false
-        scrollView.borderType = .noBorder
-        scrollView.hasVerticalScroller = true
-        scrollView.documentView = textView
+        let textLabel = NSTextField(wrappingLabelWithString: rows.joined(separator: "\n"))
+        textLabel.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        textLabel.textColor = NSColor(calibratedRed: 0.18, green: 0.24, blue: 0.31, alpha: 1)
+        textLabel.maximumNumberOfLines = 0
+        textLabel.lineBreakMode = .byCharWrapping
 
         card.addSubview(heading)
-        card.addSubview(scrollView)
+        card.addSubview(textLabel)
         heading.snp.makeConstraints { make in
             make.top.leading.trailing.equalToSuperview().inset(18)
         }
-        scrollView.snp.makeConstraints { make in
+        textLabel.snp.makeConstraints { make in
             make.top.equalTo(heading.snp.bottom).offset(12)
             make.leading.trailing.bottom.equalToSuperview().inset(18)
-            make.height.equalTo(120)
         }
         return card
     }
@@ -668,7 +663,8 @@ final class MainViewController: NSViewController {
 
         let valueLabel = NSTextField(wrappingLabelWithString: value)
         valueLabel.textColor = NSColor(calibratedRed: 0.16, green: 0.22, blue: 0.29, alpha: 1)
-        valueLabel.maximumNumberOfLines = 4
+        valueLabel.maximumNumberOfLines = 0
+        valueLabel.lineBreakMode = .byWordWrapping
 
         let row = NSStackView(views: [titleLabel, valueLabel])
         row.orientation = .horizontal
@@ -960,8 +956,12 @@ private final class HierarchyCellView: NSTableCellView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.maximumNumberOfLines = 1
+        titleLabel.lineBreakMode = .byTruncatingTail
         subtitleLabel.textColor = .secondaryLabelColor
         subtitleLabel.font = NSFont.systemFont(ofSize: 11)
+        subtitleLabel.maximumNumberOfLines = 1
+        subtitleLabel.lineBreakMode = .byTruncatingTail
         badgeView.applyStyle(
             textColor: NSColor(calibratedRed: 0.10, green: 0.45, blue: 0.60, alpha: 1),
             backgroundColor: NSColor(calibratedRed: 0.89, green: 0.95, blue: 0.98, alpha: 1)
@@ -997,6 +997,12 @@ private final class HierarchyCellView: NSTableCellView {
         let subtitle = [node.className.components(separatedBy: ".").last ?? node.className, node.subtitle].compactMap { $0 }.joined(separator: " • ")
         subtitleLabel.stringValue = subtitle
         badgeView.text = node.kind == .window ? L10n.hierarchyBadgeWindow : node.isHidden ? L10n.hierarchyBadgeHidden : L10n.hierarchyBadgeView
+    }
+}
+
+private final class FlippedStackView: NSStackView {
+    override var isFlipped: Bool {
+        true
     }
 }
 
