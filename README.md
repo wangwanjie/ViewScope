@@ -22,6 +22,7 @@ ViewScope 是一个面向原生 macOS 开发的 UI 调试工具，目标是在 A
 
 ## 项目结构
 
+- `ViewScope.xcworkspace`: 统一开发入口，同时打开主应用、Example 与本地 `ViewScopeServer` 包
 - `ViewScope/`: 主应用工程，使用 SnapKit、GRDB、Sparkle 和本地 `ViewScopeServer` 包
 - `ViewScopeServer/`: 宿主侧运行时，包含 SPM 包、CocoaPods podspec、Carthage framework 工程
 - `READMEAssets/`: README 截图资源，由测试自动生成
@@ -35,14 +36,22 @@ ViewScope 是一个面向原生 macOS 开发的 UI 调试工具，目标是在 A
 - macOS 11.0+
 - Xcode（当前仓库已在本机 Xcode 17C529 环境完成构建与测试）
 
+开发时请直接打开根目录的 `ViewScope.xcworkspace`，不要同时分别打开 `ViewScope/ViewScope.xcodeproj` 和 `TestViewScopeExample/TestViewScopeExample.xcodeproj`，否则 Xcode 会因为本地 `ViewScopeServer` 包被重复加载而报错。
+
 常用命令：
 
 ```bash
 xcodebuild \
-  -project ViewScope/ViewScope.xcodeproj \
+  -workspace ViewScope.xcworkspace \
   -scheme ViewScope \
   -destination 'platform=macOS' \
   test
+
+xcodebuild \
+  -workspace ViewScope.xcworkspace \
+  -scheme TestViewScopeExample \
+  -destination 'platform=macOS' \
+  build
 
 swift test --package-path ViewScopeServer
 
