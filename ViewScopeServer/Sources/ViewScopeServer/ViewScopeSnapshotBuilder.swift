@@ -254,6 +254,14 @@ final class ViewScopeSnapshotBuilder {
         )
     }
 
+    private func editableColorItem(title: String, key: String, value: String) -> ViewScopePropertyItem {
+        ViewScopePropertyItem(
+            title: title,
+            value: value,
+            editable: .text(key: key, value: value)
+        )
+    }
+
     private func windowSections(for window: NSWindow) -> [ViewScopePropertySection] {
         [
             ViewScopePropertySection(
@@ -315,6 +323,10 @@ final class ViewScopeSnapshotBuilder {
             editableNumberItem(title: text("server.item.width"), key: "frame.width", value: Double(view.frame.width), decimals: 1),
             editableNumberItem(title: text("server.item.height"), key: "frame.height", value: Double(view.frame.height), decimals: 1),
             ViewScopePropertyItem(title: text("server.item.bounds"), value: view.bounds.viewScopeString),
+            editableNumberItem(title: text("server.item.bounds_x"), key: "bounds.x", value: Double(view.bounds.origin.x), decimals: 1),
+            editableNumberItem(title: text("server.item.bounds_y"), key: "bounds.y", value: Double(view.bounds.origin.y), decimals: 1),
+            editableNumberItem(title: text("server.item.bounds_width"), key: "bounds.width", value: Double(view.bounds.width), decimals: 1),
+            editableNumberItem(title: text("server.item.bounds_height"), key: "bounds.height", value: Double(view.bounds.height), decimals: 1),
             ViewScopePropertyItem(title: text("server.item.intrinsic_size"), value: view.intrinsicContentSize.viewScopeString(interfaceLanguage: interfaceLanguage)),
             ViewScopePropertyItem(title: text("server.item.translates_mask"), value: view.translatesAutoresizingMaskIntoConstraints.viewScopeBoolText(interfaceLanguage: interfaceLanguage)),
             ViewScopePropertyItem(
@@ -342,8 +354,8 @@ final class ViewScopeSnapshotBuilder {
             ViewScopePropertyItem(title: text("server.item.flipped"), value: view.isFlipped.viewScopeBoolText(interfaceLanguage: interfaceLanguage)),
             ViewScopePropertyItem(title: text("server.item.subviews"), value: String(view.subviews.count))
         ]
-        if let background = view.layer?.backgroundColor?.viewScopeDescription {
-            renderingItems.append(ViewScopePropertyItem(title: text("server.item.background"), value: background))
+        if let background = view.layer?.backgroundColor?.viewScopeHexString {
+            renderingItems.append(editableColorItem(title: text("server.item.background"), key: "backgroundColor", value: background))
         }
 
         var sections = [
@@ -351,6 +363,22 @@ final class ViewScopeSnapshotBuilder {
             ViewScopePropertySection(title: text("server.section.layout"), items: layoutItems),
             ViewScopePropertySection(title: text("server.section.rendering"), items: renderingItems)
         ]
+
+        if let scrollView = view as? NSScrollView {
+            let insets = scrollView.contentInsets
+            sections.append(
+                ViewScopePropertySection(
+                    title: text("server.section.geometry"),
+                    items: [
+                        ViewScopePropertyItem(title: text("server.item.content_insets"), value: insets.viewScopeString),
+                        editableNumberItem(title: text("server.item.inset_top"), key: "contentInsets.top", value: Double(insets.top), decimals: 1),
+                        editableNumberItem(title: text("server.item.inset_left"), key: "contentInsets.left", value: Double(insets.left), decimals: 1),
+                        editableNumberItem(title: text("server.item.inset_bottom"), key: "contentInsets.bottom", value: Double(insets.bottom), decimals: 1),
+                        editableNumberItem(title: text("server.item.inset_right"), key: "contentInsets.right", value: Double(insets.right), decimals: 1)
+                    ]
+                )
+            )
+        }
 
         if let control = view as? NSControl {
             let editableControlValue: ViewScopeEditableProperty? = {
@@ -556,12 +584,21 @@ private extension NSLayoutConstraint.Relation {
 }
 
 private extension CGColor {
-    var viewScopeDescription: String {
-        guard let components else {
-            return "CGColor"
+    var viewScopeHexString: String? {
+        guard let color = NSColor(cgColor: self)?.usingColorSpace(.deviceRGB) else {
+            return nil
         }
-        let values = components.map { String(format: "%.2f", $0) }.joined(separator: ", ")
-        return "[\(values)]"
+        let red = Int(round(color.redComponent * 255))
+        let green = Int(round(color.greenComponent * 255))
+        let blue = Int(round(color.blueComponent * 255))
+        let alpha = Int(round(color.alphaComponent * 255))
+        return String(format: "#%02X%02X%02X%02X", red, green, blue, alpha)
+    }
+}
+
+private extension NSEdgeInsets {
+    var viewScopeString: String {
+        String(format: "t %.1f l %.1f b %.1f r %.1f", top, left, bottom, right)
     }
 }
 

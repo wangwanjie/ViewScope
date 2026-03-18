@@ -447,6 +447,51 @@ private final class Inspector {
                 throw MutationError.invalidValue
             }
             try mutateViewFrame(view, height: value)
+        case "bounds.x":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateViewBounds(view, x: value)
+        case "bounds.y":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateViewBounds(view, y: value)
+        case "bounds.width":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateViewBounds(view, width: value)
+        case "bounds.height":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateViewBounds(view, height: value)
+        case "contentInsets.top":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateScrollViewInsets(view, top: value)
+        case "contentInsets.left":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateScrollViewInsets(view, left: value)
+        case "contentInsets.bottom":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateScrollViewInsets(view, bottom: value)
+        case "contentInsets.right":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateScrollViewInsets(view, right: value)
+        case "backgroundColor":
+            guard let value = property.textValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateBackgroundColor(view, hexString: value)
         case "control.value":
             guard let value = property.textValue else {
                 throw MutationError.invalidValue
@@ -513,6 +558,71 @@ private final class Inspector {
         view.superview?.layoutSubtreeIfNeeded()
     }
 
+    private func mutateViewBounds(
+        _ view: NSView,
+        x: Double? = nil,
+        y: Double? = nil,
+        width: Double? = nil,
+        height: Double? = nil
+    ) throws {
+        var bounds = view.bounds
+        if let x {
+            bounds.origin.x = CGFloat(x)
+        }
+        if let y {
+            bounds.origin.y = CGFloat(y)
+        }
+        if let width {
+            bounds.size.width = CGFloat(max(0, width))
+        }
+        if let height {
+            bounds.size.height = CGFloat(max(0, height))
+        }
+        guard bounds.width >= 0, bounds.height >= 0 else {
+            throw MutationError.invalidValue
+        }
+        view.bounds = bounds
+        view.needsLayout = true
+        view.layoutSubtreeIfNeeded()
+    }
+
+    private func mutateScrollViewInsets(
+        _ view: NSView,
+        top: Double? = nil,
+        left: Double? = nil,
+        bottom: Double? = nil,
+        right: Double? = nil
+    ) throws {
+        guard let scrollView = view as? NSScrollView else {
+            throw MutationError.unsupportedProperty
+        }
+        var insets = scrollView.contentInsets
+        if let top {
+            insets.top = CGFloat(top)
+        }
+        if let left {
+            insets.left = CGFloat(left)
+        }
+        if let bottom {
+            insets.bottom = CGFloat(bottom)
+        }
+        if let right {
+            insets.right = CGFloat(right)
+        }
+        scrollView.contentInsets = insets
+        scrollView.needsLayout = true
+        scrollView.layoutSubtreeIfNeeded()
+    }
+
+    private func mutateBackgroundColor(_ view: NSView, hexString: String) throws {
+        guard let color = NSColor(viewScopeHexString: hexString) else {
+            throw MutationError.invalidValue
+        }
+        view.wantsLayer = true
+        view.layer?.backgroundColor = color.cgColor
+        view.needsDisplay = true
+    }
+
     private func applyControlValue(_ value: String, to view: NSView) throws {
         if let button = view as? NSButton {
             button.title = value
@@ -561,5 +671,35 @@ private extension JSONEncoder {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         return encoder
+    }
+}
+
+private extension NSColor {
+    convenience init?(viewScopeHexString: String) {
+        let sanitized = viewScopeHexString.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "#", with: "")
+        guard sanitized.count == 6 || sanitized.count == 8,
+              let rawValue = UInt64(sanitized, radix: 16) else {
+            return nil
+        }
+
+        let red: CGFloat
+        let green: CGFloat
+        let blue: CGFloat
+        let alpha: CGFloat
+
+        if sanitized.count == 8 {
+            red = CGFloat((rawValue & 0xFF000000) >> 24) / 255
+            green = CGFloat((rawValue & 0x00FF0000) >> 16) / 255
+            blue = CGFloat((rawValue & 0x0000FF00) >> 8) / 255
+            alpha = CGFloat(rawValue & 0x000000FF) / 255
+        } else {
+            red = CGFloat((rawValue & 0xFF0000) >> 16) / 255
+            green = CGFloat((rawValue & 0x00FF00) >> 8) / 255
+            blue = CGFloat(rawValue & 0x0000FF) / 255
+            alpha = 1
+        }
+
+        self.init(deviceRed: red, green: green, blue: blue, alpha: alpha)
     }
 }
