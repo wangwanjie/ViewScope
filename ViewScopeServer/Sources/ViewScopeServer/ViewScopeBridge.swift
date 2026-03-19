@@ -106,6 +106,18 @@ public struct ViewScopeSize: Codable, Sendable, Hashable {
     public static let zero = ViewScopeSize(width: 0, height: 0)
 }
 
+public struct ViewScopeIvarTrace: Codable, Sendable, Hashable {
+    public var relation: String?
+    public var hostClassName: String
+    public var ivarName: String
+
+    public init(relation: String? = nil, hostClassName: String, ivarName: String) {
+        self.relation = relation
+        self.hostClassName = hostClassName
+        self.ivarName = ivarName
+    }
+}
+
 public struct ViewScopeHierarchyNode: Codable, Sendable, Hashable, Identifiable {
     public enum Kind: String, Codable, Sendable {
         case window
@@ -118,6 +130,8 @@ public struct ViewScopeHierarchyNode: Codable, Sendable, Hashable, Identifiable 
     public var className: String
     public var title: String
     public var subtitle: String?
+    public var ivarName: String?
+    public var ivarTraces: [ViewScopeIvarTrace]
     public var identifier: String?
     public var address: String?
     public var frame: ViewScopeRect
@@ -147,7 +161,9 @@ public struct ViewScopeHierarchyNode: Codable, Sendable, Hashable, Identifiable 
         wantsLayer: Bool,
         isFlipped: Bool,
         clippingEnabled: Bool,
-        depth: Int
+        depth: Int,
+        ivarName: String? = nil,
+        ivarTraces: [ViewScopeIvarTrace] = []
     ) {
         self.id = id
         self.parentID = parentID
@@ -166,6 +182,8 @@ public struct ViewScopeHierarchyNode: Codable, Sendable, Hashable, Identifiable 
         self.isFlipped = isFlipped
         self.clippingEnabled = clippingEnabled
         self.depth = depth
+        self.ivarName = ivarName
+        self.ivarTraces = ivarTraces
     }
 }
 

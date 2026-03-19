@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import ObjectiveC.runtime
 
 @MainActor
 /// Builds hierarchy captures, detail payloads, and live object references for an inspected host.
@@ -140,12 +141,14 @@ final class ViewScopeSnapshotBuilder {
         references: inout [String: ViewScopeInspectableReference]
     ) -> [String] {
         var childIDs: [String] = []
+        let ivarTracesBySubview = directSubviewIvarTraces(in: view)
 
-        for (index, child) in view.subviews.enumerated() {
+        for (index, child) in capturedChildViews(of: view).enumerated() {
             let nodeID = "\(prefix)-\(index)"
             let title = sanitizedDisplayText(child.viewScopeTitle(interfaceLanguage: interfaceLanguage))
-                ?? NSStringFromClass(type(of: child)).components(separatedBy: ".").last
-                ?? NSStringFromClass(type(of: child))
+                ?? ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(type(of: child)))
+            let ivarTraces = ivarTracesBySubview[ObjectIdentifier(child)] ?? []
+            let childFrame = resolvedChildFrame(child, in: view)
             nodes[nodeID] = ViewScopeHierarchyNode(
                 id: nodeID,
                 parentID: parentID,
@@ -155,7 +158,7 @@ final class ViewScopeSnapshotBuilder {
                 subtitle: sanitizedDisplayText(child.viewScopeSubtitle(interfaceLanguage: interfaceLanguage)),
                 identifier: sanitizedDisplayText(child.identifier?.rawValue),
                 address: child.viewScopeAddress,
-                frame: child.frame.viewScopeRect,
+                frame: childFrame.viewScopeRect,
                 bounds: child.bounds.viewScopeRect,
                 childIDs: [],
                 isHidden: child.isHidden,
@@ -163,7 +166,9 @@ final class ViewScopeSnapshotBuilder {
                 wantsLayer: child.wantsLayer,
                 isFlipped: child.isFlipped,
                 clippingEnabled: child.layer?.masksToBounds ?? false,
-                depth: depth
+                depth: depth,
+                ivarName: ivarTraces.first?.ivarName,
+                ivarTraces: ivarTraces
             )
             references[nodeID] = .view(child)
             let nestedIDs = buildNodes(
@@ -179,6 +184,109 @@ final class ViewScopeSnapshotBuilder {
         }
 
         return childIDs
+    }
+
+    private func resolvedChildFrame(_ child: NSView, in hostView: NSView) -> NSRect {
+        if child.superview === hostView {
+            return child.frame
+        }
+        return child.convert(child.bounds, to: hostView)
+    }
+
+    private func capturedChildViews(of view: NSView) -> [NSView] {
+        var orderedChildren: [NSView] = []
+        var seen = Set<ObjectIdentifier>()
+
+        func append(_ child: NSView?) {
+            guard let child else { return }
+            let identifier = ObjectIdentifier(child)
+            guard seen.insert(identifier).inserted else { return }
+            orderedChildren.append(child)
+        }
+
+        view.subviews.forEach(append)
+
+        if let clipView = view as? NSClipView {
+            append(clipView.documentView)
+        }
+
+        if let tableView = view as? NSTableView {
+            append(tableView.headerView)
+
+            let visibleRows = tableView.rows(in: tableView.visibleRect)
+            if visibleRows.length > 0 {
+                for row in visibleRows.location ..< NSMaxRange(visibleRows) {
+                    append(tableView.rowView(atRow: row, makeIfNecessary: false))
+                }
+            }
+        }
+
+        if let rowView = view as? NSTableRowView,
+           let tableView = rowView.viewScopeEnclosingTableView {
+            let row = tableView.row(for: rowView)
+            if row >= 0 {
+                for column in 0 ..< tableView.numberOfColumns {
+                    append(tableView.view(atColumn: column, row: row, makeIfNecessary: false))
+                }
+            }
+        }
+
+        if let cellView = view as? NSTableCellView {
+            append(cellView.imageView)
+            append(cellView.textField)
+        }
+
+        return orderedChildren
+    }
+
+    private func directSubviewIvarTraces(in hostView: NSView) -> [ObjectIdentifier: [ViewScopeIvarTrace]] {
+        var tracesBySubview: [ObjectIdentifier: Set<ViewScopeIvarTrace>] = [:]
+        var currentClass: AnyClass? = type(of: hostView)
+
+        while let targetClass = currentClass,
+              targetClass != NSView.self,
+              targetClass != NSResponder.self,
+              targetClass != NSObject.self {
+            var count: UInt32 = 0
+            guard let ivars = class_copyIvarList(targetClass, &count) else {
+                currentClass = class_getSuperclass(targetClass)
+                continue
+            }
+
+            defer { free(ivars) }
+
+            for index in 0 ..< Int(count) {
+                let ivar = ivars[index]
+                guard let encodingPointer = ivar_getTypeEncoding(ivar) else { continue }
+                let encoding = String(cString: encodingPointer)
+                guard encoding.hasPrefix("@"), encoding.count > 3 else { continue }
+
+                let object = object_getIvar(hostView, ivar)
+                guard let subview = object as? NSView,
+                      subview.superview === hostView,
+                      let namePointer = ivar_getName(ivar) else {
+                    continue
+                }
+
+                let trace = ViewScopeIvarTrace(
+                    relation: "superview",
+                    hostClassName: ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(targetClass)),
+                    ivarName: String(cString: namePointer)
+                )
+                tracesBySubview[ObjectIdentifier(subview), default: []].insert(trace)
+            }
+
+            currentClass = class_getSuperclass(targetClass)
+        }
+
+        return tracesBySubview.mapValues { traces in
+            traces.sorted {
+                if $0.hostClassName == $1.hostClassName {
+                    return $0.ivarName < $1.ivarName
+                }
+                return $0.hostClassName < $1.hostClassName
+            }
+        }
     }
 
     private func makeViewScreenshot(view: NSView) -> NSImage? {
@@ -267,7 +375,7 @@ final class ViewScopeSnapshotBuilder {
             ViewScopePropertySection(
                 title: text("server.section.identity"),
                 items: [
-                    ViewScopePropertyItem(title: text("server.item.class"), value: NSStringFromClass(type(of: window))),
+                    ViewScopePropertyItem(title: text("server.item.class"), value: ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(type(of: window)))),
                     editableTextItem(
                         title: text("server.item.title"),
                         key: "title",
@@ -303,7 +411,7 @@ final class ViewScopeSnapshotBuilder {
 
     private func viewSections(for view: NSView) -> [ViewScopePropertySection] {
         var identityItems = [
-            ViewScopePropertyItem(title: text("server.item.class"), value: NSStringFromClass(type(of: view))),
+            ViewScopePropertyItem(title: text("server.item.class"), value: ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(type(of: view)))),
             ViewScopePropertyItem(title: text("server.item.address"), value: view.viewScopeAddress)
         ]
         if let title = sanitizedDisplayText(view.viewScopeTitle(interfaceLanguage: interfaceLanguage)) {
@@ -423,15 +531,29 @@ final class ViewScopeSnapshotBuilder {
         }
 
         let descriptions = allConstraints.map { constraint -> String in
-            let first = (constraint.firstItem as? NSObject).map { NSStringFromClass(type(of: $0)) } ?? "nil"
-            let second = (constraint.secondItem as? NSObject).map { NSStringFromClass(type(of: $0)) } ?? "nil"
+            let first = formattedConstraintItem(
+                constraint.firstItem as? NSObject,
+                attribute: constraint.firstAttribute
+            )
             let relation = constraint.relation.viewScopeSymbol
-            let multiplier = String(format: "%.2f", locale: interfaceLanguage.locale, constraint.multiplier)
             let constant = String(format: "%.2f", locale: interfaceLanguage.locale, constraint.constant)
-            return "\(first).\(constraint.firstAttribute.rawValue) \(relation) \(second).\(constraint.secondAttribute.rawValue) * \(multiplier) + \(constant)"
+            guard constraint.secondAttribute != .notAnAttribute,
+                  let secondItem = constraint.secondItem as? NSObject else {
+                return "\(first) \(relation) \(constant)"
+            }
+
+            let second = formattedConstraintItem(secondItem, attribute: constraint.secondAttribute)
+            let multiplier = String(format: "%.2f", locale: interfaceLanguage.locale, constraint.multiplier)
+            return "\(first) \(relation) \(second) * \(multiplier) + \(constant)"
         }
 
         return descriptions.isEmpty ? [text("server.value.no_active_constraints")] : descriptions
+    }
+
+    private func formattedConstraintItem(_ item: NSObject?, attribute: NSLayoutConstraint.Attribute) -> String {
+        let className = item.map { ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(type(of: $0))) } ?? "nil"
+        let attributeName = attribute.viewScopeName
+        return "\(className).\(attributeName)"
     }
 }
 
@@ -473,12 +595,12 @@ private extension NSView {
         }
         if let segmented = self as? NSSegmentedControl, segmented.segmentCount > 0 {
             return segmented.label(forSegment: max(segmented.selectedSegment, 0))?.viewScopeSanitizedSingleLine
-                ?? NSStringFromClass(type(of: self))
+                ?? ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(type(of: self)))
         }
         if let identifier = identifier?.rawValue, !identifier.isEmpty {
             return identifier.viewScopeSanitizedSingleLine
         }
-        return NSStringFromClass(type(of: self)).components(separatedBy: ".").last ?? NSStringFromClass(type(of: self))
+        return ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(type(of: self)))
     }
 
     func viewScopeSubtitle(interfaceLanguage: ViewScopeInterfaceLanguage) -> String? {
@@ -516,6 +638,27 @@ private extension NSView {
             candidate = current.superview
         }
         return nil
+    }
+}
+
+private extension NSLayoutConstraint.Attribute {
+    var viewScopeName: String {
+        switch self {
+        case .left: return "left"
+        case .right: return "right"
+        case .top: return "top"
+        case .bottom: return "bottom"
+        case .leading: return "leading"
+        case .trailing: return "trailing"
+        case .width: return "width"
+        case .height: return "height"
+        case .centerX: return "centerX"
+        case .centerY: return "centerY"
+        case .lastBaseline: return "lastBaseline"
+        case .firstBaseline: return "firstBaseline"
+        case .notAnAttribute: return "notAnAttribute"
+        @unknown default: return String(rawValue)
+        }
     }
 }
 

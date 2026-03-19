@@ -228,15 +228,19 @@ final class WorkspaceStore: NSObject {
     }
 
     func zoomInPreview() {
-        previewScale = clampedPreviewScale(previewScale * 1.2)
+        setPreviewScale(previewScale * 1.2)
     }
 
     func zoomOutPreview() {
-        previewScale = clampedPreviewScale(previewScale / 1.2)
+        setPreviewScale(previewScale / 1.2)
     }
 
     func resetPreviewZoom() {
-        previewScale = 1
+        setPreviewScale(1)
+    }
+
+    func setPreviewScale(_ value: CGFloat) {
+        previewScale = clampedPreviewScale(value)
     }
 
     func setPreviewDisplayMode(_ mode: WorkspacePreviewDisplayMode) {

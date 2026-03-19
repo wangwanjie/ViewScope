@@ -9,3 +9,5 @@ ViewScopeServer/.build/
 ViewScopeServer/.swiftpm/
 ViewScope/ViewScope.xcodeproj/project.xcworkspace/xcuserdata/
 ViewScope/ViewScope.xcodeproj/xcuserdata/
+
+.worktrees/

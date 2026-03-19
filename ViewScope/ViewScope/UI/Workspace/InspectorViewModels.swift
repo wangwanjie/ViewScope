@@ -67,7 +67,7 @@ struct InspectorPanelModelBuilder {
 
         var identityRows: [InspectorRowModel] = [
             .readOnly(title: L10n.serverItemTitle("node_id"), value: node.id),
-            .readOnly(title: L10n.serverItemTitle("class"), value: node.className)
+            .readOnly(title: L10n.serverItemTitle("class"), value: ViewScopeClassNameFormatter.displayName(for: node.className))
         ]
         if let editableTitle = propertyIndex.textProperty(forKey: "title") {
             identityRows.append(.text(.init(title: L10n.serverItemTitle("title"), property: editableTitle, value: editableTitle.textValue ?? "")))
@@ -125,7 +125,7 @@ struct InspectorPanelModelBuilder {
 
         return InspectorPanelModel(
             title: node.title,
-            subtitle: shortClassName(node.className),
+            subtitle: ViewScopeClassNameFormatter.displayName(for: node.className),
             sections: sections,
             placeholder: nil
         )
@@ -151,9 +151,6 @@ struct InspectorPanelModelBuilder {
         return InspectorEditableQuadModel(title: title, fields: fields)
     }
 
-    private func shortClassName(_ className: String) -> String {
-        className.components(separatedBy: ".").last ?? className
-    }
 }
 
 private struct DetailPropertyIndex {

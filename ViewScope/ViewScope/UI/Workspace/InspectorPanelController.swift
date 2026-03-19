@@ -26,6 +26,9 @@ final class InspectorPanelController: NSViewController {
 
     override func loadView() {
         view = panelView
+        panelView.setAccessibilityElement(true)
+        panelView.setAccessibilityRole(.group)
+        panelView.setAccessibilityIdentifier("workspace.inspectorPanel")
     }
 
     override func viewDidLoad() {
@@ -39,7 +42,7 @@ final class InspectorPanelController: NSViewController {
         panelView.setTitle(L10n.inspector)
 
         stackView.orientation = .vertical
-        stackView.alignment = .leading
+        stackView.alignment = .width
         stackView.spacing = 14
 
         scrollView.drawsBackground = false
@@ -54,11 +57,13 @@ final class InspectorPanelController: NSViewController {
             make.edges.equalToSuperview()
         }
         documentView.snp.makeConstraints { make in
-            make.edges.equalToSuperview()
+            make.top.leading.trailing.equalToSuperview()
             make.width.equalTo(scrollView.contentView)
+            make.height.greaterThanOrEqualTo(scrollView.contentView)
+            make.bottom.equalTo(stackView.snp.bottom).offset(14)
         }
         stackView.snp.makeConstraints { make in
-            make.edges.equalToSuperview().inset(14)
+            make.top.leading.trailing.equalToSuperview().inset(14)
         }
     }
 
@@ -100,6 +105,8 @@ final class InspectorPanelController: NSViewController {
 
     private func makeSectionView(_ section: InspectorSectionModel) -> NSView {
         let container = InspectorSectionCardView()
+        container.setContentHuggingPriority(.required, for: .vertical)
+        container.setContentCompressionResistancePriority(.required, for: .vertical)
 
         let titleLabel = NSTextField(labelWithString: section.title)
         titleLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
