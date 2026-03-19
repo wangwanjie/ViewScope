@@ -155,6 +155,7 @@ struct ViewHierarchyGeometry {
     }
 }
 
+#if DEBUG
 struct PreviewHitTester {
     private let geometry = ViewHierarchyGeometry()
 
@@ -162,3 +163,4 @@ struct PreviewHitTester {
         geometry.deepestNodeID(at: canvasPoint, in: capture)
     }
 }
+#endif
