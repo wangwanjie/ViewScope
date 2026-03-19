@@ -8,10 +8,138 @@
 import AppKit
 import Foundation
 import Testing
+import ViewScopeServer
 @testable import ViewScope
 
 @MainActor
 struct ViewScopeTests {
+    @Test func treePresentationShowsIvarNamesAndDemangledClassName() async throws {
+        let rawClassName = "_TtGC6AppKit18_NSCoreHostingViewVS_17AppKitPopUpButton_"
+        let node = ViewScopeHierarchyNode(
+            id: "node-1",
+            parentID: nil,
+            kind: .view,
+            className: rawClassName,
+            title: "Confirm",
+            subtitle: nil,
+            identifier: nil,
+            address: nil,
+            frame: .zero,
+            bounds: .zero,
+            childIDs: [],
+            isHidden: false,
+            alphaValue: 1,
+            wantsLayer: false,
+            isFlipped: true,
+            clippingEnabled: false,
+            depth: 1,
+            ivarName: "confirmButton",
+            ivarTraces: [
+                ViewScopeIvarTrace(hostClassName: "HostView", ivarName: "confirmButton"),
+                ViewScopeIvarTrace(hostClassName: "HostView", ivarName: "primaryButton")
+            ]
+        )
+
+        #expect(ViewTreeNodePresentation.classText(for: node).contains("_NSCoreHostingView"))
+        #expect(ViewTreeNodePresentation.classText(for: node).contains("AppKitPopUpButton"))
+        #expect(ViewTreeNodePresentation.classText(for: node) != rawClassName)
+        #expect(ViewTreeNodePresentation.ivarText(for: node) == "confirmButton, primaryButton")
+    }
+
+    @Test func treeSearchTextIncludesIvarName() async throws {
+        let node = ViewScopeHierarchyNode(
+            id: "node-2",
+            parentID: nil,
+            kind: .view,
+            className: "NSTextField",
+            title: "Search",
+            subtitle: nil,
+            identifier: nil,
+            address: nil,
+            frame: .zero,
+            bounds: .zero,
+            childIDs: [],
+            isHidden: false,
+            alphaValue: 1,
+            wantsLayer: false,
+            isFlipped: true,
+            clippingEnabled: false,
+            depth: 1,
+            ivarName: "queryField"
+        )
+
+        #expect(ViewTreeNodePresentation.matches(node: node, query: "queryfield"))
+    }
+
+    @Test func inspectorUsesDemangledClassName() async throws {
+        let rawClassName = "_TtGC6AppKit18_NSCoreHostingViewVS_17AppKitPopUpButton_"
+        let node = ViewScopeHierarchyNode(
+            id: "node-3",
+            parentID: nil,
+            kind: .view,
+            className: rawClassName,
+            title: "Pop Up",
+            subtitle: nil,
+            identifier: nil,
+            address: nil,
+            frame: .zero,
+            bounds: .zero,
+            childIDs: [],
+            isHidden: false,
+            alphaValue: 1,
+            wantsLayer: false,
+            isFlipped: true,
+            clippingEnabled: false,
+            depth: 1
+        )
+
+        let model = InspectorPanelModelBuilder().makeModel(
+            capture: nil,
+            node: node,
+            detail: nil
+        )
+
+        #expect(model.subtitle?.contains("_NSCoreHostingView") == true)
+        guard case let .readOnly(_, classValue) = try #require(model.sections.first?.rows.dropFirst().first) else {
+            Issue.record("Expected read-only class row")
+            return
+        }
+        #expect(classValue.contains("AppKitPopUpButton"))
+        #expect(classValue != rawClassName)
+    }
+
+    @Test func layeredPreviewRecentersFullCanvasWhenEntering3DWithoutFocus() async throws {
+        let shouldRecenter = PreviewPanelRenderDecisions.shouldRecenterFullCanvas(
+            displayMode: .layered,
+            lastRenderedDisplayMode: .flat,
+            focusedNodeID: nil,
+            lastRenderedFocusedNodeID: nil,
+            canvasSize: CGSize(width: 1200, height: 640)
+        )
+
+        #expect(shouldRecenter)
+    }
+
+    @Test func layeredPreviewRecentersFullCanvasWhenFocusChangesIn3D() async throws {
+        let shouldRecenter = PreviewPanelRenderDecisions.shouldRecenterFullCanvas(
+            displayMode: .layered,
+            lastRenderedDisplayMode: .layered,
+            focusedNodeID: "window-0-view-1-2",
+            lastRenderedFocusedNodeID: "window-0-view-1-1",
+            canvasSize: CGSize(width: 1200, height: 640)
+        )
+
+        #expect(shouldRecenter)
+    }
+
+    @Test func normalizedDemangledClassNameFlattensPrivateContext() async throws {
+        let formatted = ViewScopeClassNameFormatter.displayName(
+            for: "_TtC6AppKitP33_72EBFCF981BE77E1C6F26FD717D0893922NSTextFieldSimpleLabel"
+        )
+
+        #expect(formatted == "AppKit.NSTextFieldSimpleLabel _72EBFCF981BE77E1C6F26FD717D08939")
+    }
+
     @Test func releaseVersionComparison() async throws {
         #expect(ReleaseVersion("1.0") == ReleaseVersion("1.0.0"))
         #expect(ReleaseVersion("1.0.1") > ReleaseVersion("1.0.0"))

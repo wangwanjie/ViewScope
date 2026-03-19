@@ -50,6 +50,16 @@
                ReferencedContainer = "container:ViewScope.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "9580FAC12F69BAE1000C0E71"
+               BuildableName = "ViewScopeUITests.xctest"
+               BlueprintName = "ViewScopeUITests"
+               ReferencedContainer = "container:ViewScope.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction
