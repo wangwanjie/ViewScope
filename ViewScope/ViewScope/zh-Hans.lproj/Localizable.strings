@@ -83,6 +83,7 @@
 "menu.show_main_window" = "显示主窗口";
 "menu.refresh_capture" = "刷新采集";
 "menu.window" = "窗口";
+"menu.close_window" = "关闭窗口";
 "menu.minimize" = "最小化";
 "menu.zoom" = "缩放";
 "menu.help" = "帮助";

@@ -83,6 +83,7 @@
 "menu.show_main_window" = "Show Main Window";
 "menu.refresh_capture" = "Refresh Capture";
 "menu.window" = "Window";
+"menu.close_window" = "Close Window";
 "menu.minimize" = "Minimize";
 "menu.zoom" = "Zoom";
 "menu.help" = "Help";

@@ -83,6 +83,7 @@
 "menu.show_main_window" = "顯示主視窗";
 "menu.refresh_capture" = "重新整理擷取";
 "menu.window" = "視窗";
+"menu.close_window" = "關閉視窗";
 "menu.minimize" = "最小化";
 "menu.zoom" = "縮放";
 "menu.help" = "輔助說明";
