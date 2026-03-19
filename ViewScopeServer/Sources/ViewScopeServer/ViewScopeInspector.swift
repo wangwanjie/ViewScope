@@ -66,10 +66,12 @@ public enum ViewScopeInspector {
     }
 }
 
-@_cdecl("ViewScopeInspectorPerformAutomaticStart")
-func ViewScopeInspectorPerformAutomaticStart() {
-    Task { @MainActor in
-        ViewScopeInspector.performAutomaticStartIfNeededForBootstrap()
+@objc(ViewScopeAutomaticStartBridge)
+public final class ViewScopeAutomaticStartBridge: NSObject {
+    @objc public static func performAutomaticStart() {
+        Task { @MainActor in
+            ViewScopeInspector.performAutomaticStartIfNeededForBootstrap()
+        }
     }
 }
 

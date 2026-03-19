@@ -1,7 +1,17 @@
 #import "ViewScopeServerBootstrap.h"
 #import <AppKit/AppKit.h>
+#import <objc/message.h>
 
-extern void ViewScopeInspectorPerformAutomaticStart(void);
+static void ViewScopeInspectorPerformAutomaticStart(void) {
+    Class bridgeClass = NSClassFromString(@"ViewScopeAutomaticStartBridge");
+    SEL selector = @selector(performAutomaticStart);
+
+    if (bridgeClass == Nil || ![bridgeClass respondsToSelector:selector]) {
+        return;
+    }
+
+    ((void (*)(id, SEL))objc_msgSend)(bridgeClass, selector);
+}
 
 void ViewScopeServerBootstrapAnchor(void) {
 }
