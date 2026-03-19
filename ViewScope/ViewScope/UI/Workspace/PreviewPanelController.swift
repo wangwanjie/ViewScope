@@ -7,7 +7,6 @@ import ViewScopeServer
 final class PreviewPanelController: NSViewController {
     private let store: WorkspaceStore
     private let panelView = WorkspacePanelContainerView()
-    private let scrollView = NSScrollView()
     private let canvasView = PreviewCanvasView()
     private let guideView = IntegrationGuideView()
     private let geometry = ViewHierarchyGeometry()
@@ -25,6 +24,8 @@ final class PreviewPanelController: NSViewController {
     private let clearFocusButton = NSButton()
     private let visibilityButton = NSButton()
     private let highlightButton = NSButton()
+    private var autoCenterFocusKey: String?
+    private var lastRenderedDisplayMode: WorkspacePreviewDisplayMode?
 
     init(store: WorkspaceStore) {
         self.store = store
@@ -38,6 +39,9 @@ final class PreviewPanelController: NSViewController {
 
     override func loadView() {
         view = panelView
+        panelView.setAccessibilityElement(true)
+        panelView.setAccessibilityRole(.group)
+        panelView.setAccessibilityIdentifier("workspace.previewPanel")
     }
 
     override func viewDidLoad() {
@@ -49,7 +53,7 @@ final class PreviewPanelController: NSViewController {
 
     override func viewDidLayout() {
         super.viewDidLayout()
-        canvasView.minimumViewportSize = scrollView.contentView.bounds.size
+        canvasView.minimumViewportSize = panelView.contentView.bounds.size
     }
 
     private func buildUI() {
@@ -77,26 +81,23 @@ final class PreviewPanelController: NSViewController {
             panelView.accessoryStackView.addArrangedSubview($0)
         }
 
-        scrollView.drawsBackground = false
-        scrollView.borderType = .noBorder
-        scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = true
-        scrollView.documentView = canvasView
-
-        panelView.contentView.addSubview(scrollView)
+        panelView.contentView.addSubview(canvasView)
         panelView.contentView.addSubview(guideView)
-        scrollView.snp.makeConstraints { make in
+        canvasView.snp.makeConstraints { make in
             make.edges.equalToSuperview()
         }
         guideView.snp.makeConstraints { make in
             make.edges.equalToSuperview()
         }
 
-        canvasView.onCanvasClick = { [weak self] point in
-            self?.selectNode(at: point, focusAfterSelection: false)
+        canvasView.onNodeClick = { [weak self] nodeID in
+            self?.selectNode(withID: nodeID, focusAfterSelection: false)
         }
-        canvasView.onCanvasDoubleClick = { [weak self] point in
-            self?.selectNode(at: point, focusAfterSelection: true)
+        canvasView.onNodeDoubleClick = { [weak self] nodeID in
+            self?.selectNode(withID: nodeID, focusAfterSelection: true)
+        }
+        canvasView.onScaleChanged = { [weak self] scale in
+            self?.store.setPreviewScale(scale)
         }
     }
 
@@ -119,7 +120,7 @@ final class PreviewPanelController: NSViewController {
     private func renderCurrentState() {
         let capture = store.capture
         guideView.isHidden = capture != nil
-        scrollView.isHidden = capture == nil
+        canvasView.isHidden = capture == nil
 
         panelView.setTitle(L10n.canvasPreview, subtitle: store.focusedNode?.title)
 
@@ -128,9 +129,9 @@ final class PreviewPanelController: NSViewController {
         canvasView.canvasSize = resolvedCanvasSize(capture: capture, detail: store.selectedNodeDetail)
         canvasView.selectedNodeID = store.selectedNodeID
         canvasView.focusedNodeID = store.focusedNodeID
+        canvasView.highlightedCanvasRect = resolvedSelectionRect(capture: capture, detail: store.selectedNodeDetail)
         canvasView.displayMode = store.previewDisplayMode
         canvasView.zoomScale = store.previewScale
-        canvasView.minimumViewportSize = scrollView.contentView.bounds.size
 
         zoomResetButton.title = "\(Int(round(store.previewScale * 100)))%"
         displayModeControl.selectedSegment = store.previewDisplayMode == .flat ? 0 : 1
@@ -145,7 +146,26 @@ final class PreviewPanelController: NSViewController {
             visibilityButton.toolTip = node.isHidden ? L10n.hierarchyMenuShowView : L10n.hierarchyMenuHideView
         }
 
-        centerSelectionIfNeeded()
+        guard let focusedNodeID = store.focusedNodeID else {
+            autoCenterFocusKey = nil
+            return
+        }
+        let nextAutoCenterFocusKey = [
+            capture?.capturedAt.timeIntervalSinceReferenceDate.description ?? "nil",
+            focusedNodeID
+        ].joined(separator: "|")
+        if autoCenterFocusKey != nextAutoCenterFocusKey {
+            autoCenterFocusKey = nextAutoCenterFocusKey
+            centerSelectionIfNeeded()
+        }
+
+        if lastRenderedDisplayMode != store.previewDisplayMode,
+           store.previewDisplayMode == .layered,
+           canvasView.canvasSize.width > 0,
+           canvasView.canvasSize.height > 0 {
+            canvasView.centerOnCanvasRect(CGRect(origin: .zero, size: canvasView.canvasSize))
+        }
+        lastRenderedDisplayMode = store.previewDisplayMode
     }
 
     private func configureToolbarButton(_ button: NSButton, symbolName: String, toolTip: String, action: Selector) {
@@ -176,10 +196,7 @@ final class PreviewPanelController: NSViewController {
         return .zero
     }
 
-    private func selectNode(at point: CGPoint, focusAfterSelection: Bool) {
-        guard let capture = store.capture else { return }
-        let nodeID = geometry.deepestNodeID(at: point, in: capture, rootNodeID: store.focusedNodeID)
-        guard let nodeID else { return }
+    private func selectNode(withID nodeID: String, focusAfterSelection: Bool) {
         Task { @MainActor [weak self] in
             await self?.store.selectNode(withID: nodeID)
             if focusAfterSelection {
@@ -189,14 +206,21 @@ final class PreviewPanelController: NSViewController {
     }
 
     private func centerSelectionIfNeeded() {
-        guard let capture = store.capture,
-              let selectedNodeID = store.selectedNodeID,
-              let rect = geometry.canvasRect(for: selectedNodeID, in: capture) else {
+        guard store.previewDisplayMode == .flat else {
             return
         }
-        let targetRect = canvasView.viewRect(fromCanvasRect: rect).insetBy(dx: -40, dy: -40)
-        scrollView.contentView.scrollToVisible(targetRect)
-        scrollView.reflectScrolledClipView(scrollView.contentView)
+        guard let rect = resolvedSelectionRect(capture: store.capture, detail: store.selectedNodeDetail) else {
+            return
+        }
+        canvasView.centerOnCanvasRect(rect.insetBy(dx: -40, dy: -40))
+    }
+
+    private func resolvedSelectionRect(capture: ViewScopeCapturePayload?, detail: ViewScopeNodeDetailPayload?) -> CGRect? {
+        if let detail, detail.nodeID == store.selectedNodeID {
+            return detail.highlightedRect.cgRect
+        }
+        guard let capture, let selectedNodeID = store.selectedNodeID else { return nil }
+        return geometry.canvasRect(for: selectedNodeID, in: capture)
     }
 
     @objc private func zoomOut(_ sender: Any?) {
