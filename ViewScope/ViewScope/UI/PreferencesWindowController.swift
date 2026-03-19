@@ -11,7 +11,6 @@ final class PreferencesWindowController: NSWindowController {
         let contentViewController = PreferencesViewController(store: store)
         let window = NSWindow(contentViewController: contentViewController)
         window.title = L10n.preferencesWindowTitle
-        window.appearance = NSAppearance(named: .aqua)
         window.styleMask = [.titled, .closable, .miniaturizable]
         if #available(macOS 11.0, *) {
             window.toolbarStyle = .preference
@@ -68,7 +67,7 @@ private final class PreferencesViewController: NSViewController {
     private let titleLabel = NSTextField(labelWithString: "")
     private let descriptionLabel = NSTextField(wrappingLabelWithString: "")
     private let sectionControl = NSSegmentedControl(labels: ["", ""], trackingMode: .selectOne, target: nil, action: nil)
-    private let card = NSView()
+    private let card = PreferencesCardView()
     private let paneHostView = NSView()
     private let generalPaneView = NSView()
     private let updatesPaneView = NSView()
@@ -99,7 +98,7 @@ private final class PreferencesViewController: NSViewController {
     }
 
     override func loadView() {
-        view = NSView()
+        view = PreferencesBackgroundView()
         buildUI()
     }
 
@@ -114,12 +113,6 @@ private final class PreferencesViewController: NSViewController {
         titleLabel.font = NSFont(name: "Avenir Next Demi Bold", size: 28) ?? .systemFont(ofSize: 28, weight: .semibold)
 
         descriptionLabel.textColor = .secondaryLabelColor
-
-        card.wantsLayer = true
-        card.layer?.cornerRadius = 18
-        card.layer?.backgroundColor = NSColor(calibratedRed: 0.97, green: 0.98, blue: 0.99, alpha: 1).cgColor
-        card.layer?.borderWidth = 1
-        card.layer?.borderColor = NSColor(calibratedRed: 0.86, green: 0.89, blue: 0.92, alpha: 1).cgColor
 
         sectionControl.segmentStyle = .rounded
         sectionControl.selectedSegment = selectedPane.rawValue
@@ -382,5 +375,52 @@ private final class PreferencesViewController: NSViewController {
 
     @objc private func openGitHubHomepage(_ sender: Any?) {
         updateManager.openGitHubHomepage()
+    }
+}
+
+private final class PreferencesBackgroundView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        applyAppearance()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyAppearance()
+    }
+
+    private func applyAppearance() {
+        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+    }
+}
+
+private final class PreferencesCardView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 18
+        layer?.borderWidth = 1
+        applyAppearance()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyAppearance()
+    }
+
+    private func applyAppearance() {
+        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.4).cgColor
     }
 }
