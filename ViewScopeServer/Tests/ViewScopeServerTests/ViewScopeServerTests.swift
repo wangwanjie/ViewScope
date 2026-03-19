@@ -281,6 +281,63 @@ final class ViewScopeServerTests: XCTestCase {
         XCTAssertTrue(editableKeys.contains("frame.x"))
         XCTAssertTrue(editableKeys.contains("frame.width"))
     }
+
+    @MainActor
+    func testAutoStartRunsOnceByDefault() {
+        ViewScopeInspector.resetLifecycleStateForTesting()
+        var startCount = 0
+        ViewScopeInspector.setStartHandlerForTesting { _ in
+            startCount += 1
+        }
+
+        XCTAssertTrue(ViewScopeInspector.isAutomaticStartEnabledForTesting)
+
+        ViewScopeInspector.performAutomaticStartIfNeededForTesting()
+        ViewScopeInspector.performAutomaticStartIfNeededForTesting()
+
+        XCTAssertEqual(startCount, 1)
+        XCTAssertFalse(ViewScopeInspector.isAutomaticStartEnabledForTesting)
+    }
+
+    @MainActor
+    func testAutoStartCanBeDisabledBeforeBootstrapRuns() {
+        ViewScopeInspector.resetLifecycleStateForTesting()
+        var startCount = 0
+        ViewScopeInspector.setStartHandlerForTesting { _ in
+            startCount += 1
+        }
+
+        ViewScopeInspector.disableAutomaticStart()
+        ViewScopeInspector.performAutomaticStartIfNeededForTesting()
+
+        XCTAssertEqual(startCount, 0)
+        XCTAssertFalse(ViewScopeInspector.isAutomaticStartEnabledForTesting)
+    }
+
+    @MainActor
+    func testManualStartStillWorksAfterDisablingAutomaticStart() {
+        ViewScopeInspector.resetLifecycleStateForTesting()
+        var receivedConfiguration: ViewScopeInspector.Configuration?
+        ViewScopeInspector.setStartHandlerForTesting { configuration in
+            receivedConfiguration = configuration
+        }
+
+        ViewScopeInspector.disableAutomaticStart()
+        ViewScopeInspector.start(
+            configuration: .init(
+                displayName: "Manual",
+                allowInReleaseBuilds: true,
+                heartbeatInterval: 4,
+                highlightDuration: 2
+            )
+        )
+
+        XCTAssertEqual(receivedConfiguration?.displayName, "Manual")
+        XCTAssertEqual(receivedConfiguration?.allowInReleaseBuilds, true)
+        XCTAssertEqual(receivedConfiguration?.heartbeatInterval, 4)
+        XCTAssertEqual(receivedConfiguration?.highlightDuration, 2)
+        XCTAssertFalse(ViewScopeInspector.isAutomaticStartEnabledForTesting)
+    }
 }
 
 private final class FlippedFixtureView: NSView {

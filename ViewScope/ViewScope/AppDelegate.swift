@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import ViewScopeServer
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -11,6 +12,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var cancellables = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Avoid exposing the ViewScope client itself as an inspectable host.
+        ViewScopeInspector.disableAutomaticStart()
+
         do {
             NSApp.setActivationPolicy(.regular)
             let store = try WorkspaceStore()

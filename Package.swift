@@ -9,13 +9,22 @@ let package = Package(
     products: [
         .library(
             name: "ViewScopeServer",
-            targets: ["ViewScopeServer"]
+            targets: ["ViewScopeServer", "ViewScopeServerBootstrap"]
         )
     ],
     targets: [
         .target(
             name: "ViewScopeServer",
-            path: "ViewScopeServer/Sources/ViewScopeServer"
+            dependencies: ["ViewScopeServerBootstrap"],
+            path: "ViewScopeServer/Sources/ViewScopeServer",
+            linkerSettings: [
+                .unsafeFlags(["-Xlinker", "-u", "-Xlinker", "_ViewScopeServerBootstrapAnchor"], .when(platforms: [.macOS]))
+            ]
+        ),
+        .target(
+            name: "ViewScopeServerBootstrap",
+            path: "ViewScopeServer/Sources/ViewScopeServerBootstrap",
+            publicHeadersPath: "."
         ),
         .testTarget(
             name: "ViewScopeServerTests",

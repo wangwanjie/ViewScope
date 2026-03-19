@@ -15,33 +15,51 @@
 ### Swift Package Manager
 
 ```swift
-.package(url: "https://github.com/wangwanjie/ViewScope.git", from: "1.0.0")
+.package(url: "https://github.com/wangwanjie/ViewScope.git", from: "1.1.0")
 ```
 
-Add the `ViewScopeServer` product to your debug target and start it after launch:
+Add the `ViewScopeServer` product to your debug target:
+
+```swift
+import ViewScopeServer
+```
+
+That is enough for the default behavior. Once the library is loaded in a debug build, `ViewScopeServer` automatically starts after the host app finishes launching.
+
+If you want to control the timing manually, disable automatic startup early and call `start()` yourself later:
 
 ```swift
 import ViewScopeServer
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        ViewScopeInspector.start()
+@main
+struct DemoApp: App {
+    init() {
+        ViewScopeInspector.disableAutomaticStart()
+    }
+
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+                .task {
+                    ViewScopeInspector.start()
+                }
+        }
     }
 }
 ```
 
-If your macOS debug host enables `App Sandbox`, turn `ENABLE_APP_SANDBOX` off for the Debug configuration first. `ViewScope 1.0` discovers hosts through `DistributedNotificationCenter`, and the default macOS app sandbox does not allow a regular app to publish those discovery notifications, so the host never appears in `Live Hosts`.
+If your macOS debug host enables `App Sandbox`, turn `ENABLE_APP_SANDBOX` off for the Debug configuration first. The current discovery path uses `DistributedNotificationCenter`, and the default macOS app sandbox does not allow a regular app to publish those discovery notifications, so the host never appears in `Live Hosts`.
 
 ### CocoaPods
 
 ```ruby
-pod 'ViewScopeServer', :git => 'https://github.com/wangwanjie/ViewScope.git', :tag => 'v1.0.0', :configurations => ['Debug']
+pod 'ViewScopeServer', :git => 'https://github.com/wangwanjie/ViewScope.git', :tag => 'v1.1.0', :configurations => ['Debug']
 ```
 
 ### Carthage
 
 ```ruby
-github "wangwanjie/ViewScope" ~> 1.0
+github "wangwanjie/ViewScope" ~> 1.1
 ```
 
 Then run:
@@ -53,5 +71,11 @@ carthage update --use-xcframeworks --platform macOS
 ## Notes
 
 - keep `ViewScopeServer` in debug-style configurations only
-- sandboxed hosts should disable `App Sandbox` for their Debug configuration in `ViewScope 1.0`
+- sandboxed hosts should disable `App Sandbox` for their Debug configuration when using the current discovery flow
 - all capture data stays on the local machine and the server requires a short-lived auth token
+
+## Lifecycle
+
+- default behavior: import and link `ViewScopeServer`, then let it auto-start after app launch
+- manual behavior: call `ViewScopeInspector.disableAutomaticStart()` early, then call `ViewScopeInspector.start()` when you are ready
+- if the host app itself embeds `ViewScopeServer` only for development tooling, remember to opt out of auto-start where exposing the host would be undesirable

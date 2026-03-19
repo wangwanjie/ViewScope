@@ -58,7 +58,7 @@
 "hierarchy.menu.expand_children" = "展開子節點";
 "hierarchy.menu.collapse_children" = "摺疊子節點";
 "integration.title" = "先把 ViewScopeServer 整合到你的 Debug 宿主中";
-"integration.subtitle" = "ViewScope 會自動發現本機 Debug 建構，透過 loopback 連線，並確保擷取資料只在你的 Mac 上流動。若宿主啟用了 App Sandbox，請先關閉 Debug 設定裡的沙盒，否則 1.0 版本無法發現它。";
+"integration.subtitle" = "ViewScope 會自動發現本機 Debug 建構，透過 loopback 連線，並確保擷取資料只在你的 Mac 上流動。若宿主啟用了 App Sandbox，請先關閉 Debug 設定裡的沙盒，否則目前的發現流程無法發現它。";
 "integration.package.swiftpm" = "Swift Package Manager";
 "integration.package.cocoapods" = "CocoaPods";
 "integration.package.carthage" = "Carthage";
