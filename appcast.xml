@@ -3,22 +3,55 @@
     <channel>
         <title>ViewScope</title>
         <item>
-            <title>1.2.0</title>
-            <pubDate>Fri, 20 Mar 2026 22:29:13 +0800</pubDate>
-            <link>https://github.com/wangwanjie/ViewScope/releases/tag/v1.2.0</link>
-            <sparkle:version>3</sparkle:version>
-            <sparkle:shortVersionString>1.2.0</sparkle:shortVersionString>
+            <title>1.2.1</title>
+            <pubDate>Sat, 21 Mar 2026 01:23:50 +0800</pubDate>
+            <link>https://github.com/wangwanjie/ViewScope/releases/tag/v1.2.1</link>
+            <sparkle:version>4</sparkle:version>
+            <sparkle:shortVersionString>1.2.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"># ViewScope 1.2.0
+            <description sparkle:format="markdown"># ViewScope 1.2.1
 
-- 修复 2D / 3D 预览坐标系问题，兼容 flipped 与非 flipped 的宿主视图，高亮框、图层位置和点击命中保持一致。
-- 优化 3D 画布渲染性能，减少重影与重复绘制，切换宿主和手动刷新时会完整清空旧画面再加载新捕获。
-- Inspector 回写链路补强，alpha、显示隐藏等修改可即时刷新到画布与属性区，并继续保留已扩展的一批可编辑属性。
-- 层级树新增隐藏态继承展示，隐藏节点及其子树会统一置灰，便于快速识别当前不可见分支。
-- 无连接时的工作区空状态重新设计：预览区改为更紧凑的三种接入方式切换，层级树和 Inspector 也补充了占位提示。
-- 发布版本升级到 1.2.0，主应用、ViewScopeServer、podspec、README 和后续发布脚本示例同步更新。
+- 修正 Sparkle 更新公钥配置，避免后续自动更新校验与发布元数据出现不一致。
+- 同步刷新主应用、ViewScopeServer、SwiftPM / CocoaPods 集成示例到 1.2.1。
+- 补齐 1.2.1 发布链路所需的版本号、运行时标识与发布说明，方便继续通过 GitHub Release 和 appcast 分发。
 </description>
-            <enclosure url="https://github.com/wangwanjie/ViewScope/releases/download/v1.2.0/ViewScope_V_1.2.0.dmg" length="9760898" type="application/octet-stream" sparkle:edSignature="6A5aZy5wqdd8slTZVQ6oveWpOiz++2aOwQv09LI6TQ/hD+2pUHvuLHlzbrZSEFcd6s3JR8/sBudGd95b4I4cBQ==" />
+            <enclosure url="https://github.com/wangwanjie/ViewScope/releases/download/v1.2.1/ViewScope_V_1.2.1.dmg" length="9769359" type="application/octet-stream" sparkle:edSignature="/dmTuZc9Z/J9crw//FuHKksXvbT1qmT8pFSyNBGJssSSIo3SgL2I9Z1g26RdAnhrYCBTM1Z1jnJmHFaIoiutAQ==" />
+        </item>
+        <item>
+            <title>1.1.0</title>
+            <pubDate>Sat, 21 Mar 2026 01:23:50 +0800</pubDate>
+            <link>https://github.com/wangwanjie/ViewScope/releases/tag/v1.1.0</link>
+            <sparkle:version>2</sparkle:version>
+            <sparkle:shortVersionString>1.1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"># ViewScope 1.1.0
+
+- `ViewScopeServer` 现在默认随宿主应用启动自动启用，接入后不再需要手动调用 `ViewScopeInspector.start()`。
+- 新增 `ViewScopeInspector.disableAutomaticStart()`，允许宿主在很早期关闭自动启用，并在稍后按需手动启动。
+- 为 SwiftPM / CocoaPods / Xcode framework 接入补齐自动启动 bootstrap，统一 Debug 宿主侧行为。
+- ViewScope 客户端自身显式关闭了内嵌 `ViewScopeServer` 的自动启用，避免把调试器客户端错误地暴露成可连接宿主。
+- 更新根 README、`ViewScopeServer/README.md` 和应用内集成说明，文档统一切换到 1.1.0 用法与版本号。
+- 发布版本号升级到 1.1.0，运行时版本、podspec、工程版本和后续发布脚本示例同步更新。
+</description>
+            <enclosure url="https://github.com/wangwanjie/ViewScope/releases/download/v1.1.0/ViewScope_V_1.1.0.dmg" length="9711268" type="application/octet-stream" sparkle:edSignature="LFtsGtP0ui6ZPqWfgANpu4Eg5+WcKvlx1migvB20wzAT3wnKvtZ5UhVK9DLKZPzsS2/CSvSrUPURYcW9CJC6Cw==" />
+        </item>
+        <item>
+            <title>1.0.0</title>
+            <pubDate>Sat, 21 Mar 2026 01:23:50 +0800</pubDate>
+            <link>https://github.com/wangwanjie/ViewScope/releases/tag/v1.0.0</link>
+            <sparkle:version>1</sparkle:version>
+            <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"># ViewScope 1.0.0
+
+- 首个可用版本：提供原生 macOS UI 层级树、属性面板、截图预览与节点高亮。
+- 新增 `ViewScopeServer`，通过 `DistributedNotificationCenter` + loopback TCP 在本机发现并连接调试宿主。
+- 支持 Swift Package Manager、CocoaPods、Carthage 三种集成方式，默认面向 Debug 构建使用。
+- 新增状态栏快捷入口、分组偏好设置、GRDB 捕获历史、Sparkle 更新通道，以及 DMG / appcast 发布脚本。
+- 支持简体中文、繁体中文、英语三种应用内语言切换，客户端与 inspector 文案同步切换。
+- 仓库根目录直接暴露 `Package.swift`，Xcode / SwiftPM 可直接依赖 `https://github.com/wangwanjie/ViewScope.git`。
+</description>
+            <enclosure url="https://github.com/wangwanjie/ViewScope/releases/download/v1.0.0/ViewScope_V_1.0.0.dmg" length="9260101" type="application/octet-stream" sparkle:edSignature="l8Vfk5WkxkU6PigNj8UrOskxEyYi7DcA89Nv/C7ZOQM0nxzHWZjhnX4DE8RvFxKztBBsaVt58UtSCzsEFsy9Ag==" />
         </item>
         <link>https://github.com/wangwanjie/ViewScope</link>
         <description>ViewScope release feed.</description>
