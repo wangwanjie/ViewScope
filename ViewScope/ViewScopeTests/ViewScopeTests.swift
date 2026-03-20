@@ -140,6 +140,32 @@ struct ViewScopeTests {
         #expect(formatted == "AppKit.NSTextFieldSimpleLabel _72EBFCF981BE77E1C6F26FD717D08939")
     }
 
+    @Test func previewImageSliceGeometryFlipsCanvasRectIntoImageSpace() async throws {
+        let imageRect = PreviewImageSliceGeometry.imageRect(
+            forCanvasRect: CGRect(x: 12, y: 18, width: 60, height: 24),
+            canvasSize: CGSize(width: 200, height: 120),
+            imageSize: CGSize(width: 200, height: 120)
+        )
+
+        #expect(imageRect.origin.x == 12)
+        #expect(imageRect.origin.y == 78)
+        #expect(imageRect.width == 60)
+        #expect(imageRect.height == 24)
+    }
+
+    @Test func previewImageSliceGeometryScalesCanvasRectIntoRetinaImageSpace() async throws {
+        let imageRect = PreviewImageSliceGeometry.imageRect(
+            forCanvasRect: CGRect(x: 12, y: 18, width: 60, height: 24),
+            canvasSize: CGSize(width: 200, height: 120),
+            imageSize: CGSize(width: 400, height: 240)
+        )
+
+        #expect(imageRect.origin.x == 24)
+        #expect(imageRect.origin.y == 156)
+        #expect(imageRect.width == 120)
+        #expect(imageRect.height == 48)
+    }
+
     @Test func releaseVersionComparison() async throws {
         #expect(ReleaseVersion("1.0") == ReleaseVersion("1.0.0"))
         #expect(ReleaseVersion("1.0.1") > ReleaseVersion("1.0.0"))
@@ -155,13 +181,13 @@ struct ViewScopeTests {
 
     @Test func previewHitTestingFindsChartCard() async throws {
         let capture = SampleFixture.capture()
-        let nodeID = PreviewHitTester().deepestNodeID(at: CGPoint(x: 600, y: 200), in: capture)
+        let nodeID = ViewHierarchyGeometry().deepestNodeID(at: CGPoint(x: 600, y: 200), in: capture)
         #expect(nodeID == "window-0-view-1-2")
     }
 
     @Test func previewHitTestingRespectsFlippedCoordinates() async throws {
         let capture = SampleFixture.capture()
-        let nodeID = PreviewHitTester().deepestNodeID(at: CGPoint(x: 100, y: 590), in: capture)
+        let nodeID = ViewHierarchyGeometry().deepestNodeID(at: CGPoint(x: 100, y: 590), in: capture)
         #expect(nodeID == "window-0-view-0-0")
     }
 

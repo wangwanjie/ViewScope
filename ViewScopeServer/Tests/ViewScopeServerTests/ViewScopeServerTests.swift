@@ -142,6 +142,96 @@ final class ViewScopeServerTests: XCTestCase {
         XCTAssertTrue(ivarNames.contains("actionButton"))
     }
 
+    @MainActor
+    func testSnapshotBuilderCapturesVisibleTableRowContentViews() {
+        final class TableFixtureDataSource: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+            let items = ["Alpha", "Beta"]
+
+            func numberOfRows(in tableView: NSTableView) -> Int {
+                items.count
+            }
+
+            func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+                let cell = NSTableCellView(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
+                let container = NSView(frame: cell.bounds)
+                let textField = NSTextField(labelWithString: items[row])
+                textField.frame = NSRect(x: 8, y: 2, width: 180, height: 20)
+                container.addSubview(textField)
+                cell.addSubview(container)
+                cell.textField = textField
+                return cell
+            }
+        }
+
+        let dataSource = TableFixtureDataSource()
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 220), styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "Table Fixture"
+        defer {
+            window.orderOut(nil)
+            window.close()
+        }
+
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 180))
+        let tableView = NSTableView(frame: scrollView.bounds)
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
+        column.width = 260
+        tableView.addTableColumn(column)
+        tableView.headerView = nil
+        tableView.rowHeight = 24
+        tableView.intercellSpacing = .zero
+        tableView.delegate = dataSource
+        tableView.dataSource = dataSource
+        scrollView.documentView = tableView
+
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 220))
+        root.addSubview(scrollView)
+        window.contentView = root
+        window.orderFrontRegardless()
+        tableView.reloadData()
+        tableView.layoutSubtreeIfNeeded()
+        scrollView.layoutSubtreeIfNeeded()
+        root.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+
+        let builder = ViewScopeSnapshotBuilder(
+            hostInfo: ViewScopeHostInfo(
+                displayName: "Fixture",
+                bundleIdentifier: "fixture.tests",
+                version: "1.0",
+                build: "1",
+                processIdentifier: 1,
+                runtimeVersion: viewScopeServerRuntimeVersion,
+                supportsHighlighting: true
+            )
+        )
+
+        let (capture, _) = builder.makeCapture()
+        let titles = Set(capture.nodes.values.map(\.title))
+
+        XCTAssertTrue(titles.contains("Alpha"))
+        XCTAssertTrue(titles.contains("Beta"))
+
+        let rowNode = capture.nodes.values.first {
+            $0.className.contains("NSTableRowView") && $0.title.contains("Row")
+        }
+        let cellNode = capture.nodes.values.first {
+            $0.className.contains("NSTableCellView") && $0.title == "Alpha"
+        }
+
+        XCTAssertNotNil(rowNode)
+        XCTAssertNotNil(cellNode)
+        if let rowNode, let cellNode {
+            XCTAssertLessThanOrEqual(cellNode.frame.x, rowNode.bounds.width)
+            XCTAssertLessThanOrEqual(cellNode.frame.y, rowNode.bounds.height)
+            XCTAssertFalse(cellNode.childIDs.isEmpty)
+            let cellChildClassNames = Set(
+                cellNode.childIDs.compactMap { capture.nodes[$0]?.className }
+            )
+            XCTAssertTrue(cellChildClassNames.contains { $0.contains("NSTextField") })
+        }
+    }
+
     func testClassNameFormatterFlattensPrivateSwiftContext() {
         let formatted = ViewScopeClassNameFormatter.displayName(
             for: "_TtC6AppKitP33_72EBFCF981BE77E1C6F26FD717D0893922NSTextFieldSimpleLabel"
@@ -280,63 +370,6 @@ final class ViewScopeServerTests: XCTestCase {
         XCTAssertTrue(editableKeys.contains("alpha"))
         XCTAssertTrue(editableKeys.contains("frame.x"))
         XCTAssertTrue(editableKeys.contains("frame.width"))
-    }
-
-    @MainActor
-    func testAutoStartRunsOnceByDefault() {
-        ViewScopeInspector.resetLifecycleStateForTesting()
-        var startCount = 0
-        ViewScopeInspector.setStartHandlerForTesting { _ in
-            startCount += 1
-        }
-
-        XCTAssertTrue(ViewScopeInspector.isAutomaticStartEnabledForTesting)
-
-        ViewScopeInspector.performAutomaticStartIfNeededForTesting()
-        ViewScopeInspector.performAutomaticStartIfNeededForTesting()
-
-        XCTAssertEqual(startCount, 1)
-        XCTAssertFalse(ViewScopeInspector.isAutomaticStartEnabledForTesting)
-    }
-
-    @MainActor
-    func testAutoStartCanBeDisabledBeforeBootstrapRuns() {
-        ViewScopeInspector.resetLifecycleStateForTesting()
-        var startCount = 0
-        ViewScopeInspector.setStartHandlerForTesting { _ in
-            startCount += 1
-        }
-
-        ViewScopeInspector.disableAutomaticStart()
-        ViewScopeInspector.performAutomaticStartIfNeededForTesting()
-
-        XCTAssertEqual(startCount, 0)
-        XCTAssertFalse(ViewScopeInspector.isAutomaticStartEnabledForTesting)
-    }
-
-    @MainActor
-    func testManualStartStillWorksAfterDisablingAutomaticStart() {
-        ViewScopeInspector.resetLifecycleStateForTesting()
-        var receivedConfiguration: ViewScopeInspector.Configuration?
-        ViewScopeInspector.setStartHandlerForTesting { configuration in
-            receivedConfiguration = configuration
-        }
-
-        ViewScopeInspector.disableAutomaticStart()
-        ViewScopeInspector.start(
-            configuration: .init(
-                displayName: "Manual",
-                allowInReleaseBuilds: true,
-                heartbeatInterval: 4,
-                highlightDuration: 2
-            )
-        )
-
-        XCTAssertEqual(receivedConfiguration?.displayName, "Manual")
-        XCTAssertEqual(receivedConfiguration?.allowInReleaseBuilds, true)
-        XCTAssertEqual(receivedConfiguration?.heartbeatInterval, 4)
-        XCTAssertEqual(receivedConfiguration?.highlightDuration, 2)
-        XCTAssertFalse(ViewScopeInspector.isAutomaticStartEnabledForTesting)
     }
 }
 

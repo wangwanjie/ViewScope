@@ -11,3 +11,6 @@ ViewScope/ViewScope.xcodeproj/project.xcworkspace/xcuserdata/
 ViewScope/ViewScope.xcodeproj/xcuserdata/
 
 .worktrees/
+.worktree-link
+.derived
+docs/superpowers
