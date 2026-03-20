@@ -4,7 +4,7 @@ import ViewScopeServer
 
 @MainActor
 /// Owns a single TCP session between the macOS client and an inspected host app.
-final class ViewScopeClientSession {
+final class ViewScopeClientSession: WorkspaceSessionProtocol {
     enum SessionError: LocalizedError {
         case connectionFailed(String)
         case disconnected
