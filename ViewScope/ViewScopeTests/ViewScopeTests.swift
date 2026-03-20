@@ -177,7 +177,7 @@ struct ViewScopeTests {
     @Test func releaseVersionComparison() async throws {
         #expect(ReleaseVersion("1.0") == ReleaseVersion("1.0.0"))
         #expect(ReleaseVersion("1.0.1") > ReleaseVersion("1.0.0"))
-        #expect(ReleaseVersion("v1.2.0-beta.1") > ReleaseVersion("1.1.9"))
+        #expect(ReleaseVersion("v1.2.1-beta.1") > ReleaseVersion("1.1.9"))
         #expect(ReleaseVersion("2.0") > ReleaseVersion("1.9.9"))
     }
 
@@ -384,10 +384,10 @@ struct ViewScopeTests {
     }
 
     @Test func integrationGuideEntriesUseCurrentReleaseVersion() async throws {
-        let entries = IntegrationGuideContent.entries(releaseVersion: "1.2.0")
+        let entries = IntegrationGuideContent.entries(releaseVersion: "1.2.1")
 
         #expect(entries.count == 3)
-        #expect(entries.allSatisfy { $0.snippet.contains("1.2.0") || $0.snippet.contains("~> 1.2") })
+        #expect(entries.allSatisfy { $0.snippet.contains("1.2.1") || $0.snippet.contains("~> 1.2") })
     }
 
     @Test func treePanelShowsEmptyStateWhenDisconnected() async throws {
@@ -424,7 +424,7 @@ struct ViewScopeTests {
             L10n.integrationCarthage
         ])
         #expect(guideView.visibleSnippets.count == 3)
-        #expect(guideView.visibleSnippets.joined(separator: "\n").contains("1.2.0"))
+        #expect(guideView.visibleSnippets.joined(separator: "\n").contains("1.2.1"))
         #expect(guideView.helpButtonTitle == L10n.menuGitHub)
         #expect(guideView.helpButtonPlacement == .bottom)
     }

@@ -1,6 +1,6 @@
 Pod::Spec.new do |spec|
   spec.name = 'ViewScopeServer'
-  spec.version = '1.2.0'
+  spec.version = '1.2.1'
   spec.summary = 'AppKit UI inspection bridge for the ViewScope macOS client.'
   spec.description = 'Embed ViewScopeServer into a debug build to inspect native macOS windows and views from ViewScope.'
   spec.homepage = 'https://github.com/wangwanjie/ViewScope'

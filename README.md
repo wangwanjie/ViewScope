@@ -62,7 +62,7 @@ xcodebuild \
 ### Swift Package Manager
 
 ```swift
-.package(url: "https://github.com/wangwanjie/ViewScope.git", from: "1.2.0")
+.package(url: "https://github.com/wangwanjie/ViewScope.git", from: "1.2.1")
 ```
 
 仓库根目录直接提供 `Package.swift`，Xcode / SwiftPM 可以直接依赖整个仓库 URL，无需指向 `ViewScopeServer/` 子目录。
@@ -102,7 +102,7 @@ struct DemoApp: App {
 ### CocoaPods
 
 ```ruby
-pod 'ViewScopeServer', :git => 'https://github.com/wangwanjie/ViewScope.git', :tag => 'v1.2.0', :configurations => ['Debug']
+pod 'ViewScopeServer', :git => 'https://github.com/wangwanjie/ViewScope.git', :tag => 'v1.2.1', :configurations => ['Debug']
 ```
 
 ### Carthage
@@ -156,8 +156,8 @@ ViewScope 会常驻一个 `VS` 状态栏入口：
 
 ```bash
 ./scripts/build_dmg.sh
-./scripts/publish_github_release.sh --notes-file release-notes/v1.2.0.md
-./scripts/generate_appcast.sh --archive build/dmg/ViewScope_V_1.2.0.dmg --notes-file release-notes/v1.2.0.md
+./scripts/publish_github_release.sh --notes-file release-notes/v1.2.1.md
+./scripts/generate_appcast.sh --archive build/dmg/ViewScope_V_1.2.1.dmg --notes-file release-notes/v1.2.1.md
 ```
 
 其中：

@@ -55,7 +55,7 @@ final class ViewScopeClientSession: WorkspaceSessionProtocol {
                 clientHello: ViewScopeClientHelloPayload(
                     authToken: announcement.authToken,
                     clientName: "ViewScope",
-                    clientVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.2.0",
+                    clientVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.2.1",
                     protocolVersion: viewScopeCurrentProtocolVersion,
                     preferredLanguage: AppLocalization.shared.language.rawValue
                 )
