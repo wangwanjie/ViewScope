@@ -17,6 +17,9 @@ enum L10n {
     static var recentSessions: String { tr("sidebar.recent_sessions") }
     static var hierarchy: String { tr("section.hierarchy") }
     static var inspector: String { tr("section.inspector") }
+    static var hierarchyEmptyTitle: String { tr("workspace.empty.hierarchy.title") }
+    static var inspectorEmptyDisconnectedTitle: String { tr("workspace.empty.inspector.disconnected.title") }
+    static var inspectorEmptySelectionTitle: String { tr("workspace.empty.inspector.selection.title") }
     static var ancestry: String { tr("detail.ancestry") }
     static var constraints: String { tr("detail.constraints") }
     static var idleBadge: String { tr("badge.idle") }
@@ -33,6 +36,7 @@ enum L10n {
     static var detailCapture: String { tr("detail.field.capture") }
     static var detailHistory: String { tr("detail.field.history") }
     static var pickNodePlaceholder: String { tr("detail.placeholder.pick_node") }
+    static var previewDisconnectedPlaceholder: String { tr("detail.placeholder.disconnected") }
     static var noHostsOnlineTitle: String { tr("hosts.empty.live.title") }
     static var noHostsOnlineSubtitle: String { tr("hosts.empty.live.subtitle") }
     static var noRecentSessionsTitle: String { tr("hosts.empty.recent.title") }

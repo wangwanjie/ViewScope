@@ -14,6 +14,9 @@
 "sidebar.recent_sessions" = "最近工作階段";
 "section.hierarchy" = "層級樹";
 "section.inspector" = "檢查器";
+"workspace.empty.hierarchy.title" = "尚未取得層級";
+"workspace.empty.inspector.disconnected.title" = "暫時沒有可檢查內容";
+"workspace.empty.inspector.selection.title" = "請選取一個節點";
 "detail.ancestry" = "祖先鏈";
 "detail.constraints" = "約束";
 "badge.idle" = "閒置";
@@ -34,6 +37,7 @@
 "detail.history.first" = "這是目前工作區中的首次擷取";
 "detail.history.summary.one" = "%1$d 次擷取，平均 %2$d 毫秒";
 "detail.history.summary.other" = "%1$d 次擷取，平均 %2$d 毫秒";
+"detail.placeholder.disconnected" = "請先連接一個 Debug 宿主，連接成功後這裡會顯示層級、屬性與可編輯項。";
 "detail.placeholder.pick_node" = "從層級樹中選取一個節點，以查看它的屬性、約束與即時截圖預覽。";
 "hosts.empty.live.title" = "暫無線上宿主";
 "hosts.empty.live.subtitle" = "在 Debug 應用中啟動 ViewScopeServer 後，會在這裡發現它。";

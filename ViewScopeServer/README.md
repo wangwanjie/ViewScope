@@ -15,7 +15,7 @@
 ### Swift Package Manager
 
 ```swift
-.package(url: "https://github.com/wangwanjie/ViewScope.git", from: "1.1.0")
+.package(url: "https://github.com/wangwanjie/ViewScope.git", from: "1.2.0")
 ```
 
 Add the `ViewScopeServer` product to your debug target:
@@ -53,13 +53,13 @@ If your macOS debug host enables `App Sandbox`, turn `ENABLE_APP_SANDBOX` off fo
 ### CocoaPods
 
 ```ruby
-pod 'ViewScopeServer', :git => 'https://github.com/wangwanjie/ViewScope.git', :tag => 'v1.1.0', :configurations => ['Debug']
+pod 'ViewScopeServer', :git => 'https://github.com/wangwanjie/ViewScope.git', :tag => 'v1.2.0', :configurations => ['Debug']
 ```
 
 ### Carthage
 
 ```ruby
-github "wangwanjie/ViewScope" ~> 1.1
+github "wangwanjie/ViewScope" ~> 1.2
 ```
 
 Then run:

@@ -123,7 +123,7 @@ final class StatusItemController: NSObject {
     }
 
     @objc private func refreshCapture() {
-        Task { await store.refreshCapture() }
+        Task { await store.refreshCapture(forceReloadSelectionDetail: true, clearingVisibleState: true) }
     }
 
     @objc private func toggleAutoRefresh() {

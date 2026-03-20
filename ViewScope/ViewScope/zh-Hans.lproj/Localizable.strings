@@ -14,6 +14,9 @@
 "sidebar.recent_sessions" = "最近会话";
 "section.hierarchy" = "层级树";
 "section.inspector" = "检查器";
+"workspace.empty.hierarchy.title" = "暂未获取层级";
+"workspace.empty.inspector.disconnected.title" = "暂时没有可检查内容";
+"workspace.empty.inspector.selection.title" = "请选择一个节点";
 "detail.ancestry" = "祖先链";
 "detail.constraints" = "约束";
 "badge.idle" = "空闲";
@@ -34,6 +37,7 @@
 "detail.history.first" = "这是当前工作区中的首次采集";
 "detail.history.summary.one" = "%1$d 次采集，平均 %2$d 毫秒";
 "detail.history.summary.other" = "%1$d 次采集，平均 %2$d 毫秒";
+"detail.placeholder.disconnected" = "请先连接一个 Debug 宿主，连接成功后这里会显示层级、属性和可编辑项。";
 "detail.placeholder.pick_node" = "从层级树中选择一个节点，以查看它的属性、约束和实时截图预览。";
 "hosts.empty.live.title" = "暂无在线宿主";
 "hosts.empty.live.subtitle" = "在 Debug 应用中启动 ViewScopeServer 后，会在这里发现它。";

@@ -14,6 +14,9 @@
 "sidebar.recent_sessions" = "Recent Sessions";
 "section.hierarchy" = "Hierarchy";
 "section.inspector" = "Inspector";
+"workspace.empty.hierarchy.title" = "No hierarchy yet";
+"workspace.empty.inspector.disconnected.title" = "Nothing to inspect yet";
+"workspace.empty.inspector.selection.title" = "Select a node";
 "detail.ancestry" = "Ancestry";
 "detail.constraints" = "Constraints";
 "badge.idle" = "IDLE";
@@ -34,6 +37,7 @@
 "detail.history.first" = "First capture in this workspace";
 "detail.history.summary.one" = "%1$d capture, avg %2$d ms";
 "detail.history.summary.other" = "%1$d captures, avg %2$d ms";
+"detail.placeholder.disconnected" = "Connect a debug host first, then ViewScope can load the hierarchy and editable properties here.";
 "detail.placeholder.pick_node" = "Pick a node from the hierarchy to inspect its properties, constraints, and live screenshot preview.";
 "hosts.empty.live.title" = "No hosts online";
 "hosts.empty.live.subtitle" = "Start ViewScopeServer in a debug app to discover it here.";

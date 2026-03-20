@@ -11,6 +11,7 @@ final class ViewTreePanelController: NSViewController {
     private let searchField = NSSearchField(frame: .zero)
     private let scrollView = NSScrollView()
     private let outlineView = NSOutlineView()
+    private let emptyStateView = WorkspaceEmptyStateView()
     private var cancellables = Set<AnyCancellable>()
     private var rootItems: [ViewTreeNodeItem] = []
     private var expandedNodeIDs = Set<String>()
@@ -66,12 +67,16 @@ final class ViewTreePanelController: NSViewController {
 
         panelView.contentView.addSubview(searchField)
         panelView.contentView.addSubview(scrollView)
+        panelView.contentView.addSubview(emptyStateView)
         searchField.snp.makeConstraints { make in
             make.top.leading.trailing.equalToSuperview().inset(12)
         }
         scrollView.snp.makeConstraints { make in
             make.top.equalTo(searchField.snp.bottom).offset(10)
             make.leading.trailing.bottom.equalToSuperview()
+        }
+        emptyStateView.snp.makeConstraints { make in
+            make.edges.equalToSuperview()
         }
     }
 
@@ -87,9 +92,28 @@ final class ViewTreePanelController: NSViewController {
     private func rebuildTree() {
         panelView.setTitle(L10n.hierarchy, subtitle: store.focusedNode?.title)
         rootItems = buildFilteredRoots()
+        updateEmptyState()
         outlineView.reloadData()
         restoreExpansionState(items: rootItems)
         syncSelectionFromStore()
+    }
+
+    private func updateEmptyState() {
+        let isDisconnected = store.capture == nil
+        emptyStateView.isHidden = !isDisconnected
+        searchField.isHidden = isDisconnected
+        scrollView.isHidden = isDisconnected
+        guard isDisconnected else { return }
+
+        emptyStateView.configure(
+            .init(
+                symbolName: "square.stack.3d.up.slash",
+                title: L10n.hierarchyEmptyTitle,
+                message: L10n.previewDisconnectedPlaceholder,
+                actionTitle: nil,
+                action: nil
+            )
+        )
     }
 
     private func buildFilteredRoots() -> [ViewTreeNodeItem] {
@@ -170,7 +194,7 @@ final class ViewTreePanelController: NSViewController {
     }
 
     @objc private func refreshCapture(_ sender: Any?) {
-        Task { await store.refreshCapture() }
+        Task { await store.refreshCapture(forceReloadSelectionDetail: true, clearingVisibleState: true) }
     }
 
     @objc private func copySelectedNodeTitle(_ sender: Any?) {
@@ -264,7 +288,7 @@ extension ViewTreePanelController: NSOutlineViewDataSource, NSOutlineViewDelegat
         let cell = outlineView.makeView(withIdentifier: identifier, owner: self) as? ViewTreeNodeCellView ?? ViewTreeNodeCellView(frame: .zero)
         cell.identifier = identifier
         cell.delegate = self
-        cell.configure(node: item.node)
+        cell.configure(node: item.node, isEffectivelyHidden: item.isEffectivelyHidden)
         return cell
     }
 
@@ -485,15 +509,19 @@ private final class ViewTreeNodeCellView: NSTableCellView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func configure(node: ViewScopeHierarchyNode) {
+    func configure(node: ViewScopeHierarchyNode, isEffectivelyHidden: Bool) {
         nodeID = node.id
         classLabel.stringValue = ViewTreeNodePresentation.classText(for: node)
         let ivarText = ViewTreeNodePresentation.ivarText(for: node)
         ivarLabel.isHidden = ivarText == nil
         ivarLabel.stringValue = ivarText ?? ""
+        let alphaComponent: CGFloat = isEffectivelyHidden ? 0.45 : 1
+        classLabel.textColor = .labelColor.withAlphaComponent(alphaComponent)
+        ivarLabel.textColor = .secondaryLabelColor.withAlphaComponent(alphaComponent)
         visibilityButton.image = NSImage(systemSymbolName: node.isHidden ? "eye.slash" : "eye", accessibilityDescription: nil)
         visibilityButton.toolTip = node.isHidden ? L10n.hierarchyMenuShowView : L10n.hierarchyMenuHideView
         visibilityButton.isEnabled = node.kind == .view
+        visibilityButton.contentTintColor = .secondaryLabelColor.withAlphaComponent(alphaComponent)
     }
 
     @objc private func handleVisibilityButton(_ sender: Any?) {
@@ -508,10 +536,13 @@ extension ViewTreePanelController: ViewTreeNodeCellViewDelegate {
     }
 }
 
-private final class ViewTreeNodeItem: NSObject {
+final class ViewTreeNodeItem: NSObject {
     let node: ViewScopeHierarchyNode
     weak var parent: ViewTreeNodeItem?
     let children: [ViewTreeNodeItem]
+    var isEffectivelyHidden: Bool {
+        node.isHidden || parent?.isEffectivelyHidden == true
+    }
 
     init(node: ViewScopeHierarchyNode, children: [ViewTreeNodeItem]) {
         self.node = node

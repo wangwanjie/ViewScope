@@ -197,7 +197,7 @@ final class WorkspaceToolbarViewController: NSViewController {
     }
 
     @objc private func refreshCapture(_ sender: Any?) {
-        Task { await store.refreshCapture() }
+        Task { await store.refreshCapture(forceReloadSelectionDetail: true, clearingVisibleState: true) }
     }
 
     @objc private func disconnectHost(_ sender: Any?) {

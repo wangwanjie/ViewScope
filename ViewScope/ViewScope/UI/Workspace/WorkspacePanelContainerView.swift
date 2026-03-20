@@ -40,6 +40,7 @@ final class WorkspacePanelContainerView: NSView {
 
     private func buildViewHierarchy() {
         wantsLayer = true
+        translatesAutoresizingMaskIntoConstraints = false
 
         headerView.material = .headerView
         headerView.blendingMode = .withinWindow
@@ -48,17 +49,21 @@ final class WorkspacePanelContainerView: NSView {
         headerView.layer?.borderWidth = 1
 
         titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.lineBreakMode = .byTruncatingTail
         subtitleLabel.font = NSFont.systemFont(ofSize: 11)
         subtitleLabel.textColor = .secondaryLabelColor
+        subtitleLabel.lineBreakMode = .byTruncatingTail
         subtitleLabel.isHidden = true
 
         accessoryStackView.orientation = .horizontal
         accessoryStackView.alignment = .centerY
         accessoryStackView.spacing = 8
+        accessoryStackView.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         titleStack.orientation = .vertical
         titleStack.alignment = .leading
         titleStack.spacing = 1
+        titleStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleStack.addArrangedSubview(titleLabel)
         titleStack.addArrangedSubview(subtitleLabel)
 
