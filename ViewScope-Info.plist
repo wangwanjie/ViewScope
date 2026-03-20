@@ -37,7 +37,7 @@
     <key>SUFeedURL</key>
     <string>https://raw.githubusercontent.com/wangwanjie/ViewScope/main/appcast.xml</string>
     <key>SUPublicEDKey</key>
-	<string>1oNr1ETj+PunsBbJAb64HuHxACah0pQF07cidiG5rHc=</string>
+    <string>6swJ0d9FxitDqslP3gdTK9HsZwBOYEwDRmwRRvqXz78=</string>
     <key>SUVerifyUpdateBeforeExtraction</key>
     <true/>
 </dict>
