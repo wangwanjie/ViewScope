@@ -81,6 +81,7 @@ enum L10n {
     static var menuShowMainWindow: String { tr("menu.show_main_window") }
     static var menuRefreshCapture: String { tr("menu.refresh_capture") }
     static var menuWindow: String { tr("menu.window") }
+    static var menuCloseWindow: String { tr("menu.close_window") }
     static var menuMinimize: String { tr("menu.minimize") }
     static var menuZoom: String { tr("menu.zoom") }
     static var menuHelp: String { tr("menu.help") }

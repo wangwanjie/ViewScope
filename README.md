@@ -62,35 +62,53 @@ xcodebuild \
 ### Swift Package Manager
 
 ```swift
-.package(url: "https://github.com/wangwanjie/ViewScope.git", from: "1.0.0")
+.package(url: "https://github.com/wangwanjie/ViewScope.git", from: "1.1.0")
 ```
 
 仓库根目录直接提供 `Package.swift`，Xcode / SwiftPM 可以直接依赖整个仓库 URL，无需指向 `ViewScopeServer/` 子目录。
 
-把 `ViewScopeServer` product 加到 Debug 宿主 target，并在启动阶段调用：
+把 `ViewScopeServer` product 加到 Debug 宿主 target：
+
+```swift
+import ViewScopeServer
+```
+
+默认情况下，只要库被加载到 Debug 构建中，`ViewScopeServer` 会在宿主应用完成启动后自动启用。
+
+如果你想自己控制启用时机，可以在很早期先关闭自动启用，再在合适的时机手动调用 `start()`：
 
 ```swift
 import ViewScopeServer
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        ViewScopeInspector.start()
+@main
+struct DemoApp: App {
+    init() {
+        ViewScopeInspector.disableAutomaticStart()
+    }
+
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+                .task {
+                    ViewScopeInspector.start()
+                }
+        }
     }
 }
 ```
 
-如果你的 macOS Debug 宿主启用了 `App Sandbox`，请先把 Debug 配置里的 `ENABLE_APP_SANDBOX` 关掉。`ViewScope 1.0` 的发现层只用了 `DistributedNotificationCenter`，而系统默认的 app sandbox 不允许普通应用发送这类 discovery 广播，所以客户端会一直看不到 `Live Hosts`。
+如果你的 macOS Debug 宿主启用了 `App Sandbox`，请先把 Debug 配置里的 `ENABLE_APP_SANDBOX` 关掉。当前发现层使用 `DistributedNotificationCenter`，而系统默认的 app sandbox 不允许普通应用发送这类 discovery 广播，所以客户端会一直看不到 `Live Hosts`。
 
 ### CocoaPods
 
 ```ruby
-pod 'ViewScopeServer', :git => 'https://github.com/wangwanjie/ViewScope.git', :tag => 'v1.0.0', :configurations => ['Debug']
+pod 'ViewScopeServer', :git => 'https://github.com/wangwanjie/ViewScope.git', :tag => 'v1.1.0', :configurations => ['Debug']
 ```
 
 ### Carthage
 
 ```ruby
-github "wangwanjie/ViewScope" ~> 1.0
+github "wangwanjie/ViewScope" ~> 1.1
 ```
 
 然后执行：
@@ -99,7 +117,7 @@ github "wangwanjie/ViewScope" ~> 1.0
 carthage update --use-xcframeworks --platform macOS
 ```
 
-将生成的 `ViewScopeServer.framework` 链接到 Debug 宿主，再调用 `ViewScopeInspector.start()`。
+将生成的 `ViewScopeServer.framework` 链接到 Debug 宿主即可；默认会在启动完成后自动启用。
 
 ## 使用方式
 
@@ -138,8 +156,8 @@ ViewScope 会常驻一个 `VS` 状态栏入口：
 
 ```bash
 ./scripts/build_dmg.sh
-./scripts/publish_github_release.sh --notes-file release-notes/v1.0.0.md
-./scripts/generate_appcast.sh --archive build/dmg/ViewScope_V_1.0.0.dmg --notes-file release-notes/v1.0.0.md
+./scripts/publish_github_release.sh --notes-file release-notes/v1.1.0.md
+./scripts/generate_appcast.sh --archive build/dmg/ViewScope_V_1.1.0.dmg --notes-file release-notes/v1.1.0.md
 ```
 
 其中：

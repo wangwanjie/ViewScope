@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import ViewScopeServer
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -11,6 +12,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var cancellables = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Avoid exposing the ViewScope client itself as an inspectable host.
+        ViewScopeInspector.disableAutomaticStart()
+
         do {
             NSApp.setActivationPolicy(.regular)
             let store = try WorkspaceStore()
@@ -128,6 +132,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let windowItem = NSMenuItem()
         let windowMenu = NSMenu(title: L10n.menuWindow)
+        windowMenu.addItem(NSMenuItem(title: L10n.menuCloseWindow, action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"))
+        windowMenu.addItem(NSMenuItem.separator())
         windowMenu.addItem(NSMenuItem(title: L10n.menuMinimize, action: #selector(NSWindow.miniaturize(_:)), keyEquivalent: "m"))
         windowMenu.addItem(NSMenuItem(title: L10n.menuZoom, action: #selector(NSWindow.zoom(_:)), keyEquivalent: ""))
         NSApp.windowsMenu = windowMenu

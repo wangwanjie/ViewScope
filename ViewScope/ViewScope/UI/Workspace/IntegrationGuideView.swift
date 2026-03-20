@@ -64,15 +64,15 @@ final class IntegrationGuideView: NSView {
         subtitleLabel.stringValue = L10n.integrationSubtitle
         swiftPackageCard.configure(
             title: L10n.integrationSwiftPackageManager,
-            snippet: ".package(url: \"https://github.com/wangwanjie/ViewScope.git\", from: \"1.0.0\")\nimport ViewScopeServer\nViewScopeInspector.start()"
+            snippet: ".package(url: \"https://github.com/wangwanjie/ViewScope.git\", from: \"1.1.0\")\nimport ViewScopeServer\n// Auto-starts after launch by default"
         )
         cocoaPodsCard.configure(
             title: L10n.integrationCocoaPods,
-            snippet: "pod 'ViewScopeServer', :git => 'https://github.com/wangwanjie/ViewScope.git', :tag => 'v1.0.0', :configurations => ['Debug']"
+            snippet: "pod 'ViewScopeServer', :git => 'https://github.com/wangwanjie/ViewScope.git', :tag => 'v1.1.0', :configurations => ['Debug']"
         )
         carthageCard.configure(
             title: L10n.integrationCarthage,
-            snippet: "github \"wangwanjie/ViewScope\" ~> 1.0"
+            snippet: "github \"wangwanjie/ViewScope\" ~> 1.1"
         )
     }
 

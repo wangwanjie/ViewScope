@@ -58,7 +58,7 @@
 "hierarchy.menu.expand_children" = "展开子节点";
 "hierarchy.menu.collapse_children" = "折叠子节点";
 "integration.title" = "先把 ViewScopeServer 集成到你的 Debug 宿主里";
-"integration.subtitle" = "ViewScope 会自动发现本机 Debug 构建，通过 loopback 连接，并确保采集数据只在你的 Mac 上流动。若宿主启用了 App Sandbox，请先关闭 Debug 配置里的沙盒，否则 1.0 版本无法发现它。";
+"integration.subtitle" = "ViewScope 会自动发现本机 Debug 构建，通过 loopback 连接，并确保采集数据只在你的 Mac 上流动。若宿主启用了 App Sandbox，请先关闭 Debug 配置里的沙盒，否则当前发现流程无法发现它。";
 "integration.package.swiftpm" = "Swift Package Manager";
 "integration.package.cocoapods" = "CocoaPods";
 "integration.package.carthage" = "Carthage";
@@ -83,6 +83,7 @@
 "menu.show_main_window" = "显示主窗口";
 "menu.refresh_capture" = "刷新采集";
 "menu.window" = "窗口";
+"menu.close_window" = "关闭窗口";
 "menu.minimize" = "最小化";
 "menu.zoom" = "缩放";
 "menu.help" = "帮助";

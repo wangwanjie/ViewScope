@@ -13,8 +13,11 @@
 		7D538425D8B1C8188623F193 /* ViewScopeOverlayController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCCAF489C762B940DAB9250A /* ViewScopeOverlayController.swift */; };
 		89DD46EC8FA95BD53DA54C67 /* ViewScopeImageEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D92056C8E8D77D4C74AB75E /* ViewScopeImageEncoder.swift */; };
 		8EDFF273B141E89E18316988 /* ViewScopeSnapshotBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9264CEDC0BE79C4024537B1E /* ViewScopeSnapshotBuilder.swift */; };
+		8FD1234567890ABCDEFFEDCB /* ViewScopeClassNameFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FD1234567890ABCDEFFEDCA /* ViewScopeClassNameFormatter.swift */; };
+		90A1B2C3D4E5F60718293A4B /* ViewScopeAutoBootstrap.m in Sources */ = {isa = PBXBuildFile; fileRef = 90A1B2C3D4E5F60718293A4A /* ViewScopeAutoBootstrap.m */; };
 		97D5A2E0BC14C8018ACC5FD6 /* ViewScopeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2752205479184B07954C339F /* ViewScopeBridge.swift */; };
 		A80631511584830D7AAF3922 /* ViewScopeInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8B22980F2B8D619D5EB947B /* ViewScopeInspector.swift */; };
+		B90A1B2C3D4E5F60718293A4 /* ViewScopeInterfaceLanguage.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90A1B2C3D4E5F60718293A3 /* ViewScopeInterfaceLanguage.swift */; };
 		CB2227ED4DE2C0EAFA6EE658 /* ViewScopeConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A7DD03239C86E2343AF8E2C /* ViewScopeConnection.swift */; };
 		DE4B12D84A36A70F9051F957 /* Network.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 179CC96D1CF8C60A7A246E00 /* Network.framework */; };
 /* End PBXBuildFile section */
@@ -27,8 +30,12 @@
 		4A7DD03239C86E2343AF8E2C /* ViewScopeConnection.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ViewScopeConnection.swift; path = Sources/ViewScopeServer/ViewScopeConnection.swift; sourceTree = "<group>"; };
 		87409C648FE00350397FE216 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		9264CEDC0BE79C4024537B1E /* ViewScopeSnapshotBuilder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ViewScopeSnapshotBuilder.swift; path = Sources/ViewScopeServer/ViewScopeSnapshotBuilder.swift; sourceTree = "<group>"; };
+		8FD1234567890ABCDEFFEDCA /* ViewScopeClassNameFormatter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ViewScopeClassNameFormatter.swift; path = Sources/ViewScopeServer/ViewScopeClassNameFormatter.swift; sourceTree = "<group>"; };
+		90A1B2C3D4E5F60718293A4A /* ViewScopeAutoBootstrap.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; name = ViewScopeAutoBootstrap.m; path = Sources/ViewScopeServerBootstrap/ViewScopeAutoBootstrap.m; sourceTree = "<group>"; };
 		9D92056C8E8D77D4C74AB75E /* ViewScopeImageEncoder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ViewScopeImageEncoder.swift; path = Sources/ViewScopeServer/ViewScopeImageEncoder.swift; sourceTree = "<group>"; };
+		B90A1B2C3D4E5F60718293A3 /* ViewScopeInterfaceLanguage.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ViewScopeInterfaceLanguage.swift; path = Sources/ViewScopeServer/ViewScopeInterfaceLanguage.swift; sourceTree = "<group>"; };
 		B8B22980F2B8D619D5EB947B /* ViewScopeInspector.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ViewScopeInspector.swift; path = Sources/ViewScopeServer/ViewScopeInspector.swift; sourceTree = "<group>"; };
+		BA0A1B2C3D4E5F60718293A4 /* ViewScopeServerBootstrap.h */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.h; name = ViewScopeServerBootstrap.h; path = Sources/ViewScopeServerBootstrap/ViewScopeServerBootstrap.h; sourceTree = "<group>"; };
 		E040321C39205EE1DC62C4FB /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
 		FCCAF489C762B940DAB9250A /* ViewScopeOverlayController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ViewScopeOverlayController.swift; path = Sources/ViewScopeServer/ViewScopeOverlayController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -72,10 +79,14 @@
 			children = (
 				2752205479184B07954C339F /* ViewScopeBridge.swift */,
 				4A7DD03239C86E2343AF8E2C /* ViewScopeConnection.swift */,
+				8FD1234567890ABCDEFFEDCA /* ViewScopeClassNameFormatter.swift */,
 				9D92056C8E8D77D4C74AB75E /* ViewScopeImageEncoder.swift */,
 				B8B22980F2B8D619D5EB947B /* ViewScopeInspector.swift */,
+				B90A1B2C3D4E5F60718293A3 /* ViewScopeInterfaceLanguage.swift */,
 				FCCAF489C762B940DAB9250A /* ViewScopeOverlayController.swift */,
 				9264CEDC0BE79C4024537B1E /* ViewScopeSnapshotBuilder.swift */,
+				90A1B2C3D4E5F60718293A4A /* ViewScopeAutoBootstrap.m */,
+				BA0A1B2C3D4E5F60718293A4 /* ViewScopeServerBootstrap.h */,
 			);
 			name = ViewScopeServer;
 			sourceTree = "<group>";
@@ -182,10 +193,13 @@
 			files = (
 				97D5A2E0BC14C8018ACC5FD6 /* ViewScopeBridge.swift in Sources */,
 				CB2227ED4DE2C0EAFA6EE658 /* ViewScopeConnection.swift in Sources */,
+				8FD1234567890ABCDEFFEDCB /* ViewScopeClassNameFormatter.swift in Sources */,
 				89DD46EC8FA95BD53DA54C67 /* ViewScopeImageEncoder.swift in Sources */,
 				A80631511584830D7AAF3922 /* ViewScopeInspector.swift in Sources */,
+				B90A1B2C3D4E5F60718293A4 /* ViewScopeInterfaceLanguage.swift in Sources */,
 				7D538425D8B1C8188623F193 /* ViewScopeOverlayController.swift in Sources */,
 				8EDFF273B141E89E18316988 /* ViewScopeSnapshotBuilder.swift in Sources */,
+				90A1B2C3D4E5F60718293A4B /* ViewScopeAutoBootstrap.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -229,7 +243,7 @@
 				CODE_SIGNING_REQUIRED = NO;
 				CODE_SIGN_IDENTITY = "";
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -242,7 +256,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 11.0;
-				MARKETING_VERSION = 1.0.0;
+				MARKETING_VERSION = 1.1.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -290,7 +304,7 @@
 				CODE_SIGNING_REQUIRED = NO;
 				CODE_SIGN_IDENTITY = "";
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -309,7 +323,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 11.0;
-				MARKETING_VERSION = 1.0.0;
+				MARKETING_VERSION = 1.1.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -329,7 +343,7 @@
 				CODE_SIGNING_REQUIRED = NO;
 				CODE_SIGN_IDENTITY = "";
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEFINES_MODULE = YES;
 				DYLIB_COMPATIBILITY_VERSION = 1;
 				DYLIB_CURRENT_VERSION = 1;
@@ -341,7 +355,7 @@
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @loader_path/Frameworks @executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 11.0;
-				MARKETING_VERSION = 1.0.0;
+				MARKETING_VERSION = 1.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = cn.vanjay.ViewScopeServer;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
@@ -362,7 +376,7 @@
 				CODE_SIGNING_REQUIRED = NO;
 				CODE_SIGN_IDENTITY = "";
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEFINES_MODULE = YES;
 				DYLIB_COMPATIBILITY_VERSION = 1;
 				DYLIB_CURRENT_VERSION = 1;
@@ -374,7 +388,7 @@
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @loader_path/Frameworks @executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 11.0;
-				MARKETING_VERSION = 1.0.0;
+				MARKETING_VERSION = 1.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = cn.vanjay.ViewScopeServer;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;

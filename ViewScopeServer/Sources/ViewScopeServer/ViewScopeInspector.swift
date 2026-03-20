@@ -7,7 +7,12 @@ import Security
 public enum ViewScopeInspector {
     @MainActor
     public static func start(configuration: Configuration = .init()) {
-        Inspector.shared.start(configuration: configuration)
+        ViewScopeInspectorLifecycle.startManually(configuration: configuration)
+    }
+
+    @MainActor
+    public static func disableAutomaticStart() {
+        ViewScopeInspectorLifecycle.disableAutomaticStart()
     }
 
     @MainActor
@@ -32,6 +37,71 @@ public enum ViewScopeInspector {
             self.heartbeatInterval = heartbeatInterval
             self.highlightDuration = highlightDuration
         }
+    }
+
+    @MainActor
+    static func performAutomaticStartIfNeededForBootstrap() {
+        ViewScopeInspectorLifecycle.performAutomaticStartIfNeeded()
+    }
+
+    @MainActor
+    static var isAutomaticStartEnabledForTesting: Bool {
+        ViewScopeInspectorLifecycle.automaticStartEnabled
+    }
+
+    @MainActor
+    static func performAutomaticStartIfNeededForTesting() {
+        ViewScopeInspectorLifecycle.performAutomaticStartIfNeeded()
+    }
+
+    @MainActor
+    static func setStartHandlerForTesting(_ handler: @escaping (Configuration) -> Void) {
+        ViewScopeInspectorLifecycle.startHandler = handler
+    }
+
+    @MainActor
+    static func resetLifecycleStateForTesting() {
+        Inspector.shared.stop()
+        ViewScopeInspectorLifecycle.reset()
+    }
+}
+
+@objc(ViewScopeAutomaticStartBridge)
+public final class ViewScopeAutomaticStartBridge: NSObject {
+    @objc public static func performAutomaticStart() {
+        Task { @MainActor in
+            ViewScopeInspector.performAutomaticStartIfNeededForBootstrap()
+        }
+    }
+}
+
+@MainActor
+private enum ViewScopeInspectorLifecycle {
+    private static let defaultStartHandler: (ViewScopeInspector.Configuration) -> Void = { configuration in
+        Inspector.shared.start(configuration: configuration)
+    }
+
+    static var automaticStartEnabled = true
+    static var startHandler: (ViewScopeInspector.Configuration) -> Void = defaultStartHandler
+
+    static func startManually(configuration: ViewScopeInspector.Configuration) {
+        automaticStartEnabled = false
+        startHandler(configuration)
+    }
+
+    static func disableAutomaticStart() {
+        automaticStartEnabled = false
+    }
+
+    static func performAutomaticStartIfNeeded() {
+        guard automaticStartEnabled else { return }
+        automaticStartEnabled = false
+        startHandler(.init())
+    }
+
+    static func reset() {
+        automaticStartEnabled = true
+        startHandler = defaultStartHandler
     }
 }
 
@@ -58,7 +128,7 @@ private final class Inspector {
         self.configuration = configuration
 
         if isSandboxedHost() {
-            NSLog("ViewScopeServer warning: this host is sandboxed. ViewScope 1.0 discovery uses DistributedNotificationCenter only, so disable App Sandbox for the Debug configuration if you want it to appear in Live Hosts.")
+            NSLog("ViewScopeServer warning: this host is sandboxed. The current discovery flow uses DistributedNotificationCenter only, so disable App Sandbox for the Debug configuration if you want it to appear in Live Hosts.")
         }
 
         do {

@@ -240,6 +240,10 @@ for item in channel.findall("item"):
     item_link = find_or_create(item, "link")
     item_link.text = release_url
 
+    deltas = item.find(f"{{{sparkle_ns}}}deltas")
+    if deltas is not None:
+        item.remove(deltas)
+
     release_notes_link = item.find(f"{{{sparkle_ns}}}releaseNotesLink")
     if release_notes_link is not None:
         item.remove(release_notes_link)

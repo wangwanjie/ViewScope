@@ -58,7 +58,7 @@
 "hierarchy.menu.expand_children" = "Expand Children";
 "hierarchy.menu.collapse_children" = "Collapse Children";
 "integration.title" = "Start by embedding ViewScopeServer in your debug host";
-"integration.subtitle" = "ViewScope discovers local debug builds, connects over loopback, and only keeps capture traffic on your Mac. If the host still has App Sandbox enabled, turn it off for Debug first or ViewScope 1.0 will not discover it.";
+"integration.subtitle" = "ViewScope discovers local debug builds, connects over loopback, and only keeps capture traffic on your Mac. If the host still has App Sandbox enabled, turn it off for Debug first or discovery will not find it.";
 "integration.package.swiftpm" = "Swift Package Manager";
 "integration.package.cocoapods" = "CocoaPods";
 "integration.package.carthage" = "Carthage";
@@ -83,6 +83,7 @@
 "menu.show_main_window" = "Show Main Window";
 "menu.refresh_capture" = "Refresh Capture";
 "menu.window" = "Window";
+"menu.close_window" = "Close Window";
 "menu.minimize" = "Minimize";
 "menu.zoom" = "Zoom";
 "menu.help" = "Help";
