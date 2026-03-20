@@ -27,6 +27,10 @@ final class PreviewPanelController: NSViewController {
     private var autoCenterFocusKey: String?
     private var lastRenderedDisplayMode: WorkspacePreviewDisplayMode?
     private var lastRenderedFocusedNodeID: String?
+    private var lastResolvedSelectionNodeID: String?
+    private var lastResolvedSelectionRect: CGRect?
+    private var lastResolvedGeometryMode: PreviewCanvasGeometryMode?
+    private var lastResolvedSelectionGeometryMode: PreviewCanvasGeometryMode?
 
     init(store: WorkspaceStore) {
         self.store = store
@@ -122,15 +126,24 @@ final class PreviewPanelController: NSViewController {
         let capture = store.capture
         guideView.isHidden = capture != nil
         canvasView.isHidden = capture == nil
+        let previewImage = capture == nil ? nil : decodedPreviewImage(from: store.selectedNodeDetail)
+        let previewCanvasSize = capture == nil ? .zero : resolvedCanvasSize(capture: capture, detail: store.selectedNodeDetail)
+        let geometryMode = resolvedGeometryMode(capture: capture, detail: store.selectedNodeDetail)
+        let selectionRect = capture == nil ? nil : resolvedSelectionRect(
+            capture: capture,
+            detail: store.selectedNodeDetail,
+            geometryMode: geometryMode
+        )
 
         panelView.setTitle(L10n.canvasPreview, subtitle: store.focusedNode?.title)
 
         canvasView.capture = capture
-        canvasView.image = decodedPreviewImage(from: store.selectedNodeDetail)
-        canvasView.canvasSize = resolvedCanvasSize(capture: capture, detail: store.selectedNodeDetail)
+        canvasView.image = previewImage
+        canvasView.canvasSize = previewCanvasSize
         canvasView.selectedNodeID = store.selectedNodeID
         canvasView.focusedNodeID = store.focusedNodeID
-        canvasView.highlightedCanvasRect = resolvedSelectionRect(capture: capture, detail: store.selectedNodeDetail)
+        canvasView.highlightedCanvasRect = selectionRect
+        canvasView.geometryMode = geometryMode
         canvasView.displayMode = store.previewDisplayMode
         canvasView.zoomScale = store.previewScale
 
@@ -211,18 +224,70 @@ final class PreviewPanelController: NSViewController {
               store.focusedNodeID != nil else {
             return
         }
-        guard let rect = resolvedSelectionRect(capture: store.capture, detail: store.selectedNodeDetail) else {
+        guard let rect = resolvedSelectionRect(
+            capture: store.capture,
+            detail: store.selectedNodeDetail,
+            geometryMode: resolvedGeometryMode(capture: store.capture, detail: store.selectedNodeDetail)
+        ) else {
             return
         }
         canvasView.centerOnCanvasRect(rect.insetBy(dx: -40, dy: -40))
     }
 
-    private func resolvedSelectionRect(capture: ViewScopeCapturePayload?, detail: ViewScopeNodeDetailPayload?) -> CGRect? {
-        if let detail, detail.nodeID == store.selectedNodeID {
-            return detail.highlightedRect.cgRect
+    private func resolvedGeometryMode(
+        capture: ViewScopeCapturePayload?,
+        detail: ViewScopeNodeDetailPayload?
+    ) -> PreviewCanvasGeometryMode {
+        guard let capture else {
+            lastResolvedGeometryMode = nil
+            return .directGlobalCanvasRect
         }
-        guard let capture, let selectedNodeID = store.selectedNodeID else { return nil }
-        return geometry.canvasRect(for: selectedNodeID, in: capture)
+        if let inferredMode = PreviewPanelRenderDecisions.geometryMode(
+            capture: capture,
+            selectedNodeID: store.selectedNodeID,
+            detail: detail,
+            geometry: geometry
+        ) {
+            lastResolvedGeometryMode = inferredMode
+            return inferredMode
+        }
+        return lastResolvedGeometryMode ?? .directGlobalCanvasRect
+    }
+
+    private func resolvedSelectionRect(
+        capture: ViewScopeCapturePayload?,
+        detail: ViewScopeNodeDetailPayload?,
+        geometryMode: PreviewCanvasGeometryMode
+    ) -> CGRect? {
+        let selectionRect = PreviewPanelRenderDecisions.selectionRect(
+            capture: capture,
+            selectedNodeID: store.selectedNodeID,
+            detail: detail,
+            geometryMode: geometryMode,
+            geometry: geometry
+        )
+
+        if let selectedNodeID = store.selectedNodeID {
+            if let detail,
+               detail.nodeID == selectedNodeID,
+               let selectionRect {
+                lastResolvedSelectionNodeID = selectedNodeID
+                lastResolvedSelectionRect = selectionRect
+                lastResolvedSelectionGeometryMode = geometryMode
+                return selectionRect
+            }
+
+            if lastResolvedSelectionNodeID == selectedNodeID,
+               lastResolvedSelectionGeometryMode == geometryMode,
+               let lastResolvedSelectionRect {
+                return lastResolvedSelectionRect
+            }
+        }
+
+        lastResolvedSelectionNodeID = store.selectedNodeID
+        lastResolvedSelectionRect = selectionRect
+        lastResolvedSelectionGeometryMode = geometryMode
+        return selectionRect
     }
 
     @objc private func zoomOut(_ sender: Any?) {
@@ -260,6 +325,65 @@ final class PreviewPanelController: NSViewController {
 }
 
 struct PreviewPanelRenderDecisions {
+    static func geometryMode(
+        capture: ViewScopeCapturePayload?,
+        selectedNodeID: String?,
+        detail: ViewScopeNodeDetailPayload?,
+        geometry: ViewHierarchyGeometry = ViewHierarchyGeometry()
+    ) -> PreviewCanvasGeometryMode? {
+        guard let capture,
+              let selectedNodeID,
+              let detail,
+              detail.nodeID == selectedNodeID else {
+            return nil
+        }
+        let targetRect = detail.highlightedRect.cgRect
+        guard let directRect = geometry.canvasRect(
+                for: selectedNodeID,
+                in: capture,
+                mode: .directGlobalCanvasRect
+              ),
+              let legacyRect = geometry.canvasRect(
+                for: selectedNodeID,
+                in: capture,
+                mode: .legacyLocalFrames
+              ) else {
+            return nil
+        }
+
+        return rectDistance(from: directRect, to: targetRect) <= rectDistance(from: legacyRect, to: targetRect)
+            ? .directGlobalCanvasRect
+            : .legacyLocalFrames
+    }
+
+    static func selectionRect(
+        capture: ViewScopeCapturePayload?,
+        selectedNodeID: String?,
+        detail: ViewScopeNodeDetailPayload?,
+        geometryMode: PreviewCanvasGeometryMode,
+        geometry: ViewHierarchyGeometry = ViewHierarchyGeometry()
+    ) -> CGRect? {
+        guard let selectedNodeID else {
+            return nil
+        }
+        if let detail,
+           detail.nodeID == selectedNodeID {
+            return detail.highlightedRect.cgRect
+        }
+        if let capture,
+           let rect = geometry.canvasRect(for: selectedNodeID, in: capture, mode: geometryMode) {
+            return rect
+        }
+        return nil
+    }
+
+    private static func rectDistance(from lhs: CGRect, to rhs: CGRect) -> CGFloat {
+        abs(lhs.minX - rhs.minX) +
+            abs(lhs.minY - rhs.minY) +
+            abs(lhs.width - rhs.width) +
+            abs(lhs.height - rhs.height)
+    }
+
     static func autoCenterFocusKey(
         focusedNodeID: String?,
         capture: ViewScopeCapturePayload?

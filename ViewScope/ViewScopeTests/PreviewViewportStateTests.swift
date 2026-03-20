@@ -2,6 +2,7 @@ import CoreGraphics
 import Testing
 @testable import ViewScope
 
+@Suite(.serialized)
 @MainActor
 struct PreviewViewportStateTests {
     @Test func canvasPointRoundTripsAfterPanAndZoom() async throws {

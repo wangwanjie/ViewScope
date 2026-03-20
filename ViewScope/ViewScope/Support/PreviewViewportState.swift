@@ -110,7 +110,7 @@ struct PreviewViewportState {
 
     func canvasPoint(forViewPoint point: CGPoint) -> CGPoint? {
         guard isReady else { return nil }
-        let canvasPoint = canvasPointInBounds(forViewPoint: point)
+        let canvasPoint = rawCanvasPoint(forViewPoint: point)
         guard canvasBounds.insetBy(dx: -0.5, dy: -0.5).contains(canvasPoint) else {
             return nil
         }
@@ -118,6 +118,10 @@ struct PreviewViewportState {
             x: max(0, min(canvasSize.width, canvasPoint.x)),
             y: max(0, min(canvasSize.height, canvasPoint.y))
         )
+    }
+
+    func rawCanvasPoint(forViewPoint point: CGPoint) -> CGPoint {
+        canvasPointInBounds(forViewPoint: point)
     }
 
     func viewRect(forCanvasRect rect: CGRect) -> CGRect {

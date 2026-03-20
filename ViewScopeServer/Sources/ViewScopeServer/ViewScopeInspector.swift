@@ -440,15 +440,34 @@ private final class Inspector {
     }
 
     private func applyMutation(_ property: ViewScopeEditableProperty, to reference: ViewScopeInspectableReference) throws {
+        try ViewScopeMutationApplier.apply(property, to: reference)
+    }
+
+    private func hostInfo(from announcement: ViewScopeHostAnnouncement) -> ViewScopeHostInfo {
+        ViewScopeHostInfo(
+            displayName: announcement.displayName,
+            bundleIdentifier: announcement.bundleIdentifier,
+            version: announcement.version,
+            build: announcement.build,
+            processIdentifier: announcement.processIdentifier,
+            runtimeVersion: announcement.runtimeVersion,
+            supportsHighlighting: announcement.supportsHighlighting
+        )
+    }
+}
+
+@MainActor
+enum ViewScopeMutationApplier {
+    static func apply(_ property: ViewScopeEditableProperty, to reference: ViewScopeInspectableReference) throws {
         switch reference {
         case .window(let window):
-            try applyMutation(property, to: window)
+            try apply(property, to: window)
         case .view(let view):
-            try applyMutation(property, to: view)
+            try apply(property, to: view)
         }
     }
 
-    private func applyMutation(_ property: ViewScopeEditableProperty, to window: NSWindow) throws {
+    static func apply(_ property: ViewScopeEditableProperty, to window: NSWindow) throws {
         switch property.key {
         case "title":
             guard let value = property.textValue else {
@@ -485,7 +504,7 @@ private final class Inspector {
         }
     }
 
-    private func applyMutation(_ property: ViewScopeEditableProperty, to view: NSView) throws {
+    static func apply(_ property: ViewScopeEditableProperty, to view: NSView) throws {
         switch property.key {
         case "hidden":
             guard let value = property.boolValue else {
@@ -567,12 +586,46 @@ private final class Inspector {
                 throw MutationError.invalidValue
             }
             try applyControlValue(value, to: view)
+        case "toolTip":
+            guard let value = property.textValue else {
+                throw MutationError.invalidValue
+            }
+            view.toolTip = value
+        case "enabled":
+            guard let control = view as? NSControl,
+                  let value = property.boolValue else {
+                throw MutationError.invalidValue
+            }
+            control.isEnabled = value
+        case "button.state":
+            guard let button = view as? NSButton,
+                  button.allowsMixedState == false,
+                  let value = property.boolValue else {
+                throw MutationError.invalidValue
+            }
+            button.state = value ? .on : .off
+        case "textField.placeholderString":
+            guard let textField = view as? NSTextField,
+                  let value = property.textValue else {
+                throw MutationError.invalidValue
+            }
+            textField.placeholderString = value
+        case "layer.cornerRadius":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            mutateLayerValue(view, cornerRadius: value)
+        case "layer.borderWidth":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            mutateLayerValue(view, borderWidth: value)
         default:
             throw MutationError.unsupportedProperty
         }
     }
 
-    private func mutateWindowFrame(
+    private static func mutateWindowFrame(
         _ window: NSWindow,
         x: Double? = nil,
         y: Double? = nil,
@@ -598,7 +651,7 @@ private final class Inspector {
         window.setFrame(frame, display: true)
     }
 
-    private func mutateViewFrame(
+    private static func mutateViewFrame(
         _ view: NSView,
         x: Double? = nil,
         y: Double? = nil,
@@ -628,7 +681,7 @@ private final class Inspector {
         view.superview?.layoutSubtreeIfNeeded()
     }
 
-    private func mutateViewBounds(
+    private static func mutateViewBounds(
         _ view: NSView,
         x: Double? = nil,
         y: Double? = nil,
@@ -656,7 +709,7 @@ private final class Inspector {
         view.layoutSubtreeIfNeeded()
     }
 
-    private func mutateScrollViewInsets(
+    private static func mutateScrollViewInsets(
         _ view: NSView,
         top: Double? = nil,
         left: Double? = nil,
@@ -679,12 +732,13 @@ private final class Inspector {
         if let right {
             insets.right = CGFloat(right)
         }
+        scrollView.automaticallyAdjustsContentInsets = false
         scrollView.contentInsets = insets
         scrollView.needsLayout = true
         scrollView.layoutSubtreeIfNeeded()
     }
 
-    private func mutateBackgroundColor(_ view: NSView, hexString: String) throws {
+    private static func mutateBackgroundColor(_ view: NSView, hexString: String) throws {
         guard let color = NSColor(viewScopeHexString: hexString) else {
             throw MutationError.invalidValue
         }
@@ -693,7 +747,22 @@ private final class Inspector {
         view.needsDisplay = true
     }
 
-    private func applyControlValue(_ value: String, to view: NSView) throws {
+    private static func mutateLayerValue(
+        _ view: NSView,
+        cornerRadius: Double? = nil,
+        borderWidth: Double? = nil
+    ) {
+        view.wantsLayer = true
+        if let cornerRadius {
+            view.layer?.cornerRadius = CGFloat(max(0, cornerRadius))
+        }
+        if let borderWidth {
+            view.layer?.borderWidth = CGFloat(max(0, borderWidth))
+        }
+        view.needsDisplay = true
+    }
+
+    private static func applyControlValue(_ value: String, to view: NSView) throws {
         if let button = view as? NSButton {
             button.title = value
             return
@@ -707,18 +776,6 @@ private final class Inspector {
             return
         }
         throw MutationError.unsupportedProperty
-    }
-
-    private func hostInfo(from announcement: ViewScopeHostAnnouncement) -> ViewScopeHostInfo {
-        ViewScopeHostInfo(
-            displayName: announcement.displayName,
-            bundleIdentifier: announcement.bundleIdentifier,
-            version: announcement.version,
-            build: announcement.build,
-            processIdentifier: announcement.processIdentifier,
-            runtimeVersion: announcement.runtimeVersion,
-            supportsHighlighting: announcement.supportsHighlighting
-        )
     }
 }
 

@@ -10,6 +10,7 @@ final class InspectorPanelController: NSViewController {
     private let scrollView = NSScrollView()
     private let documentView = NSView()
     private let stackView = NSStackView()
+    private let emptyStateView = WorkspaceEmptyStateView()
     private let builder = InspectorPanelModelBuilder()
     private var cancellables = Set<AnyCancellable>()
     private var currentNodeID: String?
@@ -53,7 +54,11 @@ final class InspectorPanelController: NSViewController {
         documentView.addSubview(stackView)
 
         panelView.contentView.addSubview(scrollView)
+        panelView.contentView.addSubview(emptyStateView)
         scrollView.snp.makeConstraints { make in
+            make.edges.equalToSuperview()
+        }
+        emptyStateView.snp.makeConstraints { make in
             make.edges.equalToSuperview()
         }
         documentView.snp.makeConstraints { make in
@@ -88,11 +93,22 @@ final class InspectorPanelController: NSViewController {
         }
 
         if let placeholder = model.placeholder {
-            let label = NSTextField(wrappingLabelWithString: placeholder)
-            label.textColor = .secondaryLabelColor
-            stackView.addArrangedSubview(label)
+            scrollView.isHidden = true
+            emptyStateView.isHidden = false
+            emptyStateView.configure(
+                .init(
+                    symbolName: store.capture == nil ? "slider.horizontal.3" : "cursorarrow.click.2",
+                    title: store.capture == nil ? L10n.inspectorEmptyDisconnectedTitle : L10n.inspectorEmptySelectionTitle,
+                    message: placeholder,
+                    actionTitle: nil,
+                    action: nil
+                )
+            )
             return
         }
+
+        scrollView.isHidden = false
+        emptyStateView.isHidden = true
 
         model.sections.forEach { section in
             let sectionView = makeSectionView(section)
@@ -113,7 +129,7 @@ final class InspectorPanelController: NSViewController {
 
         let rowsStack = NSStackView()
         rowsStack.orientation = .vertical
-        rowsStack.alignment = .leading
+        rowsStack.alignment = .width
         rowsStack.spacing = 8
 
         container.addSubview(titleLabel)
@@ -157,6 +173,13 @@ final class InspectorPanelController: NSViewController {
                 self.commitToggleValue(isOn, property: model.property, rowView: rowView)
             }
             return rowView
+        case .number(let model):
+            let rowView = InspectorEditableNumberRowView(title: model.title, value: model.value)
+            rowView.commitHandler = { [weak self, weak rowView] value in
+                guard let self, let rowView else { return }
+                self.commitNumberValue(value, property: model.property, rowView: rowView)
+            }
+            return rowView
         case .quad(let model):
             let rowView = InspectorEditableQuadRowView(title: model.title, fields: model.fields)
             rowView.commitHandler = { [weak self, weak rowView] field, value in
@@ -175,35 +198,11 @@ final class InspectorPanelController: NSViewController {
     }
 
     private func commitTextValue(_ value: String, property: ViewScopeEditableProperty, rowView: InspectorCommitCapable) {
-        guard let nodeID = currentNodeID else { return }
-        rowView.setEditingEnabled(false)
-        let nextProperty = ViewScopeEditableProperty.text(key: property.key, value: value)
-        Task { [weak self] in
-            guard let self else { return }
-            let success = await store.applyMutation(nodeID: nodeID, property: nextProperty)
-            await MainActor.run {
-                rowView.setEditingEnabled(true)
-                if !success {
-                    rowView.resetDisplayedValue()
-                }
-            }
-        }
+        commitProperty(.text(key: property.key, value: value), rowView: rowView)
     }
 
     private func commitToggleValue(_ isOn: Bool, property: ViewScopeEditableProperty, rowView: InspectorCommitCapable) {
-        guard let nodeID = currentNodeID else { return }
-        rowView.setEditingEnabled(false)
-        let nextProperty = ViewScopeEditableProperty.toggle(key: property.key, value: isOn)
-        Task { [weak self] in
-            guard let self else { return }
-            let success = await store.applyMutation(nodeID: nodeID, property: nextProperty)
-            await MainActor.run {
-                rowView.setEditingEnabled(true)
-                if !success {
-                    rowView.resetDisplayedValue()
-                }
-            }
-        }
+        commitProperty(.toggle(key: property.key, value: isOn), rowView: rowView)
     }
 
     private func commitNumberValue(_ value: String, property: ViewScopeEditableProperty, rowView: InspectorCommitCapable) {
@@ -212,19 +211,7 @@ final class InspectorPanelController: NSViewController {
             rowView.resetDisplayedValue()
             return
         }
-        guard let nodeID = currentNodeID else { return }
-        rowView.setEditingEnabled(false)
-        let nextProperty = ViewScopeEditableProperty.number(key: property.key, value: number)
-        Task { [weak self] in
-            guard let self else { return }
-            let success = await store.applyMutation(nodeID: nodeID, property: nextProperty)
-            await MainActor.run {
-                rowView.setEditingEnabled(true)
-                if !success {
-                    rowView.resetDisplayedValue()
-                }
-            }
-        }
+        commitProperty(.number(key: property.key, value: number), rowView: rowView)
     }
 
     private func commitColorValue(_ value: String, property: ViewScopeEditableProperty, rowView: InspectorCommitCapable) {
@@ -233,12 +220,15 @@ final class InspectorPanelController: NSViewController {
             rowView.resetDisplayedValue()
             return
         }
+        commitProperty(.text(key: property.key, value: value.uppercased()), rowView: rowView)
+    }
+
+    private func commitProperty(_ property: ViewScopeEditableProperty, rowView: InspectorCommitCapable) {
         guard let nodeID = currentNodeID else { return }
         rowView.setEditingEnabled(false)
-        let nextProperty = ViewScopeEditableProperty.text(key: property.key, value: value.uppercased())
         Task { [weak self] in
             guard let self else { return }
-            let success = await store.applyMutation(nodeID: nodeID, property: nextProperty)
+            let success = await store.applyMutation(nodeID: nodeID, property: property)
             await MainActor.run {
                 rowView.setEditingEnabled(true)
                 if !success {
@@ -385,6 +375,50 @@ private final class InspectorEditableTextRowView: NSView, InspectorCommitCapable
     }
 }
 
+private final class InspectorEditableNumberRowView: NSView, InspectorCommitCapable {
+    private let textField: InspectorTextField
+    private let originalValue: String
+    var commitHandler: ((String) -> Void)?
+
+    init(title: String, value: String) {
+        self.textField = InspectorTextField(value: value)
+        self.originalValue = value
+        super.init(frame: .zero)
+
+        let titleLabel = InspectorRowTitleLabel(text: title)
+        textField.onCommit = { [weak self] in
+            self?.commitHandler?(self?.textField.stringValue ?? "")
+        }
+
+        let stack = NSStackView(views: [titleLabel, textField])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 10
+
+        addSubview(stack)
+        stack.snp.makeConstraints { make in
+            make.edges.equalToSuperview()
+        }
+        textField.snp.makeConstraints { make in
+            make.width.equalTo(92)
+            make.height.equalTo(26)
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func setEditingEnabled(_ enabled: Bool) {
+        textField.isEnabled = enabled
+    }
+
+    func resetDisplayedValue() {
+        textField.stringValue = originalValue
+    }
+}
+
 private final class InspectorEditableToggleRowView: NSView, InspectorCommitCapable {
     private let toggle = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let originalValue: Bool
@@ -429,6 +463,12 @@ private final class InspectorEditableToggleRowView: NSView, InspectorCommitCapab
 }
 
 private final class InspectorEditableQuadRowView: NSView, InspectorCommitCapable {
+    private enum Metrics {
+        static let titleWidth: CGFloat = 56
+        static let fieldWidth: CGFloat = 48
+        static let fieldSpacing: CGFloat = 4
+    }
+
     private var fieldViews: [InspectorTextField] = []
     private let originalValues: [String]
     var commitHandler: ((InspectorEditableQuadModel.Field, String) -> Void)?
@@ -437,11 +477,11 @@ private final class InspectorEditableQuadRowView: NSView, InspectorCommitCapable
         self.originalValues = fields.map(\.value)
         super.init(frame: .zero)
 
-        let titleLabel = InspectorRowTitleLabel(text: title)
+        let titleLabel = InspectorRowTitleLabel(text: title, width: Metrics.titleWidth)
         let fieldsStack = NSStackView()
         fieldsStack.orientation = .horizontal
         fieldsStack.alignment = .centerY
-        fieldsStack.spacing = 6
+        fieldsStack.spacing = Metrics.fieldSpacing
 
         fields.forEach { field in
             let label = NSTextField(labelWithString: field.label)
@@ -460,7 +500,7 @@ private final class InspectorEditableQuadRowView: NSView, InspectorCommitCapable
             container.spacing = 3
             fieldsStack.addArrangedSubview(container)
             input.snp.makeConstraints { make in
-                make.width.equalTo(58)
+                make.width.equalTo(Metrics.fieldWidth)
                 make.height.equalTo(26)
             }
         }
@@ -554,7 +594,7 @@ private final class InspectorEditableColorRowView: NSView, InspectorCommitCapabl
 }
 
 private final class InspectorRowTitleLabel: NSTextField {
-    init(text: String) {
+    init(text: String, width: CGFloat = 88) {
         super.init(frame: .zero)
         stringValue = text.uppercased()
         font = NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold)
@@ -566,7 +606,7 @@ private final class InspectorRowTitleLabel: NSTextField {
         setContentHuggingPriority(.required, for: .horizontal)
         setContentCompressionResistancePriority(.required, for: .horizontal)
         snp.makeConstraints { make in
-            make.width.equalTo(88)
+            make.width.equalTo(width)
         }
     }
 

@@ -1,34 +1,34 @@
 import CoreGraphics
 import ViewScopeServer
 
+enum PreviewCanvasGeometryMode {
+    case directGlobalCanvasRect
+    case legacyLocalFrames
+}
+
 struct ViewHierarchyGeometry {
-    func deepestNodeID(at canvasPoint: CGPoint, in capture: ViewScopeCapturePayload, rootNodeID: String? = nil) -> String? {
+    func deepestNodeID(
+        at canvasPoint: CGPoint,
+        in capture: ViewScopeCapturePayload,
+        rootNodeID: String? = nil,
+        mode: PreviewCanvasGeometryMode = .directGlobalCanvasRect
+    ) -> String? {
         let rootNodeIDs = rootNodeID.map { [$0] } ?? capture.rootNodeIDs
         for nodeID in rootNodeIDs.reversed() {
-            if let match = deepestNodeID(
-                for: nodeID,
-                at: canvasPoint,
-                in: capture.nodes,
-                parentOrigin: .zero,
-                parentIsFlipped: false,
-                parentBoundsHeight: 0
-            ) {
+            if let match = deepestNodeID(for: nodeID, at: canvasPoint, in: capture.nodes, mode: mode) {
                 return match
             }
         }
         return nil
     }
 
-    func canvasRect(for nodeID: String, in capture: ViewScopeCapturePayload) -> CGRect? {
+    func canvasRect(
+        for nodeID: String,
+        in capture: ViewScopeCapturePayload,
+        mode: PreviewCanvasGeometryMode = .directGlobalCanvasRect
+    ) -> CGRect? {
         for rootNodeID in capture.rootNodeIDs {
-            if let rect = canvasRect(
-                for: nodeID,
-                searchNodeID: rootNodeID,
-                in: capture.nodes,
-                parentOrigin: .zero,
-                parentIsFlipped: false,
-                parentBoundsHeight: 0
-            ) {
+            if let rect = canvasRect(for: nodeID, searchNodeID: rootNodeID, in: capture.nodes, mode: mode) {
                 return rect
             }
         }
@@ -48,16 +48,19 @@ struct ViewHierarchyGeometry {
         for nodeID: String,
         at canvasPoint: CGPoint,
         in nodes: [String: ViewScopeHierarchyNode],
-        parentOrigin: CGPoint,
-        parentIsFlipped: Bool,
-        parentBoundsHeight: CGFloat
+        mode: PreviewCanvasGeometryMode,
+        parentOrigin: CGPoint = .zero,
+        parentIsFlipped: Bool = false,
+        parentBoundsHeight: CGFloat = 0
     ) -> String? {
         guard let node = nodes[nodeID], !node.isHidden else {
             return nil
         }
 
-        let rect = globalRect(
-            for: node,
+        let rect = resolvedRect(
+            for: nodeID,
+            in: nodes,
+            mode: mode,
             parentOrigin: parentOrigin,
             parentIsFlipped: parentIsFlipped,
             parentBoundsHeight: parentBoundsHeight
@@ -71,6 +74,7 @@ struct ViewHierarchyGeometry {
                 for: childID,
                 at: canvasPoint,
                 in: nodes,
+                mode: mode,
                 parentOrigin: rect.origin,
                 parentIsFlipped: node.isFlipped,
                 parentBoundsHeight: CGFloat(node.bounds.height)
@@ -86,16 +90,19 @@ struct ViewHierarchyGeometry {
         for targetNodeID: String,
         searchNodeID: String,
         in nodes: [String: ViewScopeHierarchyNode],
-        parentOrigin: CGPoint,
-        parentIsFlipped: Bool,
-        parentBoundsHeight: CGFloat
+        mode: PreviewCanvasGeometryMode,
+        parentOrigin: CGPoint = .zero,
+        parentIsFlipped: Bool = false,
+        parentBoundsHeight: CGFloat = 0
     ) -> CGRect? {
         guard let node = nodes[searchNodeID] else {
             return nil
         }
 
-        let rect = globalRect(
-            for: node,
+        let rect = resolvedRect(
+            for: searchNodeID,
+            in: nodes,
+            mode: mode,
             parentOrigin: parentOrigin,
             parentIsFlipped: parentIsFlipped,
             parentBoundsHeight: parentBoundsHeight
@@ -109,6 +116,7 @@ struct ViewHierarchyGeometry {
                 for: targetNodeID,
                 searchNodeID: childID,
                 in: nodes,
+                mode: mode,
                 parentOrigin: rect.origin,
                 parentIsFlipped: node.isFlipped,
                 parentBoundsHeight: CGFloat(node.bounds.height)
@@ -128,7 +136,29 @@ struct ViewHierarchyGeometry {
         node.childIDs.forEach { appendVisibleNodeIDs($0, nodes: nodes, into: &result) }
     }
 
-    private func globalRect(
+    private func resolvedRect(
+        for nodeID: String,
+        in nodes: [String: ViewScopeHierarchyNode],
+        mode: PreviewCanvasGeometryMode,
+        parentOrigin: CGPoint,
+        parentIsFlipped: Bool,
+        parentBoundsHeight: CGFloat
+    ) -> CGRect {
+        guard let node = nodes[nodeID] else { return .zero }
+        switch mode {
+        case .directGlobalCanvasRect:
+            return node.frame.cgRect
+        case .legacyLocalFrames:
+            return legacyGlobalRect(
+                for: node,
+                parentOrigin: parentOrigin,
+                parentIsFlipped: parentIsFlipped,
+                parentBoundsHeight: parentBoundsHeight
+            )
+        }
+    }
+
+    private func legacyGlobalRect(
         for node: ViewScopeHierarchyNode,
         parentOrigin: CGPoint,
         parentIsFlipped: Bool,

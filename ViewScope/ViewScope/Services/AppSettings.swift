@@ -49,9 +49,11 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(updateCheckStrategy.rawValue, forKey: Keys.updateCheckStrategy) }
     }
 
+    let environment: [String: String]
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard, environment: [String: String] = ProcessInfo.processInfo.environment) {
+        self.environment = environment
         self.defaults = defaults
         self.appLanguage = Self.resolveLanguage(defaults: defaults, environment: environment)
         self.autoRefreshEnabled = defaults.object(forKey: Keys.autoRefreshEnabled) as? Bool ?? false

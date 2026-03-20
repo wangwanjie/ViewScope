@@ -42,7 +42,7 @@ final class WorkspaceStore: NSObject {
         self.settings = settings
         self.updateManager = updateManager ?? UpdateManager(settings: settings)
         self.sessionFactory = sessionFactory
-        self.previewFixtureEnabled = ProcessInfo.processInfo.environment["VIEWSCOPE_PREVIEW_FIXTURE"] == "1"
+        self.previewFixtureEnabled = settings.environment["VIEWSCOPE_PREVIEW_FIXTURE"] == "1"
 
         let appSupportDirectory = try FileManager.default.url(
             for: .applicationSupportDirectory,
@@ -141,13 +141,26 @@ final class WorkspaceStore: NSObject {
         discoveryCenter.stop()
     }
 
-    func refreshCapture() async {
+    func refreshCapture(
+        forceReloadSelectionDetail: Bool = false,
+        clearingVisibleState: Bool = false
+    ) async {
         let generation = connectionGeneration
         guard case .connected(let host) = connectionState else { return }
+        let preferredNodeID = selectedNodeID
+        let preferredFocusedNodeID = focusedNodeID
+
+        if clearingVisibleState {
+            clearVisibleWorkspaceState()
+        }
 
         if previewFixtureEnabled {
             capture = SampleFixture.capture()
-            await normalizeSelectionAfterCaptureUpdate(preferredNodeID: selectedNodeID)
+            await normalizeSelectionAfterCaptureUpdate(
+                preferredNodeID: preferredNodeID,
+                preferredFocusedNodeID: preferredFocusedNodeID,
+                forceReloadDetail: forceReloadSelectionDetail
+            )
             return
         }
 
@@ -162,7 +175,11 @@ final class WorkspaceStore: NSObject {
             errorMessage = nil
             try database.recordCapture(for: host, summary: capture.summary)
             captureInsight = try database.captureInsight(for: host.bundleIdentifier)
-            await normalizeSelectionAfterCaptureUpdate(preferredNodeID: selectedNodeID)
+            await normalizeSelectionAfterCaptureUpdate(
+                preferredNodeID: preferredNodeID,
+                preferredFocusedNodeID: preferredFocusedNodeID,
+                forceReloadDetail: forceReloadSelectionDetail
+            )
         } catch {
             guard isActiveConnection(generation: generation, session: session) else {
                 return
@@ -233,7 +250,7 @@ final class WorkspaceStore: NSObject {
             guard isActiveConnection(generation: generation, session: session) else {
                 return false
             }
-            await refreshCapture()
+            await refreshCapture(forceReloadSelectionDetail: true)
             guard generation == connectionGeneration else {
                 return false
             }
@@ -293,7 +310,11 @@ final class WorkspaceStore: NSObject {
         min(max(value, 0.35), 4)
     }
 
-    private func normalizeSelectionAfterCaptureUpdate(preferredNodeID: String?) async {
+    private func normalizeSelectionAfterCaptureUpdate(
+        preferredNodeID: String?,
+        preferredFocusedNodeID: String?,
+        forceReloadDetail: Bool = false
+    ) async {
         guard let capture else {
             selectedNodeID = nil
             selectedNodeDetail = nil
@@ -301,7 +322,9 @@ final class WorkspaceStore: NSObject {
             return
         }
 
-        if let focusedNodeID, capture.nodes[focusedNodeID] == nil {
+        if let preferredFocusedNodeID, capture.nodes[preferredFocusedNodeID] != nil {
+            focusedNodeID = preferredFocusedNodeID
+        } else if let focusedNodeID, capture.nodes[focusedNodeID] == nil {
             self.focusedNodeID = nil
         }
 
@@ -312,7 +335,7 @@ final class WorkspaceStore: NSObject {
             targetNodeID = capture.rootNodeIDs.first
         }
 
-        if selectedNodeID != targetNodeID || selectedNodeDetail == nil {
+        if selectedNodeID != targetNodeID || selectedNodeDetail == nil || forceReloadDetail {
             await selectNode(withID: targetNodeID, highlightInHost: false)
         }
     }
@@ -355,7 +378,7 @@ final class WorkspaceStore: NSObject {
 
         let timer = Timer(timeInterval: 2.5, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                await self?.refreshCapture()
+                await self?.refreshCapture(clearingVisibleState: false)
             }
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -376,10 +399,14 @@ final class WorkspaceStore: NSObject {
         session = nil
         autoRefreshTimer?.invalidate()
         autoRefreshTimer = nil
+        clearVisibleWorkspaceState()
+        errorMessage = nil
+    }
+
+    private func clearVisibleWorkspaceState() {
         capture = nil
         selectedNodeID = nil
         selectedNodeDetail = nil
         focusedNodeID = nil
-        errorMessage = nil
     }
 }

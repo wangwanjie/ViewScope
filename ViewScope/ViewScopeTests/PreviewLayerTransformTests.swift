@@ -2,8 +2,27 @@ import CoreGraphics
 import Testing
 @testable import ViewScope
 
+@Suite(.serialized)
 @MainActor
 struct PreviewLayerTransformTests {
+    @Test func previewCanvasDisplayRectFlipsNormalizedYIntoCanvasSpace() async throws {
+        let rect = PreviewCanvasCoordinateSpace.displayRect(
+            fromNormalizedRect: CGRect(x: 10, y: 20, width: 30, height: 40),
+            canvasSize: CGSize(width: 100, height: 100)
+        )
+
+        #expect(rect == CGRect(x: 10, y: 40, width: 30, height: 40))
+    }
+
+    @Test func previewCanvasDisplayRectPreservesFullCanvasBounds() async throws {
+        let rect = PreviewCanvasCoordinateSpace.displayRect(
+            fromNormalizedRect: CGRect(x: 0, y: 0, width: 100, height: 80),
+            canvasSize: CGSize(width: 100, height: 80)
+        )
+
+        #expect(rect == CGRect(x: 0, y: 0, width: 100, height: 80))
+    }
+
     @Test func relativeDepthPinsFocusedNodeToCanvasPlane() async throws {
         #expect(PreviewLayerTransform.relativeDepth(nodeDepth: 3, focusDepth: 3) == 0)
         #expect(PreviewLayerTransform.relativeDepth(nodeDepth: 5, focusDepth: 3) == 2)
@@ -42,6 +61,60 @@ struct PreviewLayerTransformTests {
         #expect(abs(quad[0].x - quad[3].x) > 1)
     }
 
+    @Test func layeredImagePerspectiveMappingUsesProjectedQuadOrderDirectly() async throws {
+        let mapping = try #require(
+            PreviewImagePerspectiveMapping.quad(
+                projectedQuad: [
+                    CGPoint(x: 0, y: 0),
+                    CGPoint(x: 100, y: 0),
+                    CGPoint(x: 100, y: 80),
+                    CGPoint(x: 0, y: 80)
+                ],
+                canvasSize: CGSize(width: 100, height: 80)
+            )
+        )
+
+        #expect(mapping.topLeft == CGPoint(x: 0, y: 0))
+        #expect(mapping.topRight == CGPoint(x: 100, y: 0))
+        #expect(mapping.bottomRight == CGPoint(x: 100, y: 80))
+        #expect(mapping.bottomLeft == CGPoint(x: 0, y: 80))
+    }
+
+    @Test func layeredHitTestingUsesFocusedRelativeDepthPlan() async throws {
+        let capture = SampleFixture.capture()
+        let focusedNodeID = "window-0-view-1-2"
+        let viewport = PreviewViewportState(
+            canvasSize: CGSize(width: 1200, height: 640),
+            viewportSize: CGSize(width: 900, height: 700)
+        )
+        let transform = PreviewLayerTransform(yaw: -0.16, pitch: 0.12)
+        let plan = PreviewLayeredRenderPlan.make(
+            capture: capture,
+            canvasSize: viewport.canvasSize,
+            selectedNodeID: focusedNodeID,
+            focusedNodeID: focusedNodeID,
+            layerTransform: transform
+        )
+        let chartOverlay = try #require(plan.overlay(for: focusedNodeID))
+        let canvasPoint = CGPoint(
+            x: chartOverlay.quad.map(\.x).reduce(0, +) / CGFloat(chartOverlay.quad.count),
+            y: chartOverlay.quad.map(\.y).reduce(0, +) / CGFloat(chartOverlay.quad.count)
+        )
+        let viewPoint = try #require(viewport.viewPoint(forCanvasPoint: canvasPoint))
+
+        let resolved = PreviewHitTestResolver().nodeID(
+            atViewPoint: viewPoint,
+            capture: capture,
+            viewportState: viewport,
+            focusedNodeID: focusedNodeID,
+            displayMode: .layered,
+            geometryMode: .directGlobalCanvasRect,
+            layerTransform: transform
+        )
+
+        #expect(resolved == focusedNodeID)
+    }
+
     @Test func layeredHitTestingUsesProjectedGeometry() async throws {
         let capture = SampleFixture.capture()
         var viewport = PreviewViewportState(
@@ -51,13 +124,15 @@ struct PreviewLayerTransformTests {
         viewport.setScale(1.1, keepingCanvasPoint: CGPoint(x: 600, y: 320), anchoredAt: CGPoint(x: 450, y: 350))
 
         let transform = PreviewLayerTransform(yaw: 0.28, pitch: -0.2)
-        let geometry = ViewHierarchyGeometry()
-        let chartRect = try #require(geometry.canvasRect(for: "window-0-view-1-2", in: capture))
-        let quad = transform.projectedQuad(
-            for: chartRect,
-            depth: 2,
-            canvasSize: viewport.canvasSize
+        let plan = PreviewLayeredRenderPlan.make(
+            capture: capture,
+            canvasSize: viewport.canvasSize,
+            selectedNodeID: nil,
+            focusedNodeID: nil,
+            geometryMode: .directGlobalCanvasRect,
+            layerTransform: transform
         )
+        let quad = try #require(plan.overlay(for: "window-0-view-1-2")?.quad)
         let canvasPoint = CGPoint(
             x: quad.map(\.x).reduce(0, +) / CGFloat(quad.count),
             y: quad.map(\.y).reduce(0, +) / CGFloat(quad.count)
@@ -70,6 +145,7 @@ struct PreviewLayerTransformTests {
             viewportState: viewport,
             focusedNodeID: nil,
             displayMode: .layered,
+            geometryMode: .directGlobalCanvasRect,
             layerTransform: transform
         )
 
@@ -84,13 +160,15 @@ struct PreviewLayerTransformTests {
         )
 
         let transform = PreviewLayerTransform(yaw: 0.18, pitch: 0.1)
-        let geometry = ViewHierarchyGeometry()
-        let sidebarRect = try #require(geometry.canvasRect(for: "window-0-view-0-0", in: capture))
-        let quad = transform.projectedQuad(
-            for: sidebarRect,
-            depth: 2,
-            canvasSize: viewport.canvasSize
+        let plan = PreviewLayeredRenderPlan.make(
+            capture: capture,
+            canvasSize: viewport.canvasSize,
+            selectedNodeID: nil,
+            focusedNodeID: "window-0-view-1-2",
+            geometryMode: .directGlobalCanvasRect,
+            layerTransform: transform
         )
+        let quad = try #require(plan.overlay(for: "window-0-view-0-0")?.quad)
         let canvasPoint = CGPoint(
             x: quad.map(\.x).reduce(0, +) / CGFloat(quad.count),
             y: quad.map(\.y).reduce(0, +) / CGFloat(quad.count)
@@ -103,6 +181,7 @@ struct PreviewLayerTransformTests {
             viewportState: viewport,
             focusedNodeID: "window-0-view-1-2",
             displayMode: .layered,
+            geometryMode: .directGlobalCanvasRect,
             layerTransform: transform
         )
 

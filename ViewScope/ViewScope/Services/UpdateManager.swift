@@ -164,7 +164,7 @@ final class UpdateManager: NSObject {
     }
 
     private var updatesDisabledForEnvironment: Bool {
-        ProcessInfo.processInfo.environment["VIEWSCOPE_DISABLE_UPDATES"] == "1"
+        settings.environment["VIEWSCOPE_DISABLE_UPDATES"] == "1"
     }
 
     #if canImport(Sparkle)

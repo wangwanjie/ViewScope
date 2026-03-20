@@ -4,7 +4,7 @@ public let viewScopeDiscoveryAnnouncementNotification = Notification.Name("cn.va
 public let viewScopeDiscoveryTerminationNotification = Notification.Name("cn.vanjay.ViewScopeServer.termination")
 public let viewScopeDiscoveryRequestNotification = Notification.Name("cn.vanjay.ViewScopeServer.discovery-request")
 public let viewScopeCurrentProtocolVersion = 1
-public let viewScopeServerRuntimeVersion = "1.1.0"
+public let viewScopeServerRuntimeVersion = "1.2.0"
 
 /// Advertises a locally running debug host that can be inspected by the ViewScope app.
 public struct ViewScopeHostAnnouncement: Codable, Sendable, Hashable {

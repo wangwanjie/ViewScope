@@ -2,35 +2,6 @@ import AppKit
 import CoreImage
 import ViewScopeServer
 
-enum PreviewImageSliceGeometry {
-    static func imageRect(forCanvasRect rect: CGRect, canvasSize: CGSize, imageSize: CGSize) -> CGRect {
-        guard canvasSize.width > 0,
-              canvasSize.height > 0,
-              imageSize.width > 0,
-              imageSize.height > 0 else {
-            return .zero
-        }
-
-        let scaleX = imageSize.width / canvasSize.width
-        let scaleY = imageSize.height / canvasSize.height
-        let scaledRect = CGRect(
-            x: rect.origin.x * scaleX,
-            y: rect.origin.y * scaleY,
-            width: rect.width * scaleX,
-            height: rect.height * scaleY
-        )
-
-        let flippedRect = CGRect(
-            x: scaledRect.origin.x,
-            y: imageSize.height - scaledRect.maxY,
-            width: scaledRect.width,
-            height: scaledRect.height
-        )
-
-        return flippedRect.intersection(CGRect(origin: .zero, size: imageSize))
-    }
-}
-
 final class PreviewCanvasView: NSView {
     private let geometry = ViewHierarchyGeometry()
     private let hitTestResolver = PreviewHitTestResolver()
@@ -69,6 +40,10 @@ final class PreviewCanvasView: NSView {
     }
 
     var highlightedCanvasRect: CGRect? {
+        didSet { needsDisplay = true }
+    }
+
+    var geometryMode: PreviewCanvasGeometryMode = .directGlobalCanvasRect {
         didSet { needsDisplay = true }
     }
 
@@ -135,18 +110,31 @@ final class PreviewCanvasView: NSView {
         applyViewportTransform(to: context)
 
         let canvasRect = CGRect(origin: .zero, size: canvasSize)
+        let layeredRenderPlan = capture.map {
+            PreviewLayeredRenderPlan.make(
+                capture: $0,
+                canvasSize: canvasSize,
+                selectedNodeID: selectedNodeID,
+                focusedNodeID: focusedNodeID,
+                geometryMode: geometryMode,
+                layerTransform: layerTransform
+            )
+        }
         if displayMode == .layered {
-            drawLayeredCanvasBackdrop(in: canvasRect)
-            if let image {
-                drawLayeredImage(image, in: canvasRect, context: context)
+            drawLayeredCanvasBackdrop(in: layeredRenderPlan?.baseImageQuad ?? layerTransform.projectedQuad(for: canvasRect, depth: 0, canvasSize: canvasSize))
+            if let image, let layeredRenderPlan {
+                drawLayeredImage(
+                    image,
+                    in: canvasRect,
+                    projectedQuad: layeredRenderPlan.baseImageQuad,
+                    context: context
+                )
+                drawLayeredPreview(plan: layeredRenderPlan)
             } else {
-                drawLayeredWireframeFallback()
-            }
-            if let capture {
-                drawLayeredPreview(for: capture)
+                drawLayeredWireframeFallback(plan: layeredRenderPlan)
             }
             if let selectedRect = resolvedSelectedRect() {
-                drawLayeredSelection(for: selectedRect)
+                drawLayeredSelection(for: selectedRect, depth: resolvedSelectedRelativeDepth())
             }
         } else {
             if let image {
@@ -168,10 +156,10 @@ final class PreviewCanvasView: NSView {
         context.restoreGState()
 
         if let capture, let focusedNodeID,
-           let focusRect = geometry.canvasRect(for: focusedNodeID, in: capture) {
+           let focusRect = geometry.canvasRect(for: focusedNodeID, in: capture, mode: geometryMode) {
             guard let focusViewRect = focusMaskResolver.cutoutViewRect(
                 displayMode: displayMode,
-                focusRect: focusRect,
+                focusRect: displayCanvasRect(fromNormalizedRect: focusRect),
                 canvasSize: canvasSize,
                 viewportState: viewportState,
                 layerTransform: layerTransform
@@ -289,7 +277,8 @@ final class PreviewCanvasView: NSView {
         NSBezierPath(rect: CGRect(origin: .zero, size: canvasSize)).fill()
 
         for nodeID in geometry.visibleNodeIDs(in: capture, rootNodeID: focusedNodeID) {
-            guard let rect = geometry.canvasRect(for: nodeID, in: capture) else { continue }
+            guard let normalizedRect = geometry.canvasRect(for: nodeID, in: capture, mode: geometryMode) else { continue }
+            let rect = displayCanvasRect(fromNormalizedRect: normalizedRect)
             let path = NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4)
             NSColor.systemGray.withAlphaComponent(0.16).setFill()
             path.fill()
@@ -299,23 +288,16 @@ final class PreviewCanvasView: NSView {
         }
     }
 
-    private func drawLayeredCanvasBackdrop(in canvasRect: CGRect) {
-        let backdrop = bezierPath(for: layerTransform.projectedQuad(for: canvasRect, depth: 0, canvasSize: canvasSize))
+    private func drawLayeredCanvasBackdrop(in quad: [CGPoint]) {
+        let backdrop = bezierPath(for: quad)
         NSColor.textBackgroundColor.setFill()
         backdrop.fill()
     }
 
-    private func drawLayeredWireframeFallback() {
-        guard let capture else { return }
-        for nodeID in geometry.visibleNodeIDs(in: capture) {
-            guard let node = capture.nodes[nodeID],
-                  let rect = geometry.canvasRect(for: nodeID, in: capture) else { continue }
-            let quad = layerTransform.projectedQuad(
-                for: rect,
-                depth: CGFloat(max(0, node.depth)),
-                canvasSize: canvasSize
-            )
-            let path = bezierPath(for: quad)
+    private func drawLayeredWireframeFallback(plan: PreviewLayeredRenderPlan?) {
+        guard let plan else { return }
+        for overlay in plan.overlayQuads {
+            let path = bezierPath(for: overlay.quad)
             NSColor.systemGray.withAlphaComponent(0.16).setFill()
             path.fill()
             NSColor.systemGray.withAlphaComponent(0.45).setStroke()
@@ -324,7 +306,7 @@ final class PreviewCanvasView: NSView {
         }
     }
 
-    private func drawLayeredImage(_ image: NSImage, in canvasRect: CGRect, context: CGContext) {
+    private func drawLayeredImage(_ image: NSImage, in canvasRect: CGRect, projectedQuad: [CGPoint], context: CGContext) {
         guard let imageData = image.tiffRepresentation,
               let baseImage = CIImage(data: imageData) else {
             return
@@ -333,16 +315,24 @@ final class PreviewCanvasView: NSView {
         let scaleX = canvasRect.width / max(baseImage.extent.width, 1)
         let scaleY = canvasRect.height / max(baseImage.extent.height, 1)
         let scaledImage = baseImage.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
-        let quad = layerTransform.projectedQuad(for: canvasRect, depth: 0, canvasSize: canvasSize)
+        let orientedImage = scaledImage.transformed(
+            by: CGAffineTransform(translationX: 0, y: canvasRect.height).scaledBy(x: 1, y: -1)
+        )
 
         guard let filter = CIFilter(name: "CIPerspectiveTransform") else {
             return
         }
-        filter.setValue(scaledImage, forKey: kCIInputImageKey)
-        filter.setValue(CIVector(cgPoint: ciPoint(fromCanvasPoint: quad[0])), forKey: "inputTopLeft")
-        filter.setValue(CIVector(cgPoint: ciPoint(fromCanvasPoint: quad[1])), forKey: "inputTopRight")
-        filter.setValue(CIVector(cgPoint: ciPoint(fromCanvasPoint: quad[2])), forKey: "inputBottomRight")
-        filter.setValue(CIVector(cgPoint: ciPoint(fromCanvasPoint: quad[3])), forKey: "inputBottomLeft")
+        guard let inputQuad = PreviewImagePerspectiveMapping.quad(
+            projectedQuad: projectedQuad,
+            canvasSize: canvasSize
+        ) else {
+            return
+        }
+        filter.setValue(orientedImage, forKey: kCIInputImageKey)
+        filter.setValue(CIVector(cgPoint: inputQuad.topLeft), forKey: "inputTopLeft")
+        filter.setValue(CIVector(cgPoint: inputQuad.topRight), forKey: "inputTopRight")
+        filter.setValue(CIVector(cgPoint: inputQuad.bottomRight), forKey: "inputBottomRight")
+        filter.setValue(CIVector(cgPoint: inputQuad.bottomLeft), forKey: "inputBottomLeft")
 
         guard let outputImage = filter.outputImage?.cropped(to: CGRect(origin: .zero, size: canvasSize)) else {
             return
@@ -355,81 +345,23 @@ final class PreviewCanvasView: NSView {
         )
     }
 
-    private func drawLayeredPreview(for capture: ViewScopeCapturePayload) {
-        let ciContext = NSGraphicsContext.current.map { CIContext(cgContext: $0.cgContext, options: nil) }
-        let baseImage: CIImage? = image.flatMap { previewImage in
-            guard let data = previewImage.tiffRepresentation else { return nil }
-            return CIImage(data: data)
-        }
-        let nodeIDs = geometry.visibleNodeIDs(in: capture)
-        for nodeID in nodeIDs {
-            guard let rect = geometry.canvasRect(for: nodeID, in: capture),
-                  let node = capture.nodes[nodeID] else { continue }
-
-            if let baseImage, let ciContext, node.kind == .view, node.depth > 0 {
-                drawLayeredImageSlice(
-                    from: baseImage,
-                    for: rect,
-                    depth: CGFloat(max(0, node.depth)),
-                    context: ciContext
-                )
-            }
-
-            let quad = layerTransform.projectedQuad(
-                for: rect,
-                depth: CGFloat(max(0, node.depth)),
-                canvasSize: canvasSize
-            )
-            let outline = bezierPath(for: quad)
-            NSColor.white.withAlphaComponent(nodeID == selectedNodeID ? 0.2 : min(0.14, 0.04 + CGFloat(node.depth) * 0.015)).setFill()
+    private func drawLayeredPreview(plan: PreviewLayeredRenderPlan) {
+        for overlay in plan.overlayQuads {
+            guard overlay.isSelected == false else { continue }
+            let outline = bezierPath(for: overlay.quad)
+            NSColor.white.withAlphaComponent(overlay.style.fillAlpha).setFill()
             outline.fill()
-            NSColor.systemBlue.withAlphaComponent(nodeID == selectedNodeID ? 0.72 : min(0.34, 0.08 + CGFloat(node.depth) * 0.03)).setStroke()
-            outline.lineWidth = (nodeID == selectedNodeID ? 1.8 : 0.9) / max(viewportState.scale, 0.001)
+            NSColor.systemBlue.withAlphaComponent(overlay.style.strokeAlpha).setStroke()
+            outline.lineWidth = overlay.style.strokeWidth / max(viewportState.scale, 0.001)
             outline.stroke()
         }
     }
 
-    private func drawLayeredImageSlice(from baseImage: CIImage, for rect: CGRect, depth: CGFloat, context: CIContext) {
-        guard rect.width > 0.5, rect.height > 0.5 else { return }
-
-        let imageSize = baseImage.extent.size
-        let cropRect = PreviewImageSliceGeometry.imageRect(
-            forCanvasRect: rect,
-            canvasSize: canvasSize,
-            imageSize: imageSize
-        )
-        guard cropRect.width > 0.5, cropRect.height > 0.5,
-              canvasSize.width > 0.5,
-              canvasSize.height > 0.5,
-              let filter = CIFilter(name: "CIPerspectiveTransform") else {
-            return
-        }
-
-        let scaleX = imageSize.width / canvasSize.width
-        let scaleY = imageSize.height / canvasSize.height
-        let croppedImage = baseImage
-            .cropped(to: cropRect)
-            .transformed(by: CGAffineTransform(translationX: -cropRect.origin.x, y: -cropRect.origin.y))
-            .transformed(by: CGAffineTransform(scaleX: 1 / scaleX, y: 1 / scaleY))
-        let quad = layerTransform.projectedQuad(for: rect, depth: depth, canvasSize: canvasSize)
-        filter.setValue(croppedImage, forKey: kCIInputImageKey)
-        filter.setValue(CIVector(cgPoint: ciPoint(fromCanvasPoint: quad[0])), forKey: "inputTopLeft")
-        filter.setValue(CIVector(cgPoint: ciPoint(fromCanvasPoint: quad[1])), forKey: "inputTopRight")
-        filter.setValue(CIVector(cgPoint: ciPoint(fromCanvasPoint: quad[2])), forKey: "inputBottomRight")
-        filter.setValue(CIVector(cgPoint: ciPoint(fromCanvasPoint: quad[3])), forKey: "inputBottomLeft")
-
-        guard let outputImage = filter.outputImage?.cropped(to: CGRect(origin: .zero, size: canvasSize)) else {
-            return
-        }
-
-        context.draw(outputImage, in: CGRect(origin: .zero, size: canvasSize), from: CGRect(origin: .zero, size: canvasSize))
-    }
-
-    private func drawLayeredSelection(for rect: CGRect) {
+    private func drawLayeredSelection(for rect: CGRect, depth: CGFloat) {
         let path = bezierPath(
             for: layerTransform.projectedQuad(
                 for: rect,
-                depth: CGFloat(selectedNodeDepth),
+                depth: depth,
                 canvasSize: canvasSize
             )
         )
@@ -451,28 +383,34 @@ final class PreviewCanvasView: NSView {
     }
 
     func viewRect(fromCanvasRect rect: CGRect) -> CGRect {
-        viewportState.viewRect(forCanvasRect: rect)
+        viewportState.viewRect(forCanvasRect: displayCanvasRect(fromNormalizedRect: rect))
     }
 
     func centerOnCanvasRect(_ rect: CGRect?) {
         guard let rect else { return }
-        viewportState.center(onCanvasRect: rect)
+        viewportState.center(onCanvasRect: displayCanvasRect(fromNormalizedRect: rect))
         needsDisplay = true
     }
 
     private func resolvedSelectedRect() -> CGRect? {
         if let highlightedCanvasRect {
-            return highlightedCanvasRect
+            return displayCanvasRect(fromNormalizedRect: highlightedCanvasRect)
         }
         guard let capture, let selectedNodeID else { return nil }
-        return geometry.canvasRect(for: selectedNodeID, in: capture)
+        guard let normalizedRect = geometry.canvasRect(for: selectedNodeID, in: capture, mode: geometryMode) else {
+            return nil
+        }
+        return displayCanvasRect(fromNormalizedRect: normalizedRect)
     }
 
-    private var selectedNodeDepth: Int {
-        guard let capture, let selectedNodeID, let node = capture.nodes[selectedNodeID] else {
+    private func resolvedSelectedRelativeDepth() -> CGFloat {
+        guard let capture,
+              let selectedNodeID,
+              let node = capture.nodes[selectedNodeID] else {
             return 0
         }
-        return max(0, node.depth)
+        let focusDepth = capture.nodes[focusedNodeID ?? ""]?.depth ?? 0
+        return PreviewLayerTransform.relativeDepth(nodeDepth: node.depth, focusDepth: focusDepth)
     }
 
     private func nodeID(atViewPoint point: CGPoint) -> String? {
@@ -483,6 +421,7 @@ final class PreviewCanvasView: NSView {
             viewportState: viewportState,
             focusedNodeID: focusedNodeID,
             displayMode: displayMode,
+            geometryMode: geometryMode,
             layerTransform: layerTransform
         )
     }
@@ -502,7 +441,7 @@ final class PreviewCanvasView: NSView {
         return path
     }
 
-    private func ciPoint(fromCanvasPoint point: CGPoint) -> CGPoint {
-        CGPoint(x: point.x, y: canvasSize.height - point.y)
+    private func displayCanvasRect(fromNormalizedRect rect: CGRect) -> CGRect {
+        PreviewCanvasCoordinateSpace.displayRect(fromNormalizedRect: rect, canvasSize: canvasSize)
     }
 }

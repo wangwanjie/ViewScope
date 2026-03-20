@@ -57,7 +57,8 @@ enum SampleFixture {
                 ViewScopePropertyItem(title: "Node", value: nodeID),
                 ViewScopePropertyItem(title: L10n.serverItemTitle("class"), value: capture().nodes[nodeID]?.className ?? "NSView"),
                 ViewScopePropertyItem(title: L10n.serverItemTitle("address"), value: "0xfeedbeef"),
-                ViewScopePropertyItem(title: L10n.serverItemTitle("title"), value: capture().nodes[nodeID]?.title ?? "", editable: .text(key: "title", value: capture().nodes[nodeID]?.title ?? ""))
+                ViewScopePropertyItem(title: L10n.serverItemTitle("title"), value: capture().nodes[nodeID]?.title ?? "", editable: .text(key: "title", value: capture().nodes[nodeID]?.title ?? "")),
+                ViewScopePropertyItem(title: "Tool Tip", value: "Inspect the selected sample layer", editable: .text(key: "toolTip", value: "Inspect the selected sample layer"))
             ]),
             ViewScopePropertySection(title: L10n.serverSectionTitle("layout"), items: [
                 ViewScopePropertyItem(title: L10n.serverItemTitle("frame"), value: "x 292.0 y 152.0 w 760.0 h 408.0"),
@@ -70,16 +71,26 @@ enum SampleFixture {
                 ViewScopePropertyItem(title: "Bounds Y", value: "0.0", editable: .number(key: "bounds.y", value: 0)),
                 ViewScopePropertyItem(title: "Bounds W", value: "760.0", editable: .number(key: "bounds.width", value: 760)),
                 ViewScopePropertyItem(title: "Bounds H", value: "408.0", editable: .number(key: "bounds.height", value: 408)),
+                ViewScopePropertyItem(title: "Content Insets", value: "{8, 12, 8, 12}"),
+                ViewScopePropertyItem(title: "Inset Top", value: "8.0", editable: .number(key: "contentInsets.top", value: 8)),
+                ViewScopePropertyItem(title: "Inset Left", value: "12.0", editable: .number(key: "contentInsets.left", value: 12)),
+                ViewScopePropertyItem(title: "Inset Bottom", value: "8.0", editable: .number(key: "contentInsets.bottom", value: 8)),
+                ViewScopePropertyItem(title: "Inset Right", value: "12.0", editable: .number(key: "contentInsets.right", value: 12)),
                 ViewScopePropertyItem(title: L10n.serverItemTitle("intrinsic_size"), value: L10n.serverNoIntrinsicSize),
                 ViewScopePropertyItem(title: L10n.serverItemTitle("translates_mask"), value: L10n.serverNo)
             ]),
             ViewScopePropertySection(title: L10n.serverSectionTitle("rendering"), items: [
                 ViewScopePropertyItem(title: L10n.serverItemTitle("hidden"), value: L10n.serverNo, editable: .toggle(key: "hidden", value: false)),
-                ViewScopePropertyItem(title: L10n.serverItemTitle("alpha"), value: "1.00"),
+                ViewScopePropertyItem(title: L10n.serverItemTitle("alpha"), value: "1.00", editable: .number(key: "alpha", value: 1)),
                 ViewScopePropertyItem(title: L10n.serverItemTitle("background"), value: "#F6F8FBFF", editable: .text(key: "backgroundColor", value: "#F6F8FBFF")),
+                ViewScopePropertyItem(title: "Corner Radius", value: "14.0", editable: .number(key: "layer.cornerRadius", value: 14)),
+                ViewScopePropertyItem(title: "Border Width", value: "1.0", editable: .number(key: "layer.borderWidth", value: 1)),
                 ViewScopePropertyItem(title: L10n.serverItemTitle("layer_backed"), value: L10n.serverYes)
             ]),
             ViewScopePropertySection(title: L10n.serverSectionTitle("control"), items: [
+                ViewScopePropertyItem(title: "Enabled", value: L10n.serverYes, editable: .toggle(key: "enabled", value: true)),
+                ViewScopePropertyItem(title: "Button State", value: L10n.serverNo, editable: .toggle(key: "button.state", value: false)),
+                ViewScopePropertyItem(title: "Placeholder", value: "Search notes", editable: .text(key: "textField.placeholderString", value: "Search notes")),
                 ViewScopePropertyItem(title: L10n.serverItemTitle("value"), value: capture().nodes[nodeID]?.title ?? "", editable: .text(key: "control.value", value: capture().nodes[nodeID]?.title ?? ""))
             ])
         ]

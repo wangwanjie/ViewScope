@@ -3,6 +3,7 @@ import Testing
 import ViewScopeServer
 @testable import ViewScope
 
+@Suite(.serialized)
 @MainActor
 struct WorkspaceStoreConnectionLifecycleTests {
     @Test func switchingHostsClearsVisibleStateBeforeNewCaptureArrives() async throws {
@@ -141,6 +142,82 @@ struct WorkspaceStoreConnectionLifecycleTests {
         #expect(store.selectedNodeDetail?.nodeID == "new-node")
     }
 
+    @Test func successfulMutationReloadsSelectedNodeDetailForSameSelection() async throws {
+        let host = makeHost(id: "host-a", bundleID: "cn.vanjay.hostA", name: "Host A", port: 7107)
+        let session = FakeWorkspaceSession(
+            announcement: host,
+            openResponses: [.resolved(.success(makeHello(for: host)))],
+            captureResponses: [
+                .resolved(.success(makeCapture(nodeID: "node-1", host: host))),
+                .resolved(.success(makeCapture(nodeID: "node-1", host: host)))
+            ],
+            nodeDetailResponses: [
+                "node-1": [
+                    .resolved(.success(makeDetail(nodeID: "node-1", host: host, alphaValue: "0.80"))),
+                    .resolved(.success(makeDetail(nodeID: "node-1", host: host, alphaValue: "0.35")))
+                ]
+            ]
+        )
+
+        let store = try makeStore(sessions: [host.identifier: session])
+        defer { store.shutdown() }
+
+        await store.connect(to: host)
+        await store.selectNode(withID: "node-1", highlightInHost: false)
+
+        #expect(alphaValue(in: store.selectedNodeDetail) == "0.80")
+        #expect(await session.detailRequestCount(for: "node-1") == 1)
+
+        let success = await store.applyMutation(nodeID: "node-1", property: .number(key: "alpha", value: 0.35))
+
+        #expect(success)
+        #expect(await session.captureRequestCount == 2)
+        #expect(await session.detailRequestCount(for: "node-1") == 2)
+        #expect(alphaValue(in: store.selectedNodeDetail) == "0.35")
+    }
+
+    @Test func manualRefreshClearsVisibleStateBeforeFreshCaptureArrives() async throws {
+        let host = makeHost(id: "host-a", bundleID: "cn.vanjay.hostA", name: "Host A", port: 7108)
+        let session = FakeWorkspaceSession(
+            announcement: host,
+            openResponses: [.resolved(.success(makeHello(for: host)))],
+            captureResponses: [
+                .resolved(.success(makeCapture(nodeID: "node-1", host: host))),
+                .pending
+            ],
+            nodeDetailResponses: [
+                "node-1": [.resolved(.success(makeDetail(nodeID: "node-1", host: host)))]
+            ]
+        )
+
+        let store = try makeStore(sessions: [host.identifier: session])
+        defer { store.shutdown() }
+
+        await store.connect(to: host)
+        store.setFocusedNode("node-1")
+        await store.selectNode(withID: "node-1", highlightInHost: false)
+
+        #expect(store.capture?.rootNodeIDs == ["node-1"])
+        #expect(store.selectedNodeID == "node-1")
+        #expect(store.selectedNodeDetail?.nodeID == "node-1")
+        #expect(store.focusedNodeID == "node-1")
+
+        let refreshTask = Task { await store.refreshCapture() }
+        try await waitUntil { await session.captureRequestCount == 2 }
+
+        #expect(store.capture == nil)
+        #expect(store.selectedNodeID == nil)
+        #expect(store.selectedNodeDetail == nil)
+        #expect(store.focusedNodeID == nil)
+
+        await session.resolveNextCapture(with: .success(makeCapture(nodeID: "node-1", host: host)))
+        await refreshTask.value
+
+        #expect(store.capture?.rootNodeIDs == ["node-1"])
+        #expect(store.selectedNodeID == "node-1")
+        #expect(store.focusedNodeID == "node-1")
+    }
+
     private func makeStore(sessions: [String: FakeWorkspaceSession]) throws -> WorkspaceStore {
         let defaults = try #require(UserDefaults(suiteName: "WorkspaceStoreLifecycleTests.\(UUID().uuidString)"))
         let settings = AppSettings(defaults: defaults, environment: [:])
@@ -219,17 +296,35 @@ struct WorkspaceStoreConnectionLifecycleTests {
         )
     }
 
-    private func makeDetail(nodeID: String, host: ViewScopeHostAnnouncement) -> ViewScopeNodeDetailPayload {
+    private func makeDetail(
+        nodeID: String,
+        host: ViewScopeHostAnnouncement,
+        alphaValue: String? = nil
+    ) -> ViewScopeNodeDetailPayload {
         ViewScopeNodeDetailPayload(
             nodeID: nodeID,
             host: makeHostInfo(from: host),
-            sections: [],
+            sections: alphaValue.map {
+                [
+                    ViewScopePropertySection(
+                        title: "Rendering",
+                        items: [ViewScopePropertyItem(title: "Alpha", value: $0, editable: .number(key: "alpha", value: 0))]
+                    )
+                ]
+            } ?? [],
             constraints: [],
             ancestry: [host.displayName, nodeID],
             screenshotPNGBase64: nil,
             screenshotSize: .zero,
             highlightedRect: .zero
         )
+    }
+
+    private func alphaValue(in detail: ViewScopeNodeDetailPayload?) -> String? {
+        detail?.sections
+            .flatMap(\.items)
+            .first(where: { $0.title == "Alpha" })?
+            .value
     }
 
     private func waitUntil(

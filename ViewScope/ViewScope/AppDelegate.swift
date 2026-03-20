@@ -80,7 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func refreshCapture(_ sender: Any?) {
         guard let store else { return }
-        Task { await store.refreshCapture() }
+        Task { await store.refreshCapture(forceReloadSelectionDetail: true, clearingVisibleState: true) }
     }
 
     @objc private func openPreferencesWindow(_ sender: Any?) {

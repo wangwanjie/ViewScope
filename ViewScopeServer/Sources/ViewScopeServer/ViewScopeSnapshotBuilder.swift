@@ -66,6 +66,7 @@ final class ViewScopeSnapshotBuilder {
             if let contentView = window.contentView {
                 let childIDs = buildNodes(
                     from: contentView,
+                    rootView: contentView,
                     parentID: windowID,
                     prefix: "\(windowID)-view",
                     depth: 1,
@@ -134,6 +135,7 @@ final class ViewScopeSnapshotBuilder {
 
     private func buildNodes(
         from view: NSView,
+        rootView: NSView,
         parentID: String,
         prefix: String,
         depth: Int,
@@ -148,7 +150,7 @@ final class ViewScopeSnapshotBuilder {
             let title = sanitizedDisplayText(child.viewScopeTitle(interfaceLanguage: interfaceLanguage))
                 ?? ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(type(of: child)))
             let ivarTraces = ivarTracesBySubview[ObjectIdentifier(child)] ?? []
-            let childFrame = resolvedChildFrame(child, in: view)
+            let childFrame = normalizedCanvasRect(for: child, in: rootView)
             nodes[nodeID] = ViewScopeHierarchyNode(
                 id: nodeID,
                 parentID: parentID,
@@ -173,6 +175,7 @@ final class ViewScopeSnapshotBuilder {
             references[nodeID] = .view(child)
             let nestedIDs = buildNodes(
                 from: child,
+                rootView: rootView,
                 parentID: nodeID,
                 prefix: nodeID,
                 depth: depth + 1,
@@ -184,13 +187,6 @@ final class ViewScopeSnapshotBuilder {
         }
 
         return childIDs
-    }
-
-    private func resolvedChildFrame(_ child: NSView, in hostView: NSView) -> NSRect {
-        if child.superview === hostView {
-            return child.frame
-        }
-        return child.convert(child.bounds, to: hostView)
     }
 
     private func capturedChildViews(of view: NSView) -> [NSView] {
@@ -257,9 +253,12 @@ final class ViewScopeSnapshotBuilder {
 
             for index in 0 ..< Int(count) {
                 let ivar = ivars[index]
-                guard let encodingPointer = ivar_getTypeEncoding(ivar) else { continue }
-                let encoding = String(cString: encodingPointer)
-                guard encoding.hasPrefix("@"), encoding.count > 3 else { continue }
+                if let encodingPointer = ivar_getTypeEncoding(ivar) {
+                    let encoding = String(cString: encodingPointer)
+                    if !encoding.isEmpty, !encoding.hasPrefix("@") {
+                        continue
+                    }
+                }
 
                 let object = object_getIvar(hostView, ivar)
                 guard let subview = object as? NSView,
@@ -420,9 +419,13 @@ final class ViewScopeSnapshotBuilder {
         if let identifier = view.identifier?.rawValue, !identifier.isEmpty {
             identityItems.append(ViewScopePropertyItem(title: text("server.item.identifier"), value: identifier))
         }
-        if let tooltip = view.toolTip, !tooltip.isEmpty {
-            identityItems.append(ViewScopePropertyItem(title: text("server.item.tooltip"), value: tooltip))
-        }
+        identityItems.append(
+            editableTextItem(
+                title: text("server.item.tooltip"),
+                key: "toolTip",
+                value: view.toolTip ?? ""
+            )
+        )
 
         let layoutItems = [
             ViewScopePropertyItem(title: text("server.item.frame"), value: view.frame.viewScopeString),
@@ -465,6 +468,26 @@ final class ViewScopeSnapshotBuilder {
         if let background = view.layer?.backgroundColor?.viewScopeHexString {
             renderingItems.append(editableColorItem(title: text("server.item.background"), key: "backgroundColor", value: background))
         }
+        if view.layer != nil || view.wantsLayer {
+            let cornerRadius = Double(view.layer?.cornerRadius ?? 0)
+            let borderWidth = Double(view.layer?.borderWidth ?? 0)
+            renderingItems.append(
+                editableNumberItem(
+                    title: text("server.item.corner_radius"),
+                    key: "layer.cornerRadius",
+                    value: cornerRadius,
+                    decimals: 1
+                )
+            )
+            renderingItems.append(
+                editableNumberItem(
+                    title: text("server.item.border_width"),
+                    key: "layer.borderWidth",
+                    value: borderWidth,
+                    decimals: 1
+                )
+            )
+        }
 
         var sections = [
             ViewScopePropertySection(title: text("server.section.identity"), items: identityItems),
@@ -489,19 +512,41 @@ final class ViewScopeSnapshotBuilder {
         }
 
         if let control = view as? NSControl {
-            let editableControlValue: ViewScopeEditableProperty? = {
+            let editableControlValue: ViewScopeEditableProperty = {
                 if control is NSButton || control is NSTextField || control is NSSegmentedControl {
                     return .text(key: "control.value", value: control.viewScopeControlValue)
                 }
                 return .text(key: "control.value", value: control.stringValue)
             }()
+            var controlItems: [ViewScopePropertyItem] = [
+                editableToggleItem(title: text("server.item.enabled"), key: "enabled", value: control.isEnabled),
+                ViewScopePropertyItem(title: text("server.item.value"), value: control.viewScopeControlValue, editable: editableControlValue)
+            ]
+
+            if let button = control as? NSButton, button.allowsMixedState == false {
+                controlItems.append(
+                    editableToggleItem(
+                        title: text("server.item.button_state"),
+                        key: "button.state",
+                        value: button.state == .on
+                    )
+                )
+            }
+
+            if let textField = control as? NSTextField {
+                controlItems.append(
+                    editableTextItem(
+                        title: text("server.item.placeholder"),
+                        key: "textField.placeholderString",
+                        value: textField.placeholderString ?? ""
+                    )
+                )
+            }
+
             sections.append(
                 ViewScopePropertySection(
                     title: text("server.section.control"),
-                    items: [
-                        ViewScopePropertyItem(title: text("server.item.enabled"), value: control.isEnabled.viewScopeBoolText(interfaceLanguage: interfaceLanguage)),
-                        ViewScopePropertyItem(title: text("server.item.value"), value: control.viewScopeControlValue, editable: editableControlValue)
-                    ]
+                    items: controlItems
                 )
             )
         }

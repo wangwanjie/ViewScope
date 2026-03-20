@@ -135,6 +135,7 @@ struct PreviewHitTestResolver {
         viewportState: PreviewViewportState,
         focusedNodeID: String?,
         displayMode: WorkspacePreviewDisplayMode,
+        geometryMode: PreviewCanvasGeometryMode,
         layerTransform: PreviewLayerTransform
     ) -> String? {
         switch displayMode {
@@ -142,22 +143,31 @@ struct PreviewHitTestResolver {
             guard let canvasPoint = viewportState.canvasPoint(forViewPoint: point) else {
                 return nil
             }
-            return geometry.deepestNodeID(at: canvasPoint, in: capture, rootNodeID: focusedNodeID)
+            let normalizedPoint = CGPoint(
+                x: canvasPoint.x,
+                y: viewportState.canvasSize.height - canvasPoint.y
+            )
+            return geometry.deepestNodeID(
+                at: normalizedPoint,
+                in: capture,
+                rootNodeID: focusedNodeID,
+                mode: geometryMode
+            )
         case .layered:
-            for nodeID in geometry.visibleNodeIDs(in: capture).reversed() {
-                guard let node = capture.nodes[nodeID],
-                      let rect = geometry.canvasRect(for: nodeID, in: capture) else {
-                    continue
-                }
+            let canvasPoint = viewportState.rawCanvasPoint(forViewPoint: point)
+            let plan = PreviewLayeredRenderPlan.make(
+                capture: capture,
+                canvasSize: viewportState.canvasSize,
+                selectedNodeID: nil,
+                focusedNodeID: focusedNodeID,
+                geometryMode: geometryMode,
+                geometry: geometry,
+                layerTransform: layerTransform
+            )
 
-                let quad = layerTransform.projectedQuad(
-                    for: rect,
-                    depth: CGFloat(max(0, node.depth)),
-                    canvasSize: viewportState.canvasSize
-                ).compactMap(viewportState.viewPoint(forCanvasPoint:))
-
-                if layerTransform.contains(point, in: quad) {
-                    return nodeID
+            for overlay in plan.overlayQuads.reversed() {
+                if layerTransform.contains(canvasPoint, in: overlay.quad) {
+                    return overlay.nodeID
                 }
             }
             return nil
