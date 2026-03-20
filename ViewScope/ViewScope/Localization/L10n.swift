@@ -48,6 +48,7 @@ enum L10n {
     static var hierarchyMenuRefresh: String { tr("hierarchy.menu.refresh") }
     static var hierarchyMenuCopyTitle: String { tr("hierarchy.menu.copy_title") }
     static var hierarchyMenuCopyClassName: String { tr("hierarchy.menu.copy_class_name") }
+    static var hierarchyMenuCopyIvarName: String { tr("hierarchy.menu.copy_ivar_name") }
     static var hierarchyMenuCopyNodeID: String { tr("hierarchy.menu.copy_node_id") }
     static var hierarchyMenuCopyIdentifier: String { tr("hierarchy.menu.copy_identifier") }
     static var hierarchyMenuCopyAddress: String { tr("hierarchy.menu.copy_address") }

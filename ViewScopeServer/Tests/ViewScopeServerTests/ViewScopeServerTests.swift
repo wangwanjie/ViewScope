@@ -92,6 +92,65 @@ final class ViewScopeServerTests: XCTestCase {
     }
 
     @MainActor
+    func testSnapshotBuilderCapturesSubviewIvarTraces() {
+        final class FixtureRootView: NSView {
+            let titleLabel = NSTextField(labelWithString: "Hello")
+            let actionButton = NSButton(title: "Inspect", target: nil, action: nil)
+
+            override init(frame frameRect: NSRect) {
+                super.init(frame: frameRect)
+                addSubview(titleLabel)
+                addSubview(actionButton)
+            }
+
+            @available(*, unavailable)
+            required init?(coder: NSCoder) {
+                fatalError("init(coder:) has not been implemented")
+            }
+        }
+
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "Ivar Fixture"
+        defer {
+            window.orderOut(nil)
+            window.close()
+        }
+
+        let root = FixtureRootView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        window.contentView = root
+        window.orderFrontRegardless()
+
+        let builder = ViewScopeSnapshotBuilder(
+            hostInfo: ViewScopeHostInfo(
+                displayName: "Fixture",
+                bundleIdentifier: "fixture.tests",
+                version: "1.0",
+                build: "1",
+                processIdentifier: 1,
+                runtimeVersion: viewScopeServerRuntimeVersion,
+                supportsHighlighting: true
+            )
+        )
+
+        let (capture, _) = builder.makeCapture()
+        let ivarNames = capture.nodes.values
+            .filter { $0.parentID != nil }
+            .flatMap(\.ivarTraces)
+            .map(\.ivarName)
+
+        XCTAssertTrue(ivarNames.contains("titleLabel"))
+        XCTAssertTrue(ivarNames.contains("actionButton"))
+    }
+
+    func testClassNameFormatterFlattensPrivateSwiftContext() {
+        let formatted = ViewScopeClassNameFormatter.displayName(
+            for: "_TtC6AppKitP33_72EBFCF981BE77E1C6F26FD717D0893922NSTextFieldSimpleLabel"
+        )
+
+        XCTAssertEqual(formatted, "AppKit.NSTextFieldSimpleLabel _72EBFCF981BE77E1C6F26FD717D08939")
+    }
+
+    @MainActor
     func testWindowRootUsesContentBoundsAndFlippedState() {
         let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 500, height: 320), styleMask: [.titled], backing: .buffered, defer: false)
         window.title = "Flipped Root Fixture"

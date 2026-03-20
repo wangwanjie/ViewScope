@@ -51,6 +51,7 @@
 "hierarchy.menu.refresh" = "重新整理擷取";
 "hierarchy.menu.copy_title" = "複製標題";
 "hierarchy.menu.copy_class_name" = "複製類別名稱";
+"hierarchy.menu.copy_ivar_name" = "複製 ivar 名";
 "hierarchy.menu.copy_node_id" = "複製節點 ID";
 "hierarchy.menu.copy_identifier" = "複製識別碼";
 "hierarchy.menu.copy_address" = "複製位址";

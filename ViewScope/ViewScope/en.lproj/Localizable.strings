@@ -51,6 +51,7 @@
 "hierarchy.menu.refresh" = "Refresh Capture";
 "hierarchy.menu.copy_title" = "Copy Title";
 "hierarchy.menu.copy_class_name" = "Copy Class Name";
+"hierarchy.menu.copy_ivar_name" = "Copy Ivar Name";
 "hierarchy.menu.copy_node_id" = "Copy Node ID";
 "hierarchy.menu.copy_identifier" = "Copy Identifier";
 "hierarchy.menu.copy_address" = "Copy Address";

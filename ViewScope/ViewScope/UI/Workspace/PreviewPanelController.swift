@@ -26,6 +26,7 @@ final class PreviewPanelController: NSViewController {
     private let highlightButton = NSButton()
     private var autoCenterFocusKey: String?
     private var lastRenderedDisplayMode: WorkspacePreviewDisplayMode?
+    private var lastRenderedFocusedNodeID: String?
 
     init(store: WorkspaceStore) {
         self.store = store
@@ -146,26 +147,26 @@ final class PreviewPanelController: NSViewController {
             visibilityButton.toolTip = node.isHidden ? L10n.hierarchyMenuShowView : L10n.hierarchyMenuHideView
         }
 
-        guard let focusedNodeID = store.focusedNodeID else {
-            autoCenterFocusKey = nil
-            return
-        }
-        let nextAutoCenterFocusKey = [
-            capture?.capturedAt.timeIntervalSinceReferenceDate.description ?? "nil",
-            focusedNodeID
-        ].joined(separator: "|")
+        let nextAutoCenterFocusKey = PreviewPanelRenderDecisions.autoCenterFocusKey(
+            focusedNodeID: store.focusedNodeID,
+            capture: capture
+        )
         if autoCenterFocusKey != nextAutoCenterFocusKey {
             autoCenterFocusKey = nextAutoCenterFocusKey
             centerSelectionIfNeeded()
         }
 
-        if lastRenderedDisplayMode != store.previewDisplayMode,
-           store.previewDisplayMode == .layered,
-           canvasView.canvasSize.width > 0,
-           canvasView.canvasSize.height > 0 {
+        if PreviewPanelRenderDecisions.shouldRecenterFullCanvas(
+            displayMode: store.previewDisplayMode,
+            lastRenderedDisplayMode: lastRenderedDisplayMode,
+            focusedNodeID: store.focusedNodeID,
+            lastRenderedFocusedNodeID: lastRenderedFocusedNodeID,
+            canvasSize: canvasView.canvasSize
+        ) {
             canvasView.centerOnCanvasRect(CGRect(origin: .zero, size: canvasView.canvasSize))
         }
         lastRenderedDisplayMode = store.previewDisplayMode
+        lastRenderedFocusedNodeID = store.focusedNodeID
     }
 
     private func configureToolbarButton(_ button: NSButton, symbolName: String, toolTip: String, action: Selector) {
@@ -206,7 +207,8 @@ final class PreviewPanelController: NSViewController {
     }
 
     private func centerSelectionIfNeeded() {
-        guard store.previewDisplayMode == .flat else {
+        guard store.previewDisplayMode == .flat,
+              store.focusedNodeID != nil else {
             return
         }
         guard let rect = resolvedSelectionRect(capture: store.capture, detail: store.selectedNodeDetail) else {
@@ -254,5 +256,38 @@ final class PreviewPanelController: NSViewController {
 
     @objc private func highlightSelection(_ sender: Any?) {
         Task { await store.highlightCurrentSelection() }
+    }
+}
+
+struct PreviewPanelRenderDecisions {
+    static func autoCenterFocusKey(
+        focusedNodeID: String?,
+        capture: ViewScopeCapturePayload?
+    ) -> String? {
+        guard let focusedNodeID else {
+            return nil
+        }
+        return [
+            capture?.capturedAt.timeIntervalSinceReferenceDate.description ?? "nil",
+            focusedNodeID
+        ].joined(separator: "|")
+    }
+
+    static func shouldRecenterFullCanvas(
+        displayMode: WorkspacePreviewDisplayMode,
+        lastRenderedDisplayMode: WorkspacePreviewDisplayMode?,
+        focusedNodeID: String?,
+        lastRenderedFocusedNodeID: String?,
+        canvasSize: CGSize
+    ) -> Bool {
+        guard displayMode == .layered,
+              canvasSize.width > 0,
+              canvasSize.height > 0 else {
+            return false
+        }
+        if lastRenderedDisplayMode != displayMode {
+            return true
+        }
+        return focusedNodeID != lastRenderedFocusedNodeID
     }
 }

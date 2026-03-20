@@ -2,6 +2,35 @@ import AppKit
 import CoreImage
 import ViewScopeServer
 
+enum PreviewImageSliceGeometry {
+    static func imageRect(forCanvasRect rect: CGRect, canvasSize: CGSize, imageSize: CGSize) -> CGRect {
+        guard canvasSize.width > 0,
+              canvasSize.height > 0,
+              imageSize.width > 0,
+              imageSize.height > 0 else {
+            return .zero
+        }
+
+        let scaleX = imageSize.width / canvasSize.width
+        let scaleY = imageSize.height / canvasSize.height
+        let scaledRect = CGRect(
+            x: rect.origin.x * scaleX,
+            y: rect.origin.y * scaleY,
+            width: rect.width * scaleX,
+            height: rect.height * scaleY
+        )
+
+        let flippedRect = CGRect(
+            x: scaledRect.origin.x,
+            y: imageSize.height - scaledRect.maxY,
+            width: scaledRect.width,
+            height: scaledRect.height
+        )
+
+        return flippedRect.intersection(CGRect(origin: .zero, size: imageSize))
+    }
+}
+
 final class PreviewCanvasView: NSView {
     private let geometry = ViewHierarchyGeometry()
     private let hitTestResolver = PreviewHitTestResolver()
@@ -327,10 +356,25 @@ final class PreviewCanvasView: NSView {
     }
 
     private func drawLayeredPreview(for capture: ViewScopeCapturePayload) {
+        let ciContext = NSGraphicsContext.current.map { CIContext(cgContext: $0.cgContext, options: nil) }
+        let baseImage: CIImage? = image.flatMap { previewImage in
+            guard let data = previewImage.tiffRepresentation else { return nil }
+            return CIImage(data: data)
+        }
         let nodeIDs = geometry.visibleNodeIDs(in: capture)
         for nodeID in nodeIDs {
             guard let rect = geometry.canvasRect(for: nodeID, in: capture),
                   let node = capture.nodes[nodeID] else { continue }
+
+            if let baseImage, let ciContext, node.kind == .view, node.depth > 0 {
+                drawLayeredImageSlice(
+                    from: baseImage,
+                    for: rect,
+                    depth: CGFloat(max(0, node.depth)),
+                    context: ciContext
+                )
+            }
+
             let quad = layerTransform.projectedQuad(
                 for: rect,
                 depth: CGFloat(max(0, node.depth)),
@@ -343,6 +387,42 @@ final class PreviewCanvasView: NSView {
             outline.lineWidth = (nodeID == selectedNodeID ? 1.8 : 0.9) / max(viewportState.scale, 0.001)
             outline.stroke()
         }
+    }
+
+    private func drawLayeredImageSlice(from baseImage: CIImage, for rect: CGRect, depth: CGFloat, context: CIContext) {
+        guard rect.width > 0.5, rect.height > 0.5 else { return }
+
+        let imageSize = baseImage.extent.size
+        let cropRect = PreviewImageSliceGeometry.imageRect(
+            forCanvasRect: rect,
+            canvasSize: canvasSize,
+            imageSize: imageSize
+        )
+        guard cropRect.width > 0.5, cropRect.height > 0.5,
+              canvasSize.width > 0.5,
+              canvasSize.height > 0.5,
+              let filter = CIFilter(name: "CIPerspectiveTransform") else {
+            return
+        }
+
+        let scaleX = imageSize.width / canvasSize.width
+        let scaleY = imageSize.height / canvasSize.height
+        let croppedImage = baseImage
+            .cropped(to: cropRect)
+            .transformed(by: CGAffineTransform(translationX: -cropRect.origin.x, y: -cropRect.origin.y))
+            .transformed(by: CGAffineTransform(scaleX: 1 / scaleX, y: 1 / scaleY))
+        let quad = layerTransform.projectedQuad(for: rect, depth: depth, canvasSize: canvasSize)
+        filter.setValue(croppedImage, forKey: kCIInputImageKey)
+        filter.setValue(CIVector(cgPoint: ciPoint(fromCanvasPoint: quad[0])), forKey: "inputTopLeft")
+        filter.setValue(CIVector(cgPoint: ciPoint(fromCanvasPoint: quad[1])), forKey: "inputTopRight")
+        filter.setValue(CIVector(cgPoint: ciPoint(fromCanvasPoint: quad[2])), forKey: "inputBottomRight")
+        filter.setValue(CIVector(cgPoint: ciPoint(fromCanvasPoint: quad[3])), forKey: "inputBottomLeft")
+
+        guard let outputImage = filter.outputImage?.cropped(to: CGRect(origin: .zero, size: canvasSize)) else {
+            return
+        }
+
+        context.draw(outputImage, in: CGRect(origin: .zero, size: canvasSize), from: CGRect(origin: .zero, size: canvasSize))
     }
 
     private func drawLayeredSelection(for rect: CGRect) {
