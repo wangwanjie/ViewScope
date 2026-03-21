@@ -17,118 +17,118 @@ generate_dmg_background() {
     local output_path="$1"
 
     /usr/bin/swift - "$output_path" <<'SWIFT'
-import AppKit
+import Cocoa
 import Foundation
 
+// 获取输出路径
 guard CommandLine.arguments.count >= 2 else {
-    fputs("missing output path\n", stderr)
+    fputs("Error: Missing output path\n", stderr)
     exit(1)
 }
-
 let outputPath = CommandLine.arguments[1]
-let size = NSSize(width: 620, height: 360)
-let rect = NSRect(origin: .zero, size: size)
-let backgroundColor = NSColor(calibratedRed: 0.95, green: 0.97, blue: 0.98, alpha: 1)
-let topColor = NSColor(calibratedRed: 0.80, green: 0.90, blue: 0.95, alpha: 1)
-let accentColor = NSColor(calibratedRed: 0.11, green: 0.43, blue: 0.63, alpha: 1)
-let textColor = NSColor(calibratedRed: 0.10, green: 0.17, blue: 0.24, alpha: 1)
-let subtitleColor = NSColor(calibratedRed: 0.28, green: 0.35, blue: 0.42, alpha: 1)
-let panelStroke = NSColor(calibratedRed: 0.73, green: 0.83, blue: 0.90, alpha: 1)
-let badgeFill = NSColor(calibratedRed: 0.88, green: 0.94, blue: 0.98, alpha: 1)
 
-let image = NSImage(size: size)
-image.lockFocus()
+// MARK: - BackgroundView Definition
+class BackgroundView: NSView {
+    private enum Constants {
+        static let imageWidth: CGFloat = 620
+        static let imageHeight: CGFloat = 360
+        static let backgroundColor = NSColor(srgbRed: 0.95, green: 0.97, blue: 0.98, alpha: 1)
+        static let topGradientColor = NSColor(srgbRed: 0.80, green: 0.90, blue: 0.95, alpha: 1)
+        static let accentColor = NSColor(calibratedRed: 0.11, green: 0.43, blue: 0.63, alpha: 1)
+        static let textColor = NSColor(srgbRed: 0.10, green: 0.17, blue: 0.24, alpha: 1)
+        static let subtitleColor = NSColor(srgbRed: 0.28, green: 0.35, blue: 0.42, alpha: 1)
+        static let panelFillColor = NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.94)
+        static let panelStrokeColor = NSColor(srgbRed: 0.73, green: 0.83, blue: 0.90, alpha: 1)
+        static let cornerRadius: CGFloat = 24
+        static let panelCornerRadius: CGFloat = 26
+        static let panelStrokeWidth: CGFloat = 2
+        static let titleFont = NSFont(name: "Avenir Next Demi Bold", size: 26) ?? .systemFont(ofSize: 26, weight: .semibold)
+        static let subtitleFont = NSFont(name: "Avenir Next Regular", size: 14) ?? .systemFont(ofSize: 14)
+        static let titleText = "Drag ViewScope to Applications"
+        static let subtitleText = "Install the native macOS inspector by dragging it onto the Applications shortcut"
+    }
 
-let outer = NSBezierPath(roundedRect: rect, xRadius: 24, yRadius: 24)
-backgroundColor.setFill()
-outer.fill()
+    override func draw(_ dirtyRect: NSRect) {
+        // 背景
+        let path = NSBezierPath(roundedRect: bounds, xRadius: Constants.cornerRadius, yRadius: Constants.cornerRadius)
+        Constants.backgroundColor.setFill()
+        path.fill()
 
-let headerRect = NSRect(x: 0, y: 250, width: size.width, height: 110)
-let gradient = NSGradient(colorsAndLocations: (topColor, 0.0), (backgroundColor, 1.0))
-gradient?.draw(in: headerRect, angle: -90)
+        // 渐变头 (y=0 在底部)
+        let headerRect = NSRect(x: 0, y: 250, width: bounds.width, height: 110)
+        let gradient = NSGradient(starting: Constants.topGradientColor, ending: Constants.backgroundColor)!
+        gradient.draw(in: headerRect, angle: -90)
 
-func drawText(_ text: String, rect: NSRect, font: NSFont, color: NSColor, alignment: NSTextAlignment = .center) {
-    let paragraph = NSMutableParagraphStyle()
-    paragraph.alignment = alignment
-    let attributes: [NSAttributedString.Key: Any] = [
-        .font: font,
-        .foregroundColor: color,
-        .paragraphStyle: paragraph
-    ]
-    let attributed = NSAttributedString(string: text, attributes: attributes)
-    let options: NSString.DrawingOptions = [.usesLineFragmentOrigin, .usesFontLeading]
-    var bounds = attributed.boundingRect(with: NSSize(width: rect.width, height: .greatestFiniteMagnitude), options: options)
-    bounds.size.height = ceil(bounds.height)
-    let drawRect = NSRect(x: rect.minX, y: rect.midY - bounds.height / 2, width: rect.width, height: bounds.height)
-    attributed.draw(with: drawRect, options: options)
+        // 文字
+        drawText(Constants.titleText, font: Constants.titleFont, color: Constants.textColor, in: NSRect(x: 60, y: 286, width: 500, height: 34))
+        drawText(Constants.subtitleText, font: Constants.subtitleFont, color: Constants.subtitleColor, in: NSRect(x: 70, y: 242, width: 480, height: 24))
+
+        // 面板
+        drawPanel(NSRect(x: 58, y: 72, width: 192, height: 168))
+        drawPanel(NSRect(x: 370, y: 72, width: 192, height: 168))
+
+        // 箭头
+        let arrowBody = NSBezierPath()
+        arrowBody.move(to: NSPoint(x: 254, y: 156))
+        arrowBody.line(to: NSPoint(x: 338, y: 156))
+        Constants.accentColor.setStroke()
+        arrowBody.lineWidth = 14
+        arrowBody.stroke()
+
+        let arrowHead = NSBezierPath()
+        arrowHead.move(to: NSPoint(x: 326, y: 178))
+        arrowHead.line(to: NSPoint(x: 364, y: 156))
+        arrowHead.line(to: NSPoint(x: 326, y: 134))
+        arrowHead.close()
+        Constants.accentColor.setFill()
+        arrowHead.fill()
+    }
+
+    private func drawPanel(_ rect: NSRect) {
+        let path = NSBezierPath(roundedRect: rect, xRadius: Constants.panelCornerRadius, yRadius: Constants.panelCornerRadius)
+        Constants.panelFillColor.setFill()
+        path.fill()
+        Constants.panelStrokeColor.setStroke()
+        path.lineWidth = Constants.panelStrokeWidth
+        path.stroke()
+    }
+
+    private func drawText(_ text: String, font: NSFont, color: NSColor, in rect: NSRect) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color, .paragraphStyle: paragraph]
+        (text as NSString).draw(in: rect, withAttributes: attributes)
+    }
 }
 
-func drawPanel(_ rect: NSRect) {
-    let path = NSBezierPath(roundedRect: rect, xRadius: 26, yRadius: 26)
-    NSColor(calibratedWhite: 1.0, alpha: 0.94).setFill()
-    path.fill()
-    panelStroke.setStroke()
-    path.lineWidth = 2
-    path.stroke()
-}
+// MARK: - Execution
+let width = 620
+let height = 360
+let frame = NSRect(x: 0, y: 0, width: width, height: height)
+let view = BackgroundView(frame: frame)
 
-let leftPanel = NSRect(x: 58, y: 72, width: 192, height: 168)
-let rightPanel = NSRect(x: 370, y: 72, width: 192, height: 168)
-drawPanel(leftPanel)
-drawPanel(rightPanel)
-
-let arrow = NSBezierPath()
-arrow.move(to: NSPoint(x: 272, y: 156))
-arrow.line(to: NSPoint(x: 356, y: 156))
-arrow.lineWidth = 14
-arrow.lineCapStyle = .round
-accentColor.setStroke()
-arrow.stroke()
-
-let head = NSBezierPath()
-head.move(to: NSPoint(x: 354, y: 178))
-head.line(to: NSPoint(x: 392, y: 156))
-head.line(to: NSPoint(x: 354, y: 134))
-head.close()
-accentColor.setFill()
-head.fill()
-
-let badge1Rect = NSRect(x: 230, y: 128, width: 54, height: 54)
-let badge2Rect = NSRect(x: 336, y: 128, width: 54, height: 54)
-for (index, badgeRect) in [badge1Rect, badge2Rect].enumerated() {
-    let badge = NSBezierPath(roundedRect: badgeRect, xRadius: 27, yRadius: 27)
-    badgeFill.setFill()
-    badge.fill()
-    drawText(String(index + 1), rect: badgeRect.offsetBy(dx: 0, dy: 1), font: .systemFont(ofSize: 22, weight: .bold), color: accentColor)
-}
-
-drawText(
-    "Drag ViewScope to Applications",
-    rect: NSRect(x: 60, y: 286, width: 500, height: 34),
-    font: NSFont(name: "Avenir Next Demi Bold", size: 26) ?? .systemFont(ofSize: 26, weight: .semibold),
-    color: textColor
-)
-
-drawText(
-    "Install the native macOS inspector by dragging it onto the Applications shortcut",
-    rect: NSRect(x: 70, y: 242, width: 480, height: 24),
-    font: NSFont(name: "Avenir Next Regular", size: 14) ?? .systemFont(ofSize: 14, weight: .regular),
-    color: subtitleColor
-)
-
-drawText("View", rect: NSRect(x: leftPanel.minX, y: leftPanel.maxY - 54, width: leftPanel.width, height: 24), font: .systemFont(ofSize: 22, weight: .semibold), color: accentColor)
-drawText("Scope", rect: NSRect(x: leftPanel.minX, y: leftPanel.maxY - 82, width: leftPanel.width, height: 24), font: .systemFont(ofSize: 22, weight: .semibold), color: textColor)
-
-image.unlockFocus()
-
-guard let tiff = image.tiffRepresentation,
-      let bitmap = NSBitmapImageRep(data: tiff),
-      let png = bitmap.representation(using: .png, properties: [:]) else {
-    fputs("failed to render png\n", stderr)
+// 关键步骤：将 View 内容捕获为 Bitmap
+guard let bitmapRep = view.bitmapImageRepForCachingDisplay(in: frame) else {
+    fputs("Error: Could not create bitmap rep\n", stderr)
     exit(1)
 }
 
-try png.write(to: URL(fileURLWithPath: outputPath), options: .atomic)
+// 强制进行绘制到 bitmap
+view.cacheDisplay(in: frame, to: bitmapRep)
+
+// 转换为 PNG 数据
+guard let pngData = bitmapRep.representation(using: .png, properties: [:]) else {
+    fputs("Error: Could not generate PNG data\n", stderr)
+    exit(1)
+}
+
+// 写入文件
+do {
+    try pngData.write(to: URL(fileURLWithPath: outputPath))
+} catch {
+    fputs("Error: \(error.localizedDescription)\n", stderr)
+    exit(1)
+}
 SWIFT
 }
 
@@ -287,8 +287,8 @@ tell application "Finder"
         set icon size of viewOptions to 96
         set text size of viewOptions to 13
         set background picture of viewOptions to file ".background:installer-background.png"
-        set position of item "$app_name" of container window to {154, 180}
-        set position of item "Applications" of container window to {466, 180}
+        set position of item "$app_name" of container window to {154, 186}
+        set position of item "Applications" of container window to {466, 186}
         try
             set position of item ".background" of container window to {860, 320}
         end try
