@@ -92,6 +92,64 @@ final class ViewScopeServerTests: XCTestCase {
         XCTAssertEqual(decoded.mutationRequest?.property.numberValue, 42)
     }
 
+    func testProtocolV2BridgeMessageRoundTrip() throws {
+        let previewBitmap = ViewScopePreviewBitmap(
+            rootNodeID: "window-0",
+            pngBase64: "abc",
+            size: .init(width: 1200, height: 800),
+            capturedAt: Date(timeIntervalSince1970: 1_731_110_400),
+            scale: 2
+        )
+        let capture = ViewScopeCapturePayload(
+            host: makeHostInfo(),
+            capturedAt: Date(timeIntervalSince1970: 1_731_110_400),
+            summary: .init(nodeCount: 1, windowCount: 1, visibleWindowCount: 1, captureDurationMilliseconds: 1),
+            rootNodeIDs: ["window-0"],
+            nodes: [:],
+            captureID: "capture-1",
+            previewBitmaps: [previewBitmap]
+        )
+        let targetReference = ViewScopeRemoteObjectReference(
+            captureID: "capture-1",
+            objectID: "obj-1",
+            kind: .viewController,
+            className: "Demo.RootViewController",
+            address: "0x123",
+            sourceNodeID: "window-0-view-0"
+        )
+        let targetDescriptor = ViewScopeConsoleTargetDescriptor(
+            reference: targetReference,
+            title: "<Demo.RootViewController: 0x123>",
+            subtitle: "Primary"
+        )
+        let message = ViewScopeMessage(
+            kind: .consoleInvokeResponse,
+            requestID: "console",
+            capture: capture,
+            consoleInvokeResponse: .init(
+                submittedExpression: "viewDidAppear",
+                target: targetReference,
+                resultDescription: "<Demo.RootViewController: 0x123>",
+                returnedObject: targetDescriptor,
+                errorMessage: nil
+            )
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let data = try encoder.encode(message)
+        let decoded = try decoder.decode(ViewScopeMessage.self, from: data)
+
+        XCTAssertEqual(decoded.kind, .consoleInvokeResponse)
+        XCTAssertEqual(decoded.capture?.captureID, "capture-1")
+        XCTAssertEqual(decoded.capture?.previewBitmaps.first?.rootNodeID, "window-0")
+        XCTAssertEqual(decoded.consoleInvokeResponse?.target.kind, .viewController)
+        XCTAssertEqual(decoded.consoleInvokeResponse?.returnedObject?.title, "<Demo.RootViewController: 0x123>")
+    }
+
     @MainActor
     func testSnapshotBuilderCollectsSubviews() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
@@ -184,6 +242,104 @@ final class ViewScopeServerTests: XCTestCase {
     }
 
     @MainActor
+    func testSnapshotBuilderCapturesRootViewControllerMetadata() throws {
+        final class FixtureViewController: NSViewController {
+            let rootView = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+            let contentLabel = NSTextField(labelWithString: "Controller Content")
+
+            override func loadView() {
+                contentLabel.frame = NSRect(x: 20, y: 20, width: 180, height: 24)
+                rootView.addSubview(contentLabel)
+                view = rootView
+            }
+        }
+
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "View Controller Fixture"
+        defer {
+            window.orderOut(nil)
+            window.close()
+        }
+
+        let controller = FixtureViewController()
+        window.contentViewController = controller
+        window.orderFrontRegardless()
+
+        let builder = ViewScopeSnapshotBuilder(
+            hostInfo: ViewScopeHostInfo(
+                displayName: "Fixture",
+                bundleIdentifier: "fixture.tests",
+                version: "1.0",
+                build: "1",
+                processIdentifier: 1,
+                runtimeVersion: viewScopeServerRuntimeVersion,
+                supportsHighlighting: true
+            )
+        )
+
+        let (capture, context) = builder.makeCapture()
+        let controllerRootID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
+            guard case .view(let capturedView) = reference else { return false }
+            return capturedView === controller.view
+        })?.key)
+        let descendantID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
+            guard case .view(let capturedView) = reference else { return false }
+            return capturedView === controller.contentLabel
+        })?.key)
+        let node = try XCTUnwrap(capture.nodes[controllerRootID])
+        let descendantNode = try XCTUnwrap(capture.nodes[descendantID])
+        let detail = try XCTUnwrap(builder.makeDetail(for: controllerRootID, in: context))
+
+        XCTAssertEqual(node.rootViewControllerClassName, NSStringFromClass(FixtureViewController.self))
+        XCTAssertNil(descendantNode.rootViewControllerClassName)
+        XCTAssertTrue(propertyValue(titled: "View Controller", in: detail.sections)?.contains("FixtureViewController") == true)
+    }
+
+    @MainActor
+    func testSnapshotBuilderIncludesCapturePreviewBitmapsAndConsoleTargets() throws {
+        final class FixtureViewController: NSViewController {
+            let rootView = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 300))
+            let titleLabel = NSTextField(labelWithString: "Hello")
+
+            override func loadView() {
+                titleLabel.frame = NSRect(x: 20, y: 20, width: 120, height: 22)
+                rootView.addSubview(titleLabel)
+                view = rootView
+            }
+        }
+
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "Preview Fixture"
+        defer {
+            window.orderOut(nil)
+            window.close()
+        }
+
+        let controller = FixtureViewController()
+        window.contentViewController = controller
+        window.orderFrontRegardless()
+
+        let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
+        let (capture, context) = builder.makeCapture()
+
+        XCTAssertFalse(capture.captureID.isEmpty)
+        XCTAssertEqual(capture.previewBitmaps.count, 1)
+        XCTAssertEqual(capture.previewBitmaps.first?.rootNodeID, "window-0")
+        XCTAssertEqual(capture.previewBitmaps.first?.size.width, Double(window.contentView?.bounds.width ?? 0))
+
+        let controllerRootID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
+            guard case .view(let capturedView) = reference else { return false }
+            return capturedView === controller.view
+        })?.key)
+        let detail = try XCTUnwrap(builder.makeDetail(for: controllerRootID, in: context))
+        let kinds = detail.consoleTargets.map(\.reference.kind)
+
+        XCTAssertTrue(kinds.contains(.view))
+        XCTAssertTrue(kinds.contains(.viewController))
+        XCTAssertTrue(detail.consoleTargets.allSatisfy { $0.reference.captureID == capture.captureID })
+    }
+
+    @MainActor
     func testSnapshotBuilderIgnoresDanglingUnsafeSubviewIvars() {
         final class FixtureRootView: NSView {
             unowned(unsafe) var danglingSubview: NSView?
@@ -241,6 +397,114 @@ final class ViewScopeServerTests: XCTestCase {
 
         XCTAssertTrue(ivarNames.contains("persistentSubview"))
         XCTAssertFalse(ivarNames.contains("danglingSubview"))
+    }
+
+    @MainActor
+    func testSnapshotBuilderIncludesControlTargetAndActionInDetail() throws {
+        final class ControlTarget: NSObject {
+            @objc func handlePress(_ sender: Any?) {}
+        }
+
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "Control Fixture"
+        defer {
+            window.orderOut(nil)
+            window.close()
+        }
+
+        let button = NSButton(title: "Press", target: nil, action: nil)
+        button.frame = NSRect(x: 20, y: 20, width: 120, height: 32)
+        let target = ControlTarget()
+        button.target = target
+        button.action = #selector(ControlTarget.handlePress(_:))
+
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        root.addSubview(button)
+        window.contentView = root
+        window.orderFrontRegardless()
+
+        let builder = ViewScopeSnapshotBuilder(
+            hostInfo: ViewScopeHostInfo(
+                displayName: "Fixture",
+                bundleIdentifier: "fixture.tests",
+                version: "1.0",
+                build: "1",
+                processIdentifier: 1,
+                runtimeVersion: viewScopeServerRuntimeVersion,
+                supportsHighlighting: true
+            )
+        )
+
+        let (_, context) = builder.makeCapture()
+        let buttonID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
+            guard case .view(let capturedView) = reference else { return false }
+            return capturedView === button
+        })?.key)
+        let detail = try XCTUnwrap(builder.makeDetail(for: buttonID, in: context))
+
+        XCTAssertTrue(propertyValue(titled: "Target", in: detail.sections)?.contains("ControlTarget") == true)
+        XCTAssertEqual(propertyValue(titled: "Action", in: detail.sections), "handlePress:")
+    }
+
+    @MainActor
+    func testSnapshotBuilderCapturesEventHandlersForControlsAndGestures() throws {
+        final class ControlTarget: NSObject {
+            @objc func handlePress(_ sender: Any?) {}
+            @objc func handleTap(_ sender: Any?) {}
+        }
+
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "Handlers Fixture"
+        defer {
+            window.orderOut(nil)
+            window.close()
+        }
+
+        let target = ControlTarget()
+        let button = NSButton(title: "Press", target: target, action: #selector(ControlTarget.handlePress(_:)))
+        button.frame = NSRect(x: 20, y: 20, width: 120, height: 32)
+
+        let gesture = NSClickGestureRecognizer(target: target, action: #selector(ControlTarget.handleTap(_:)))
+        gesture.isEnabled = true
+        button.addGestureRecognizer(gesture)
+
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        root.addSubview(button)
+        window.contentView = root
+        window.orderFrontRegardless()
+
+        let builder = ViewScopeSnapshotBuilder(
+            hostInfo: ViewScopeHostInfo(
+                displayName: "Fixture",
+                bundleIdentifier: "fixture.tests",
+                version: "1.0",
+                build: "1",
+                processIdentifier: 1,
+                runtimeVersion: viewScopeServerRuntimeVersion,
+                supportsHighlighting: true
+            )
+        )
+
+        let (capture, context) = builder.makeCapture()
+        let buttonID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
+            guard case .view(let capturedView) = reference else { return false }
+            return capturedView === button
+        })?.key)
+        let node = try XCTUnwrap(capture.nodes[buttonID])
+        let handlers = try XCTUnwrap(node.eventHandlers)
+
+        XCTAssertGreaterThanOrEqual(handlers.count, 2)
+
+        let controlHandler = try XCTUnwrap(handlers.first(where: { $0.kind == .controlAction }))
+        XCTAssertEqual(controlHandler.title, "handlePress:")
+        XCTAssertEqual(controlHandler.targetActions.first?.actionName, "handlePress:")
+        XCTAssertTrue(controlHandler.targetActions.first?.targetClassName?.contains("ControlTarget") == true)
+
+        let gestureHandler = try XCTUnwrap(handlers.first(where: { $0.kind == .gesture }))
+        XCTAssertEqual(gestureHandler.title, "NSClickGestureRecognizer")
+        XCTAssertEqual(gestureHandler.targetActions.first?.actionName, "handleTap:")
+        XCTAssertTrue(gestureHandler.targetActions.first?.targetClassName?.contains("ControlTarget") == true)
+        XCTAssertEqual(gestureHandler.isEnabled, true)
     }
 
     @MainActor
@@ -505,10 +769,9 @@ final class ViewScopeServerTests: XCTestCase {
         )
 
         let (capture, context) = builder.makeCapture()
-        guard let node = capture.nodes.values.first(where: { $0.className.contains("NSTextField") }) else {
-            return XCTFail("Expected an NSTextField node")
+        guard let node = capture.nodes.values.first(where: { $0.title == "First Second" }) else {
+            return XCTFail("Expected a sanitized text node")
         }
-        XCTAssertEqual(node.title, "First Second")
 
         guard let detail = builder.makeDetail(for: node.id, in: context) else {
             return XCTFail("Expected detail payload")
@@ -589,6 +852,25 @@ final class ViewScopeServerTests: XCTestCase {
         return [nestedPodspecURL, repositoryPodspecURL].filter {
             FileManager.default.fileExists(atPath: $0.path)
         }
+    }
+
+    private func propertyValue(titled title: String, in sections: [ViewScopePropertySection]) -> String? {
+        sections
+            .flatMap(\.items)
+            .first(where: { $0.title == title })?
+            .value
+    }
+
+    private func makeHostInfo() -> ViewScopeHostInfo {
+        ViewScopeHostInfo(
+            displayName: "Fixture",
+            bundleIdentifier: "fixture.tests",
+            version: "1.0",
+            build: "1",
+            processIdentifier: 1,
+            runtimeVersion: viewScopeServerRuntimeVersion,
+            supportsHighlighting: true
+        )
     }
 }
 

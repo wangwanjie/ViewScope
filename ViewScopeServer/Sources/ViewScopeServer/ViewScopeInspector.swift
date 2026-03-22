@@ -116,7 +116,7 @@ private final class Inspector {
     private var overlayController: ViewScopeOverlayController?
     private var heartbeatTimer: Timer?
     private var announcement: ViewScopeHostAnnouncement?
-    private var lastReferenceContext = ViewScopeSnapshotBuilder.ReferenceContext(nodeReferences: [:], rootNodeIDs: [])
+    private var lastReferenceContext = ViewScopeSnapshotBuilder.ReferenceContext(nodeReferences: [:], rootNodeIDs: [], captureID: "")
     private var clientInterfaceLanguage = ViewScopeInterfaceLanguage.english
     private var discoveryRequestObserver: NSObjectProtocol?
 
@@ -185,7 +185,7 @@ private final class Inspector {
             )
         }
         announcement = nil
-        lastReferenceContext = .init(nodeReferences: [:], rootNodeIDs: [])
+        lastReferenceContext = .init(nodeReferences: [:], rootNodeIDs: [], captureID: "")
         clientInterfaceLanguage = .english
     }
 
@@ -397,6 +397,13 @@ private final class Inspector {
                 let rect = view.convert(view.bounds, to: nil)
                 overlayController?.show(highlight: rect, in: window, duration: request.duration)
             }
+        case .viewController(let controller):
+            if let window = controller.view.window {
+                let rect = controller.view.convert(controller.view.bounds, to: nil)
+                overlayController?.show(highlight: rect, in: window, duration: request.duration)
+            }
+        case .object:
+            break
         }
 
         activeConnection?.send(ViewScopeMessage(kind: .ack, requestID: message.requestID, ack: ViewScopeAckPayload()))
@@ -464,6 +471,8 @@ enum ViewScopeMutationApplier {
             try apply(property, to: window)
         case .view(let view):
             try apply(property, to: view)
+        case .viewController, .object:
+            throw MutationError.unsupportedProperty
         }
     }
 

@@ -44,6 +44,7 @@ final class ViewScopeSnapshotBuilder {
     struct ReferenceContext {
         var nodeReferences: [String: ViewScopeInspectableReference]
         var rootNodeIDs: [String]
+        var captureID: String
     }
 
     private let hostInfo: ViewScopeHostInfo
@@ -56,6 +57,7 @@ final class ViewScopeSnapshotBuilder {
 
     func makeCapture() -> (ViewScopeCapturePayload, ReferenceContext) {
         let start = Date()
+        let captureID = UUID().uuidString
         let windows = NSApp.windows
             .filter { window in
                 guard !(window is NSPanel && NSStringFromClass(type(of: window)).contains("ViewScope")) else {
@@ -73,6 +75,7 @@ final class ViewScopeSnapshotBuilder {
         var nodes: [String: ViewScopeHierarchyNode] = [:]
         var references: [String: ViewScopeInspectableReference] = [:]
         var rootNodeIDs: [String] = []
+        var previewBitmaps: [ViewScopePreviewBitmap] = []
 
         for (index, window) in windows.enumerated() {
             let windowID = "window-\(index)"
@@ -100,16 +103,59 @@ final class ViewScopeSnapshotBuilder {
             rootNodeIDs.append(windowID)
 
             if let contentView = window.contentView {
+                if let image = makeWindowScreenshot(window: window),
+                   let pngBase64 = ViewScopeImageEncoder().base64PNG(for: image) {
+                    previewBitmaps.append(
+                        ViewScopePreviewBitmap(
+                            rootNodeID: windowID,
+                            pngBase64: pngBase64,
+                            size: image.size.viewScopeSize,
+                            capturedAt: Date(),
+                            scale: Double(window.backingScaleFactor)
+                        )
+                    )
+                }
+                let contentViewNodeID = "\(windowID)-view-root"
+                let title = sanitizedDisplayText(contentView.viewScopeTitle(interfaceLanguage: interfaceLanguage))
+                    ?? ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(type(of: contentView)))
+                nodes[contentViewNodeID] = ViewScopeHierarchyNode(
+                    id: contentViewNodeID,
+                    parentID: windowID,
+                    kind: .view,
+                    className: NSStringFromClass(type(of: contentView)),
+                    title: title,
+                    subtitle: sanitizedDisplayText(contentView.viewScopeSubtitle(interfaceLanguage: interfaceLanguage)),
+                    identifier: sanitizedDisplayText(contentView.identifier?.rawValue),
+                    address: contentView.viewScopeAddress,
+                    frame: contentBounds.viewScopeRect,
+                    bounds: contentView.bounds.viewScopeRect,
+                    childIDs: [],
+                    isHidden: contentView.isHidden,
+                    alphaValue: Double(contentView.alphaValue),
+                    wantsLayer: contentView.wantsLayer,
+                    isFlipped: contentView.isFlipped,
+                    clippingEnabled: contentView.layer?.masksToBounds ?? false,
+                    depth: 1,
+                    ivarName: nil,
+                    ivarTraces: [],
+                    rootViewControllerClassName: contentView.viewScopeExactRootViewControllerClassName,
+                    controlTargetClassName: nil,
+                    controlActionName: nil,
+                    eventHandlers: contentView.viewScopeEventHandlers(interfaceLanguage: interfaceLanguage).nonEmpty
+                )
+                references[contentViewNodeID] = .view(contentView)
+
                 let childIDs = buildNodes(
                     from: contentView,
                     rootView: contentView,
-                    parentID: windowID,
+                    parentID: contentViewNodeID,
                     prefix: "\(windowID)-view",
-                    depth: 1,
+                    depth: 2,
                     nodes: &nodes,
                     references: &references
                 )
-                nodes[windowID]?.childIDs = childIDs
+                nodes[contentViewNodeID]?.childIDs = childIDs
+                nodes[windowID]?.childIDs = [contentViewNodeID]
             }
         }
 
@@ -126,9 +172,11 @@ final class ViewScopeSnapshotBuilder {
                 capturedAt: Date(),
                 summary: summary,
                 rootNodeIDs: rootNodeIDs,
-                nodes: nodes
+                nodes: nodes,
+                captureID: captureID,
+                previewBitmaps: previewBitmaps
             ),
-            ReferenceContext(nodeReferences: references, rootNodeIDs: rootNodeIDs)
+            ReferenceContext(nodeReferences: references, rootNodeIDs: rootNodeIDs, captureID: captureID)
         )
     }
 
@@ -148,7 +196,8 @@ final class ViewScopeSnapshotBuilder {
                 ancestry: [window.title.isEmpty ? interfaceLanguage.text("server.value.window_fallback") : window.title],
                 screenshotPNGBase64: image.flatMap(ViewScopeImageEncoder().base64PNG),
                 screenshotSize: image?.size.viewScopeSize ?? .zero,
-                highlightedRect: window.contentView?.bounds.viewScopeRect ?? .zero
+                highlightedRect: window.contentView?.bounds.viewScopeRect ?? .zero,
+                consoleTargets: makeConsoleTargets(for: .window(window), nodeID: nodeID, context: context)
             )
         case .view(let view):
             let rootView = view.window?.contentView
@@ -164,7 +213,52 @@ final class ViewScopeSnapshotBuilder {
                 ancestry: ancestry(for: view),
                 screenshotPNGBase64: image.flatMap(ViewScopeImageEncoder().base64PNG),
                 screenshotSize: image?.size.viewScopeSize ?? .zero,
-                highlightedRect: highlightRect
+                highlightedRect: highlightRect,
+                consoleTargets: makeConsoleTargets(for: .view(view), nodeID: nodeID, context: context)
+            )
+        case .viewController(let controller):
+            return ViewScopeNodeDetailPayload(
+                nodeID: nodeID,
+                host: hostInfo,
+                sections: [
+                    ViewScopePropertySection(
+                        title: text("server.section.identity"),
+                        items: [
+                            ViewScopePropertyItem(
+                                title: text("server.item.class"),
+                                value: ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(type(of: controller)))
+                            )
+                        ]
+                    )
+                ],
+                constraints: [],
+                ancestry: [],
+                screenshotPNGBase64: nil,
+                screenshotSize: .zero,
+                highlightedRect: .zero,
+                consoleTargets: makeConsoleTargets(for: .viewController(controller), nodeID: nodeID, context: context)
+            )
+        case .object(let object):
+            return ViewScopeNodeDetailPayload(
+                nodeID: nodeID,
+                host: hostInfo,
+                sections: [
+                    ViewScopePropertySection(
+                        title: text("server.section.identity"),
+                        items: [
+                            ViewScopePropertyItem(
+                                title: text("server.item.class"),
+                                value: ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(type(of: object)))
+                            )
+                        ]
+                    )
+                ],
+                constraints: [],
+                ancestry: [],
+                screenshotPNGBase64: nil,
+                screenshotSize: .zero,
+                highlightedRect: .zero,
+                consoleTargets: makeConsoleTargets(for: .object(object), nodeID: nodeID, context: context)
             )
         }
     }
@@ -206,7 +300,11 @@ final class ViewScopeSnapshotBuilder {
                 clippingEnabled: child.layer?.masksToBounds ?? false,
                 depth: depth,
                 ivarName: ivarTraces.first?.ivarName,
-                ivarTraces: ivarTraces
+                ivarTraces: ivarTraces,
+                rootViewControllerClassName: child.viewScopeExactRootViewControllerClassName,
+                controlTargetClassName: (child as? NSControl)?.viewScopeTargetClassName,
+                controlActionName: (child as? NSControl)?.viewScopeActionName,
+                eventHandlers: child.viewScopeEventHandlers(interfaceLanguage: interfaceLanguage).nonEmpty
             )
             references[nodeID] = .view(child)
             let nestedIDs = buildNodes(
@@ -450,6 +548,14 @@ final class ViewScopeSnapshotBuilder {
         if let identifier = view.identifier?.rawValue, !identifier.isEmpty {
             identityItems.append(ViewScopePropertyItem(title: text("server.item.identifier"), value: identifier))
         }
+        if let rootViewControllerClassName = view.viewScopeExactRootViewControllerClassName {
+            identityItems.append(
+                ViewScopePropertyItem(
+                    title: text("server.item.view_controller"),
+                    value: ViewScopeClassNameFormatter.displayName(for: rootViewControllerClassName)
+                )
+            )
+        }
         identityItems.append(
             editableTextItem(
                 title: text("server.item.tooltip"),
@@ -574,6 +680,31 @@ final class ViewScopeSnapshotBuilder {
                 )
             }
 
+            if let targetClassName = control.viewScopeTargetClassName {
+                controlItems.append(
+                    ViewScopePropertyItem(
+                        title: text("server.item.target"),
+                        value: ViewScopeClassNameFormatter.displayName(for: targetClassName)
+                    )
+                )
+            } else if control.viewScopeActionName != nil {
+                controlItems.append(
+                    ViewScopePropertyItem(
+                        title: text("server.item.target"),
+                        value: text("server.value.first_responder")
+                    )
+                )
+            }
+
+            if let actionName = control.viewScopeActionName {
+                controlItems.append(
+                    ViewScopePropertyItem(
+                        title: text("server.item.action"),
+                        value: actionName
+                    )
+                )
+            }
+
             sections.append(
                 ViewScopePropertySection(
                     title: text("server.section.control"),
@@ -631,14 +762,128 @@ final class ViewScopeSnapshotBuilder {
         let attributeName = attribute.viewScopeName
         return "\(className).\(attributeName)"
     }
+
+    private func makeConsoleTargets(
+        for reference: ViewScopeInspectableReference,
+        nodeID: String,
+        context: ReferenceContext
+    ) -> [ViewScopeConsoleTargetDescriptor] {
+        switch reference {
+        case .window(let window):
+            return [
+                makeConsoleTargetDescriptor(
+                    reference: .window(window),
+                    sourceNodeID: nodeID,
+                    captureID: context.captureID,
+                    subtitle: interfaceLanguage.text("server.value.window_fallback")
+                )
+            ].compactMap { $0 }
+        case .view(let view):
+            var targets: [ViewScopeConsoleTargetDescriptor] = []
+            if let descriptor = makeConsoleTargetDescriptor(
+                reference: .view(view),
+                sourceNodeID: nodeID,
+                captureID: context.captureID,
+                subtitle: ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(type(of: view)))
+            ) {
+                targets.append(descriptor)
+            }
+            if let controller = view.viewScopeExactRootOwningViewController,
+               let descriptor = makeConsoleTargetDescriptor(
+                reference: .viewController(controller),
+                sourceNodeID: nodeID,
+                captureID: context.captureID,
+                subtitle: ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(type(of: controller)))
+               ) {
+                targets.append(descriptor)
+            }
+            return targets
+        case .viewController(let controller):
+            return [
+                makeConsoleTargetDescriptor(
+                    reference: .viewController(controller),
+                    sourceNodeID: nodeID,
+                    captureID: context.captureID,
+                    subtitle: ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(type(of: controller)))
+                )
+            ].compactMap { $0 }
+        case .object:
+            return []
+        }
+    }
+
+    private func makeConsoleTargetDescriptor(
+        reference: ViewScopeInspectableReference,
+        sourceNodeID: String?,
+        captureID: String,
+        subtitle: String?
+    ) -> ViewScopeConsoleTargetDescriptor? {
+        let object: AnyObject
+        let kind: ViewScopeRemoteObjectReference.Kind
+        switch reference {
+        case .window(let window):
+            object = window
+            kind = .window
+        case .view(let view):
+            object = view
+            kind = .view
+        case .viewController(let controller):
+            object = controller
+            kind = .viewController
+        case .object(let anyObject):
+            object = anyObject
+            kind = .returnedObject
+        }
+        let className = NSStringFromClass(type(of: object))
+        let address = String(describing: Unmanaged.passUnretained(object).toOpaque())
+        let referencePayload = ViewScopeRemoteObjectReference(
+            captureID: captureID,
+            objectID: address,
+            kind: kind,
+            className: className,
+            address: address,
+            sourceNodeID: sourceNodeID
+        )
+        let title = "<\(ViewScopeClassNameFormatter.displayName(for: className)): \(address)>"
+        return ViewScopeConsoleTargetDescriptor(reference: referencePayload, title: title, subtitle: subtitle)
+    }
 }
 
 enum ViewScopeInspectableReference {
     case window(NSWindow)
     case view(NSView)
+    case viewController(NSViewController)
+    case object(AnyObject)
 }
 
 private extension NSView {
+    var viewScopeExactRootViewControllerClassName: String? {
+        viewScopeExactRootOwningViewController.map { NSStringFromClass(type(of: $0)) }
+    }
+
+    var viewScopeExactRootOwningViewController: NSViewController? {
+        if let windowController = window?.contentViewController,
+           let controller = windowController.viewScopeOwningController(containing: self),
+           controller.view === self {
+            return controller
+        }
+        return nil
+    }
+
+    func viewScopeEventHandlers(interfaceLanguage: ViewScopeInterfaceLanguage) -> [ViewScopeEventHandler] {
+        var handlers: [ViewScopeEventHandler] = []
+
+        if let controlHandler = (self as? NSControl)?.viewScopeControlEventHandler(interfaceLanguage: interfaceLanguage) {
+            handlers.append(controlHandler)
+        }
+
+        handlers.append(contentsOf: gestureRecognizers.map {
+            $0.viewScopeEventHandler(interfaceLanguage: interfaceLanguage)
+        })
+
+        return handlers
+    }
+
     func viewScopeTitle(interfaceLanguage: ViewScopeInterfaceLanguage) -> String {
         if let tabView = self as? NSTabView,
            let selectedItem = tabView.selectedTabViewItem,
@@ -717,6 +962,22 @@ private extension NSView {
     }
 }
 
+private extension NSViewController {
+    func viewScopeOwningController(containing view: NSView) -> NSViewController? {
+        for child in children {
+            if let controller = child.viewScopeOwningController(containing: view) {
+                return controller
+            }
+        }
+
+        if self.view === view || view.isDescendant(of: self.view) {
+            return self
+        }
+
+        return nil
+    }
+}
+
 private extension NSLayoutConstraint.Attribute {
     var viewScopeName: String {
         switch self {
@@ -745,6 +1006,16 @@ private extension NSWindow {
 }
 
 private extension NSControl {
+    var viewScopeTargetClassName: String? {
+        guard let target else { return nil }
+        return NSStringFromClass(type(of: target))
+    }
+
+    var viewScopeActionName: String? {
+        guard let action else { return nil }
+        return NSStringFromSelector(action)
+    }
+
     var viewScopeControlValue: String {
         switch self {
         case let button as NSButton:
@@ -754,6 +1025,41 @@ private extension NSControl {
         default:
             return stringValue
         }
+    }
+
+    func viewScopeControlEventHandler(interfaceLanguage: ViewScopeInterfaceLanguage) -> ViewScopeEventHandler? {
+        let targetAction = ViewScopeEventTargetAction(
+            targetClassName: viewScopeTargetClassName,
+            actionName: viewScopeActionName
+        )
+        guard targetAction.targetClassName != nil || targetAction.actionName != nil else {
+            return nil
+        }
+
+        return ViewScopeEventHandler(
+            kind: .controlAction,
+            title: targetAction.actionName ?? interfaceLanguage.text("server.item.action"),
+            targetActions: [targetAction]
+        )
+    }
+}
+
+private extension NSGestureRecognizer {
+    func viewScopeEventHandler(interfaceLanguage _: ViewScopeInterfaceLanguage) -> ViewScopeEventHandler {
+        let title = ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(type(of: self)))
+        let targetAction = ViewScopeEventTargetAction(
+            targetClassName: target.map { NSStringFromClass(type(of: $0)) },
+            actionName: action.map(NSStringFromSelector)
+        )
+        let delegateClassName = delegate.map { NSStringFromClass(type(of: $0 as AnyObject)) }
+
+        return ViewScopeEventHandler(
+            kind: .gesture,
+            title: title,
+            targetActions: (targetAction.targetClassName != nil || targetAction.actionName != nil) ? [targetAction] : [],
+            isEnabled: isEnabled,
+            delegateClassName: delegateClassName
+        )
     }
 }
 
@@ -824,5 +1130,11 @@ private extension NSEdgeInsets {
 private extension String {
     var viewScopeSanitizedSingleLine: String {
         split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+}
+
+private extension Array {
+    var nonEmpty: Self? {
+        isEmpty ? nil : self
     }
 }

@@ -2,6 +2,8 @@ import AppKit
 import ViewScopeServer
 
 enum SampleFixture {
+    private static let captureID = "sample-capture-1"
+
     static func announcement() -> ViewScopeHostAnnouncement {
         ViewScopeHostAnnouncement(
             identifier: "sample.host.preview",
@@ -31,12 +33,27 @@ enum SampleFixture {
         )
 
         let nodes = makeNodes()
+        let previewImage = previewImage()
+        let previewBitmap = previewImage.tiffRepresentation
+            .flatMap(NSBitmapImageRep.init(data:))
+            .flatMap { $0.representation(using: .png, properties: [:]) }
+            .map {
+                ViewScopePreviewBitmap(
+                    rootNodeID: "window-0",
+                    pngBase64: $0.base64EncodedString(),
+                    size: ViewScopeSize(width: Double(previewImage.size.width), height: Double(previewImage.size.height)),
+                    capturedAt: Date(),
+                    scale: 2
+                )
+            }
         return ViewScopeCapturePayload(
             host: host,
             capturedAt: Date(),
             summary: ViewScopeCaptureSummary(nodeCount: nodes.count, windowCount: 1, visibleWindowCount: 1, captureDurationMilliseconds: 184),
             rootNodeIDs: ["window-0"],
-            nodes: nodes
+            nodes: nodes,
+            captureID: captureID,
+            previewBitmaps: previewBitmap.map { [$0] } ?? []
         )
     }
 
@@ -107,8 +124,47 @@ enum SampleFixture {
             ancestry: ["Sample Notes", "WorkspaceSplitView", "ContentPane", "ChartCard"],
             screenshotPNGBase64: base64,
             screenshotSize: ViewScopeSize(width: Double(image.size.width), height: Double(image.size.height)),
-            highlightedRect: rects[nodeID] ?? ViewScopeRect(x: 292, y: 152, width: 760, height: 408)
+            highlightedRect: rects[nodeID] ?? ViewScopeRect(x: 292, y: 152, width: 760, height: 408),
+            consoleTargets: consoleTargets(for: nodeID)
         )
+    }
+
+    private static func consoleTargets(for nodeID: String) -> [ViewScopeConsoleTargetDescriptor] {
+        guard let node = makeNodes()[nodeID] else { return [] }
+
+        var targets: [ViewScopeConsoleTargetDescriptor] = [
+            ViewScopeConsoleTargetDescriptor(
+                reference: ViewScopeRemoteObjectReference(
+                    captureID: captureID,
+                    objectID: "view-\(nodeID)",
+                    kind: node.kind == .window ? .window : .view,
+                    className: node.className,
+                    address: node.address,
+                    sourceNodeID: nodeID
+                ),
+                title: "<\(ViewScopeClassNameFormatter.displayName(for: node.className)): \(node.address ?? "0xfeedbeef")>",
+                subtitle: node.title
+            )
+        ]
+
+        if let controllerClassName = node.rootViewControllerClassName {
+            targets.append(
+                ViewScopeConsoleTargetDescriptor(
+                    reference: ViewScopeRemoteObjectReference(
+                        captureID: captureID,
+                        objectID: "controller-\(nodeID)",
+                        kind: .viewController,
+                        className: controllerClassName,
+                        address: "0xc0ffee",
+                        sourceNodeID: nodeID
+                    ),
+                    title: "<\(ViewScopeClassNameFormatter.displayName(for: controllerClassName)): 0xc0ffee>",
+                    subtitle: "\(ViewScopeClassNameFormatter.displayName(for: controllerClassName)).view"
+                )
+            )
+        }
+
+        return targets
     }
 
     private static func makeNodes() -> [String: ViewScopeHierarchyNode] {
@@ -145,7 +201,8 @@ enum SampleFixture {
                 wantsLayer: true,
                 isFlipped: true,
                 clippingEnabled: false,
-                depth: 1
+                depth: 1,
+                rootViewControllerClassName: "SampleNotes.SidebarViewController"
             ),
             "window-0-view-0-0": ViewScopeHierarchyNode(
                 id: "window-0-view-0-0",
@@ -196,7 +253,8 @@ enum SampleFixture {
                 wantsLayer: true,
                 isFlipped: true,
                 clippingEnabled: false,
-                depth: 1
+                depth: 1,
+                rootViewControllerClassName: "SampleNotes.ContentViewController"
             ),
             "window-0-view-1-0": ViewScopeHierarchyNode(
                 id: "window-0-view-1-0",

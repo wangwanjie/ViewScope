@@ -106,6 +106,26 @@ final class ViewScopeClientSession: WorkspaceSessionProtocol {
         }
     }
 
+    func invokeConsole(
+        target: ViewScopeRemoteObjectReference,
+        expression: String
+    ) async throws -> ViewScopeConsoleInvokeResponsePayload {
+        let response = try await sendRequest(
+            ViewScopeMessage(
+                kind: .consoleInvokeRequest,
+                consoleInvokeRequest: ViewScopeConsoleInvokeRequestPayload(
+                    target: target,
+                    expression: expression
+                )
+            )
+        )
+        guard response.kind == .consoleInvokeResponse,
+              let payload = response.consoleInvokeResponse else {
+            throw SessionError.invalidResponse
+        }
+        return payload
+    }
+
     func disconnect() {
         guard !isDisconnected else { return }
         isDisconnected = true

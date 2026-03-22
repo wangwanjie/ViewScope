@@ -138,7 +138,8 @@ final class ViewScopeMutationSupportTests: XCTestCase {
                 "textField": .view(fixture.textField),
                 "button": .view(fixture.button)
             ],
-            rootNodeIDs: ["window"]
+            rootNodeIDs: ["window"],
+            captureID: "test-capture"
         )
     }
 

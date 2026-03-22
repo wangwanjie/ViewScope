@@ -9,12 +9,12 @@ final class ViewTreePanelController: NSViewController {
     private let store: WorkspaceStore
     private let panelView = WorkspacePanelContainerView()
     private let searchField = NSSearchField(frame: .zero)
+    private let wrapperToggle = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let scrollView = NSScrollView()
     private let outlineView = NSOutlineView()
     private let emptyStateView = WorkspaceEmptyStateView()
     private var cancellables = Set<AnyCancellable>()
     private var rootItems: [ViewTreeNodeItem] = []
-    private var expandedNodeIDs = Set<String>()
     private var currentQuery = ""
     private var isApplyingProgrammaticSelection = false
 
@@ -47,6 +47,11 @@ final class ViewTreePanelController: NSViewController {
 
         searchField.placeholderString = L10n.searchPlaceholder
         searchField.delegate = self
+        wrapperToggle.title = L10n.hierarchyShowSystemWrappers
+        wrapperToggle.state = store.showsSystemWrapperViews ? .on : .off
+        wrapperToggle.target = self
+        wrapperToggle.action = #selector(handleWrapperToggle(_:))
+        wrapperToggle.font = NSFont.systemFont(ofSize: 11)
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("ViewTreeColumn"))
         outlineView.addTableColumn(column)
@@ -66,13 +71,19 @@ final class ViewTreePanelController: NSViewController {
         scrollView.documentView = outlineView
 
         panelView.contentView.addSubview(searchField)
+        panelView.contentView.addSubview(wrapperToggle)
         panelView.contentView.addSubview(scrollView)
         panelView.contentView.addSubview(emptyStateView)
         searchField.snp.makeConstraints { make in
             make.top.leading.trailing.equalToSuperview().inset(12)
         }
+        wrapperToggle.snp.makeConstraints { make in
+            make.top.equalTo(searchField.snp.bottom).offset(6)
+            make.leading.equalToSuperview().inset(12)
+            make.trailing.lessThanOrEqualToSuperview().inset(12)
+        }
         scrollView.snp.makeConstraints { make in
-            make.top.equalTo(searchField.snp.bottom).offset(10)
+            make.top.equalTo(wrapperToggle.snp.bottom).offset(8)
             make.leading.trailing.bottom.equalToSuperview()
         }
         emptyStateView.snp.makeConstraints { make in
@@ -91,6 +102,7 @@ final class ViewTreePanelController: NSViewController {
 
     private func rebuildTree() {
         panelView.setTitle(L10n.hierarchy, subtitle: store.focusedNode?.title)
+        wrapperToggle.state = store.showsSystemWrapperViews ? .on : .off
         rootItems = buildFilteredRoots()
         updateEmptyState()
         outlineView.reloadData()
@@ -102,6 +114,7 @@ final class ViewTreePanelController: NSViewController {
         let isDisconnected = store.capture == nil
         emptyStateView.isHidden = !isDisconnected
         searchField.isHidden = isDisconnected
+        wrapperToggle.isHidden = isDisconnected
         scrollView.isHidden = isDisconnected
         guard isDisconnected else { return }
 
@@ -120,14 +133,15 @@ final class ViewTreePanelController: NSViewController {
         guard let capture = store.capture else { return [] }
         let rootNodeIDs = store.focusedNodeID.map { [$0] } ?? capture.rootNodeIDs
         let roots = rootNodeIDs.compactMap { ViewTreeNodeItem.make(nodeID: $0, nodes: capture.nodes) }
+        let presentationRoots = store.showsSystemWrapperViews ? roots : filterSystemWrapperItems(in: roots)
         let query = currentQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !query.isEmpty else { return roots }
-        return roots.compactMap { $0.filtered(matching: query) }
+        guard !query.isEmpty else { return presentationRoots }
+        return presentationRoots.compactMap { $0.filtered(matching: query) }
     }
 
     private func restoreExpansionState(items: [ViewTreeNodeItem]) {
         items.forEach { item in
-            if expandedNodeIDs.contains(item.node.id) || item.parent == nil {
+            if store.isNodeExpanded(item.node.id) || item.parent == nil {
                 outlineView.expandItem(item)
             }
             restoreExpansionState(items: item.children)
@@ -165,6 +179,7 @@ final class ViewTreePanelController: NSViewController {
     private func expandAncestors(of item: ViewTreeNodeItem) {
         var currentItem = item.parent
         while let current = currentItem {
+            store.setNodeExpanded(current.node.id, isExpanded: true)
             outlineView.expandItem(current)
             currentItem = current.parent
         }
@@ -195,6 +210,10 @@ final class ViewTreePanelController: NSViewController {
 
     @objc private func refreshCapture(_ sender: Any?) {
         Task { await store.refreshCapture(forceReloadSelectionDetail: true, clearingVisibleState: true) }
+    }
+
+    @objc private func handleWrapperToggle(_ sender: Any?) {
+        store.setShowsSystemWrapperViews(wrapperToggle.state == .on)
     }
 
     @objc private func copySelectedNodeTitle(_ sender: Any?) {
@@ -247,9 +266,20 @@ final class ViewTreePanelController: NSViewController {
         NSPasteboard.general.setString(value, forType: .string)
     }
 
+    private func filterSystemWrapperItems(in items: [ViewTreeNodeItem]) -> [ViewTreeNodeItem] {
+        items.flatMap { item in
+            let filteredChildren = filterSystemWrapperItems(in: item.children)
+            let rebuilt = ViewTreeNodeItem(node: item.node, children: filteredChildren)
+            if ViewTreeNodePresentation.isSystemWrapper(node: item.node) {
+                return filteredChildren
+            }
+            return [rebuilt]
+        }
+    }
+
     private func expandRecursively(_ item: ViewTreeNodeItem) {
         outlineView.expandItem(item)
-        expandedNodeIDs.insert(item.node.id)
+        store.setNodeExpanded(item.node.id, isExpanded: true)
         item.children.forEach { expandRecursively($0) }
     }
 
@@ -257,7 +287,7 @@ final class ViewTreePanelController: NSViewController {
         item.children.forEach {
             collapseDescendants(of: $0)
             outlineView.collapseItem($0)
-            expandedNodeIDs.remove($0.node.id)
+            store.setNodeExpanded($0.node.id, isExpanded: false)
         }
     }
 }
@@ -305,12 +335,12 @@ extension ViewTreePanelController: NSOutlineViewDataSource, NSOutlineViewDelegat
 
     func outlineViewItemDidExpand(_ notification: Notification) {
         guard let item = notification.userInfo?["NSObject"] as? ViewTreeNodeItem else { return }
-        expandedNodeIDs.insert(item.node.id)
+        store.setNodeExpanded(item.node.id, isExpanded: true)
     }
 
     func outlineViewItemDidCollapse(_ notification: Notification) {
         guard let item = notification.userInfo?["NSObject"] as? ViewTreeNodeItem else { return }
-        expandedNodeIDs.remove(item.node.id)
+        store.setNodeExpanded(item.node.id, isExpanded: false)
     }
 }
 
@@ -406,8 +436,74 @@ private protocol ViewTreeNodeCellViewDelegate: AnyObject {
 }
 
 enum ViewTreeNodePresentation {
+    enum IconKind: Equatable {
+        case window
+        case viewController
+        case button
+        case label
+        case image
+        case scrollView
+        case tableView
+        case outlineView
+        case stackView
+        case textField
+        case slider
+        case segmentedControl
+        case control
+        case view
+
+        var symbolCandidates: [String] {
+            switch self {
+            case .window:
+                return ["macwindow", "rectangle"]
+            case .viewController:
+                return ["rectangle.stack.person.crop", "person.crop.rectangle.stack", "square.stack.3d.up"]
+            case .button:
+                return ["button.programmable", "capsule", "rectangle.and.hand.point.up.left"]
+            case .label:
+                return ["textformat", "captions.bubble"]
+            case .image:
+                return ["photo", "photo.on.rectangle"]
+            case .scrollView:
+                return ["scroll", "rectangle.3.group"]
+            case .tableView:
+                return ["tablecells", "list.bullet.rectangle"]
+            case .outlineView:
+                return ["list.bullet.indent", "list.bullet"]
+            case .stackView:
+                return ["square.stack.3d.down.right", "square.stack.3d.up"]
+            case .textField:
+                return ["textbox", "character.textbox", "text.cursor"]
+            case .slider:
+                return ["slider.horizontal.3", "line.3.horizontal.decrease.circle"]
+            case .segmentedControl:
+                return ["rectangle.split.3x1", "square.split.2x1"]
+            case .control:
+                return ["switch.2", "slider.horizontal.3"]
+            case .view:
+                return ["square.on.square", "square"]
+            }
+        }
+    }
+
     static func classText(for node: ViewScopeHierarchyNode) -> String {
-        ViewScopeClassNameFormatter.displayName(for: node.className)
+        let classText = ViewScopeClassNameFormatter.displayName(for: node.className)
+        guard let controllerText = controllerText(for: node) else {
+            return classText
+        }
+        return "\(classText) \(controllerText).view"
+    }
+
+    static func secondaryText(for node: ViewScopeHierarchyNode) -> String? {
+        [ivarText(for: node)]
+            .compactMap { sanitized($0) }
+            .joined(separator: " • ")
+            .nonEmpty
+    }
+
+    static func controllerText(for node: ViewScopeHierarchyNode) -> String? {
+        guard let className = sanitized(node.rootViewControllerClassName) else { return nil }
+        return ViewScopeClassNameFormatter.displayName(for: className)
     }
 
     static func ivarText(for node: ViewScopeHierarchyNode) -> String? {
@@ -428,18 +524,168 @@ enum ViewTreeNodePresentation {
         return searchableText(for: node).contains(normalizedQuery)
     }
 
+    static func iconKind(for node: ViewScopeHierarchyNode) -> IconKind {
+        if node.kind == .window {
+            return .window
+        }
+        if sanitized(node.rootViewControllerClassName) != nil {
+            return .viewController
+        }
+
+        let className = classText(for: node)
+        if className.contains("NSOutlineView") {
+            return .outlineView
+        }
+        if className.contains("NSTableView") {
+            return .tableView
+        }
+        if className.contains("NSScrollView") || className.contains("NSClipView") {
+            return .scrollView
+        }
+        if className.contains("NSStackView") {
+            return .stackView
+        }
+        if className.contains("NSButton") {
+            return .button
+        }
+        if className.contains("NSSlider") {
+            return .slider
+        }
+        if className.contains("NSSegmentedControl") {
+            return .segmentedControl
+        }
+        if className.contains("NSSearchField") || className.contains("NSTextView") || className.contains("NSSecureTextField") {
+            return .textField
+        }
+        if className.contains("NSTextField") {
+            return .label
+        }
+        if className.contains("NSImageView") {
+            return .image
+        }
+        if className.contains("NSControl") {
+            return .control
+        }
+        return .view
+    }
+
+    static func iconImage(for node: ViewScopeHierarchyNode) -> NSImage? {
+        let configuration = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
+        for symbolName in iconKind(for: node).symbolCandidates {
+            if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) {
+                return image.withSymbolConfiguration(configuration)
+            }
+        }
+        return nil
+    }
+
+    static func eventHandlers(for node: ViewScopeHierarchyNode) -> [ViewScopeEventHandler] {
+        if let handlers = node.eventHandlers, handlers.isEmpty == false {
+            return handlers
+        }
+        guard let synthesizedControlHandler = synthesizedControlHandler(for: node) else {
+            return []
+        }
+        return [synthesizedControlHandler]
+    }
+
+    static func isSystemWrapper(node: ViewScopeHierarchyNode) -> Bool {
+        let className = ViewScopeClassNameFormatter.displayName(for: node.className)
+        let exactMatches = [
+            "_NSSplitViewItemViewWrapper",
+            "_NSSplitViewCollapsedInteractionsView",
+            "NSBlurryAlleywayView",
+            "NSThemeFrame",
+            "NSTitlebarContainerBlockingView",
+            "NSTitlebarView",
+            "_NSTitlebarDecorationView",
+            "_NSTitlebarContainerView",
+            "_NSToolbarFullScreenWindowContentView"
+        ]
+        if exactMatches.contains(where: { className.contains($0) }) {
+            return true
+        }
+
+        let wrapperKeywords = [
+            "Wrapper",
+            "Collapsed",
+            "Titlebar",
+            "Toolbar",
+            "ThemeFrame",
+            "Decoration",
+            "Auxiliary",
+            "Blocking",
+            "Overlay",
+            "FullScreen"
+        ]
+        let looksSystemOwned = className.hasPrefix("_NS") || className.hasPrefix("NS")
+        return looksSystemOwned && wrapperKeywords.contains(where: { className.contains($0) })
+    }
+
     private static func searchableText(for node: ViewScopeHierarchyNode) -> String {
-        [
+        let handlers = eventHandlers(for: node)
+        let ivarNames = node.ivarTraces.map { $0.ivarName }.joined(separator: " ")
+        let handlerTitles = handlers.map { $0.title }.joined(separator: " ")
+        let handlerSubtitles = handlers.compactMap { $0.subtitle }.joined(separator: " ")
+        let handlerDelegates = handlers.compactMap { $0.delegateClassName }.joined(separator: " ")
+
+        var targetClassNames: [String] = []
+        var actionNames: [String] = []
+        for handler in handlers {
+            for targetAction in handler.targetActions {
+                if let targetClassName = targetAction.targetClassName {
+                    targetClassNames.append(targetClassName)
+                }
+                if let actionName = targetAction.actionName {
+                    actionNames.append(actionName)
+                }
+            }
+        }
+
+        var searchText = ""
+        let parts = [
             node.title,
             node.className,
             classText(for: node),
-            node.ivarTraces.map(\.ivarName).joined(separator: " "),
+            node.rootViewControllerClassName ?? "",
+            controllerText(for: node) ?? "",
+            ivarNames,
             node.ivarName ?? "",
+            node.controlActionName ?? "",
+            node.controlTargetClassName ?? "",
+            handlerTitles,
+            handlerSubtitles,
+            handlerDelegates,
+            targetClassNames.joined(separator: " "),
+            actionNames.joined(separator: " "),
             node.identifier ?? "",
             node.address ?? ""
         ]
-        .joined(separator: " ")
-        .lowercased()
+
+        for part in parts where part.isEmpty == false {
+            if searchText.isEmpty == false {
+                searchText.append(" ")
+            }
+            searchText.append(part)
+        }
+
+        return searchText.lowercased()
+    }
+
+    private static func synthesizedControlHandler(for node: ViewScopeHierarchyNode) -> ViewScopeEventHandler? {
+        let targetAction = ViewScopeEventTargetAction(
+            targetClassName: sanitized(node.controlTargetClassName),
+            actionName: sanitized(node.controlActionName)
+        )
+        guard targetAction.targetClassName != nil || targetAction.actionName != nil else {
+            return nil
+        }
+
+        return ViewScopeEventHandler(
+            kind: .controlAction,
+            title: targetAction.actionName ?? L10n.serverItemTitle("action"),
+            targetActions: [targetAction]
+        )
     }
 
     private static func sanitized(_ value: String?) -> String? {
@@ -450,58 +696,136 @@ enum ViewTreeNodePresentation {
 }
 
 enum ViewTreeLayoutMetrics {
-    static let rowHeight: CGFloat = 30
+    static let rowHeight: CGFloat = 36
     static let horizontalInset: CGFloat = 6
     static let verticalInset: CGFloat = 4
     static let trailingSpacing: CGFloat = 8
 }
 
+private final class ViewTreeHandlersButton: NSButton {
+    var hoverStateDidChange: ((Bool) -> Void)?
+    private var trackingAreaRef: NSTrackingArea?
+    private(set) var isHovering = false {
+        didSet {
+            guard oldValue != isHovering else { return }
+            hoverStateDidChange?(isHovering)
+        }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaRef {
+            removeTrackingArea(trackingAreaRef)
+        }
+        let trackingArea = NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
+        trackingAreaRef = trackingArea
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        isHovering = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        isHovering = false
+    }
+}
+
 private final class ViewTreeNodeCellView: NSTableCellView {
     weak var delegate: ViewTreeNodeCellViewDelegate?
-    private let classLabel = NSTextField(labelWithString: "")
-    private let ivarLabel = NSTextField(labelWithString: "")
+    private let handlersButton = ViewTreeHandlersButton()
+    private let iconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let secondaryLabel = NSTextField(labelWithString: "")
+    private let labelsStackView = NSStackView()
     private let visibilityButton = NSButton()
+    private var handlersButtonWidthConstraint: Constraint?
+    private var handlersButtonHeightConstraint: Constraint?
     private var nodeID: String?
+    private var eventHandlers: [ViewScopeEventHandler] = []
+    private var handlersPopover: NSPopover?
+    private var isEffectivelyHidden = false
+
+    override var backgroundStyle: NSView.BackgroundStyle {
+        didSet {
+            guard oldValue != backgroundStyle else { return }
+            updateContentAppearance()
+        }
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
 
-        classLabel.font = NSFont.systemFont(ofSize: 12)
-        classLabel.lineBreakMode = .byTruncatingTail
-        classLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        handlersButton.isBordered = false
+        handlersButton.title = ""
+        handlersButton.toolTip = L10n.hierarchyShowHandlers
+        handlersButton.target = self
+        handlersButton.action = #selector(handleHandlersButton(_:))
+        handlersButton.wantsLayer = true
+        handlersButton.hoverStateDidChange = { [weak self] _ in
+            self?.updateHandlersButtonMetrics(animated: true)
+            self?.updateHandlersButtonAppearance()
+        }
 
-        ivarLabel.font = NSFont.systemFont(ofSize: 11)
-        ivarLabel.textColor = .secondaryLabelColor
-        ivarLabel.alignment = .right
-        ivarLabel.lineBreakMode = .byTruncatingHead
-        ivarLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
+
+        titleLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        secondaryLabel.font = NSFont.systemFont(ofSize: 10.5)
+        secondaryLabel.textColor = .secondaryLabelColor
+        secondaryLabel.lineBreakMode = .byTruncatingTail
+        secondaryLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         visibilityButton.bezelStyle = .inline
         visibilityButton.imagePosition = .imageOnly
         visibilityButton.target = self
         visibilityButton.action = #selector(handleVisibilityButton(_:))
 
-        addSubview(classLabel)
-        addSubview(ivarLabel)
+        labelsStackView.orientation = .vertical
+        labelsStackView.alignment = .leading
+        labelsStackView.spacing = 1
+        labelsStackView.addArrangedSubview(titleLabel)
+        labelsStackView.addArrangedSubview(secondaryLabel)
+
+        addSubview(handlersButton)
+        addSubview(iconView)
+        addSubview(labelsStackView)
         addSubview(visibilityButton)
 
-        classLabel.snp.makeConstraints { make in
-            make.leading.equalToSuperview().offset(ViewTreeLayoutMetrics.horizontalInset)
+        handlersButton.snp.makeConstraints { make in
+            make.leading.equalToSuperview().offset(2)
             make.centerY.equalToSuperview()
+            handlersButtonWidthConstraint = make.width.equalTo(0).constraint
+            handlersButtonHeightConstraint = make.height.equalTo(0).constraint
+        }
+        iconView.snp.makeConstraints { make in
+            make.leading.equalTo(handlersButton.snp.trailing).offset(6)
+            make.centerY.equalToSuperview()
+            make.width.height.equalTo(14)
+        }
+        labelsStackView.snp.makeConstraints { make in
+            make.leading.equalTo(iconView.snp.trailing).offset(6)
             make.top.greaterThanOrEqualToSuperview().inset(ViewTreeLayoutMetrics.verticalInset)
             make.bottom.lessThanOrEqualToSuperview().inset(ViewTreeLayoutMetrics.verticalInset)
-            make.trailing.lessThanOrEqualTo(ivarLabel.snp.leading).offset(-ViewTreeLayoutMetrics.trailingSpacing)
-        }
-        ivarLabel.snp.makeConstraints { make in
             make.centerY.equalToSuperview()
-            make.leading.greaterThanOrEqualTo(classLabel.snp.trailing).offset(ViewTreeLayoutMetrics.trailingSpacing)
-            make.trailing.equalTo(visibilityButton.snp.leading).offset(-ViewTreeLayoutMetrics.trailingSpacing)
+            make.trailing.lessThanOrEqualTo(visibilityButton.snp.leading).offset(-ViewTreeLayoutMetrics.trailingSpacing)
         }
         visibilityButton.snp.makeConstraints { make in
             make.trailing.equalToSuperview().inset(4)
             make.centerY.equalToSuperview()
             make.width.height.equalTo(18)
         }
+
+        updateHandlersButtonAppearance()
     }
 
     @available(*, unavailable)
@@ -511,22 +835,320 @@ private final class ViewTreeNodeCellView: NSTableCellView {
 
     func configure(node: ViewScopeHierarchyNode, isEffectivelyHidden: Bool) {
         nodeID = node.id
-        classLabel.stringValue = ViewTreeNodePresentation.classText(for: node)
-        let ivarText = ViewTreeNodePresentation.ivarText(for: node)
-        ivarLabel.isHidden = ivarText == nil
-        ivarLabel.stringValue = ivarText ?? ""
-        let alphaComponent: CGFloat = isEffectivelyHidden ? 0.45 : 1
-        classLabel.textColor = .labelColor.withAlphaComponent(alphaComponent)
-        ivarLabel.textColor = .secondaryLabelColor.withAlphaComponent(alphaComponent)
+        self.isEffectivelyHidden = isEffectivelyHidden
+        eventHandlers = ViewTreeNodePresentation.eventHandlers(for: node)
+        titleLabel.stringValue = ViewTreeNodePresentation.classText(for: node)
+        iconView.image = ViewTreeNodePresentation.iconImage(for: node)
+        let secondaryText = ViewTreeNodePresentation.secondaryText(for: node)
+        secondaryLabel.isHidden = secondaryText == nil
+        secondaryLabel.stringValue = secondaryText ?? ""
         visibilityButton.image = NSImage(systemSymbolName: node.isHidden ? "eye.slash" : "eye", accessibilityDescription: nil)
         visibilityButton.toolTip = node.isHidden ? L10n.hierarchyMenuShowView : L10n.hierarchyMenuHideView
         visibilityButton.isEnabled = node.kind == .view
-        visibilityButton.contentTintColor = .secondaryLabelColor.withAlphaComponent(alphaComponent)
+        updateHandlersButtonMetrics(animated: false)
+        updateContentAppearance()
+        if eventHandlers.isEmpty {
+            handlersPopover?.close()
+            handlersPopover = nil
+        }
     }
 
     @objc private func handleVisibilityButton(_ sender: Any?) {
         guard let nodeID else { return }
         delegate?.viewTreeNodeCellViewDidToggleVisibility(self, nodeID: nodeID)
+    }
+
+    @objc private func handleHandlersButton(_ sender: Any?) {
+        guard eventHandlers.isEmpty == false else { return }
+        handlersPopover?.close()
+
+        let controller = ViewTreeEventHandlersPopoverController(handlers: eventHandlers)
+        let popover = NSPopover()
+        popover.animates = false
+        popover.behavior = .transient
+        popover.contentViewController = controller
+        popover.contentSize = controller.preferredContentSize
+        popover.show(relativeTo: handlersButton.bounds, of: handlersButton, preferredEdge: .maxY)
+        handlersPopover = popover
+    }
+
+    private func updateHandlersButtonMetrics(animated: Bool) {
+        let hasHandlers = eventHandlers.isEmpty == false
+        let targetWidth: CGFloat = hasHandlers ? (handlersButton.isHovering ? 14 : 10) : 0
+        let targetHeight: CGFloat = hasHandlers ? (handlersButton.isHovering ? 20 : 16) : 0
+
+        handlersButton.isHidden = hasHandlers == false
+        let updates = {
+            self.handlersButtonWidthConstraint?.update(offset: targetWidth)
+            self.handlersButtonHeightConstraint?.update(offset: targetHeight)
+            self.layoutSubtreeIfNeeded()
+        }
+
+        guard animated else {
+            updates()
+            return
+        }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.12
+            updates()
+        }
+    }
+
+    private func updateHandlersButtonAppearance() {
+        let isSelected = backgroundStyle == .emphasized
+        let fillColor: NSColor
+        let borderColor: NSColor
+        if isSelected {
+            fillColor = NSColor.white.withAlphaComponent(handlersButton.isHovering ? 1 : 0.88)
+            borderColor = NSColor.white.withAlphaComponent(0.92)
+        } else {
+            fillColor = NSColor.systemBlue.withAlphaComponent(handlersButton.isHovering ? 0.96 : 0.6)
+            borderColor = NSColor.systemBlue.withAlphaComponent(0.82)
+        }
+        handlersButton.layer?.backgroundColor = fillColor.cgColor
+        handlersButton.layer?.borderColor = borderColor.cgColor
+        handlersButton.layer?.borderWidth = 1
+        handlersButton.layer?.cornerRadius = 5
+    }
+
+    private func updateContentAppearance() {
+        let isSelected = backgroundStyle == .emphasized
+        let alphaComponent: CGFloat = isEffectivelyHidden ? 0.45 : 1
+
+        let titleColor: NSColor
+        let secondaryColor: NSColor
+        let accessoryColor: NSColor
+        if isSelected {
+            titleColor = NSColor.white.withAlphaComponent(alphaComponent)
+            secondaryColor = NSColor.white.withAlphaComponent(isEffectivelyHidden ? 0.72 : 0.88)
+            accessoryColor = NSColor.white.withAlphaComponent(alphaComponent)
+        } else {
+            titleColor = NSColor.labelColor.withAlphaComponent(alphaComponent)
+            secondaryColor = NSColor.secondaryLabelColor.withAlphaComponent(alphaComponent)
+            accessoryColor = NSColor.secondaryLabelColor.withAlphaComponent(alphaComponent)
+        }
+
+        titleLabel.textColor = titleColor
+        secondaryLabel.textColor = secondaryColor
+        iconView.contentTintColor = accessoryColor
+        visibilityButton.contentTintColor = accessoryColor
+        updateHandlersButtonAppearance()
+    }
+}
+
+private final class ViewTreeEventHandlersPopoverController: NSViewController {
+    private let handlers: [ViewScopeEventHandler]
+    private let scrollView = NSScrollView()
+    private let documentView = ViewTreeFlippedContentView()
+    private var itemViews: [ViewTreeEventHandlerItemView] = []
+    private let contentInset: CGFloat = 10
+
+    init(handlers: [ViewScopeEventHandler]) {
+        self.handlers = handlers
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func loadView() {
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        view = container
+
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.hasVerticalScroller = true
+        scrollView.documentView = documentView
+
+        container.addSubview(scrollView)
+        scrollView.snp.makeConstraints { make in
+            make.edges.equalToSuperview()
+        }
+
+        for (index, handler) in handlers.enumerated() {
+            let itemView = ViewTreeEventHandlerItemView(
+                handler: handler,
+                showsTopSeparator: index > 0
+            )
+            itemViews.append(itemView)
+            documentView.addSubview(itemView)
+        }
+
+        view.layoutSubtreeIfNeeded()
+        updatePreferredContentSize()
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        updatePreferredContentSize()
+    }
+
+    private func updatePreferredContentSize() {
+        var fitting = CGSize.zero
+        var currentY = contentInset
+        for itemView in itemViews {
+            let size = itemView.fittingSize
+            itemView.frame = NSRect(
+                x: contentInset,
+                y: currentY,
+                width: max(size.width, 1),
+                height: size.height
+            )
+            currentY += size.height
+            fitting.width = max(fitting.width, size.width)
+            fitting.height += size.height
+        }
+
+        let preferredWidth = min(max(fitting.width + contentInset * 2, 360), 560)
+        for itemView in itemViews {
+            var frame = itemView.frame
+            frame.size.width = preferredWidth - contentInset * 2
+            itemView.frame = frame
+        }
+        documentView.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: preferredWidth,
+            height: fitting.height + contentInset * 2
+        )
+        preferredContentSize = NSSize(
+            width: preferredWidth,
+            height: min(max(fitting.height + 20, 80), 360)
+        )
+    }
+}
+
+private final class ViewTreeFlippedContentView: NSView {
+    override var isFlipped: Bool {
+        true
+    }
+}
+
+private final class ViewTreeEventHandlerItemView: NSView {
+    private let handler: ViewScopeEventHandler
+    private let separatorView = NSView()
+    private let iconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let detailLabel = NSTextField(wrappingLabelWithString: "")
+
+    init(handler: ViewScopeEventHandler, showsTopSeparator: Bool) {
+        self.handler = handler
+        super.init(frame: .zero)
+        wantsLayer = true
+
+        separatorView.wantsLayer = true
+        separatorView.layer?.backgroundColor = NSColor.separatorColor.withAlphaComponent(0.35).cgColor
+        separatorView.isHidden = showsTopSeparator == false
+
+        titleLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        detailLabel.font = NSFont.systemFont(ofSize: 11)
+        detailLabel.textColor = .secondaryLabelColor
+        detailLabel.maximumNumberOfLines = 0
+
+        addSubview(separatorView)
+        addSubview(iconView)
+        addSubview(titleLabel)
+        addSubview(detailLabel)
+
+        separatorView.snp.makeConstraints { make in
+            make.top.leading.trailing.equalToSuperview()
+            make.height.equalTo(1)
+        }
+        iconView.snp.makeConstraints { make in
+            make.leading.equalToSuperview()
+            make.top.equalToSuperview().offset(showsTopSeparator ? 12 : 2)
+            make.width.height.equalTo(16)
+        }
+        titleLabel.snp.makeConstraints { make in
+            make.leading.equalTo(iconView.snp.trailing).offset(10)
+            make.top.equalToSuperview().offset(showsTopSeparator ? 10 : 0)
+            make.trailing.equalToSuperview()
+        }
+        detailLabel.snp.makeConstraints { make in
+            make.leading.equalTo(titleLabel)
+            make.top.equalTo(titleLabel.snp.bottom).offset(4)
+            make.trailing.bottom.equalToSuperview()
+        }
+
+        configure()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    private func configure() {
+        titleLabel.stringValue = handler.title
+        detailLabel.stringValue = detailLines().joined(separator: "\n")
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+        iconView.image = image(for: handler)
+        iconView.contentTintColor = .secondaryLabelColor
+    }
+
+    private func detailLines() -> [String] {
+        var lines: [String] = []
+
+        if let subtitle = handler.subtitle, subtitle.isEmpty == false {
+            lines.append(subtitle)
+        }
+        if handler.kind == .gesture, let isEnabled = handler.isEnabled {
+            lines.append("\(L10n.serverItemTitle("enabled")): \(isEnabled ? L10n.serverYes : L10n.serverNo)")
+        }
+        if let delegateClassName = handler.delegateClassName, delegateClassName.isEmpty == false {
+            lines.append("\(L10n.serverItemTitle("delegate")): \(ViewScopeClassNameFormatter.displayName(for: delegateClassName))")
+        }
+
+        if handler.targetActions.isEmpty {
+            lines.append("\(L10n.serverItemTitle("target")): nil")
+            lines.append("\(L10n.serverItemTitle("action")): nil")
+        } else if handler.targetActions.count == 1, let targetAction = handler.targetActions.first {
+            lines.append("\(L10n.serverItemTitle("target")): \(formattedTargetValue(for: targetAction))")
+            lines.append("\(L10n.serverItemTitle("action")): \(targetAction.actionName ?? "nil")")
+        } else {
+            for (index, targetAction) in handler.targetActions.enumerated() {
+                lines.append("\(L10n.serverItemTitle("target")) \(index + 1): \(formattedTargetValue(for: targetAction))")
+                lines.append("\(L10n.serverItemTitle("action")) \(index + 1): \(targetAction.actionName ?? "nil")")
+            }
+        }
+
+        return lines
+    }
+
+    private func formattedTargetValue(for targetAction: ViewScopeEventTargetAction) -> String {
+        if let targetClassName = targetAction.targetClassName, targetClassName.isEmpty == false {
+            return ViewScopeClassNameFormatter.displayName(for: targetClassName)
+        }
+        if targetAction.actionName != nil {
+            return L10n.serverFirstResponder
+        }
+        return "nil"
+    }
+
+    private func image(for handler: ViewScopeEventHandler) -> NSImage? {
+        let symbolCandidates: [String]
+        switch handler.kind {
+        case .controlAction:
+            symbolCandidates = ["cursorarrow.click", "bolt.horizontal.circle", "command.circle"]
+        case .gesture:
+            symbolCandidates = ["hand.tap", "hand.point.up.left", "wave.3.forward.circle"]
+        }
+        for symbolName in symbolCandidates {
+            if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) {
+                return image
+            }
+        }
+        return nil
+    }
+}
+
+private extension String {
+    var nonEmpty: String? {
+        isEmpty ? nil : self
     }
 }
 

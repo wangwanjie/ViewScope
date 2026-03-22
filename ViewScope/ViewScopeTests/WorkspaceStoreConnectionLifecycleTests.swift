@@ -411,6 +411,17 @@ private final class FakeWorkspaceSession: WorkspaceSessionProtocol {
 
     func applyMutation(nodeID: String, property: ViewScopeEditableProperty) async throws {}
 
+    func invokeConsole(
+        target: ViewScopeRemoteObjectReference,
+        expression: String
+    ) async throws -> ViewScopeConsoleInvokeResponsePayload {
+        ViewScopeConsoleInvokeResponsePayload(
+            submittedExpression: expression,
+            target: target,
+            resultDescription: "<\(target.className): \(target.address ?? "0x0")>"
+        )
+    }
+
     func disconnect() {
         guard !isDisconnected else { return }
         isDisconnected = true

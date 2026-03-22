@@ -3,7 +3,7 @@ import Foundation
 public let viewScopeDiscoveryAnnouncementNotification = Notification.Name("cn.vanjay.ViewScopeServer.announcement")
 public let viewScopeDiscoveryTerminationNotification = Notification.Name("cn.vanjay.ViewScopeServer.termination")
 public let viewScopeDiscoveryRequestNotification = Notification.Name("cn.vanjay.ViewScopeServer.discovery-request")
-public let viewScopeCurrentProtocolVersion = 1
+public let viewScopeCurrentProtocolVersion = 2
 public let viewScopeServerRuntimeVersion = "1.2.1"
 
 /// Advertises a locally running debug host that can be inspected by the ViewScope app.
@@ -118,6 +118,49 @@ public struct ViewScopeIvarTrace: Codable, Sendable, Hashable {
     }
 }
 
+public struct ViewScopeEventTargetAction: Codable, Sendable, Hashable {
+    public var targetClassName: String?
+    public var actionName: String?
+
+    public init(targetClassName: String?, actionName: String?) {
+        self.targetClassName = targetClassName
+        self.actionName = actionName
+    }
+}
+
+public struct ViewScopeEventHandler: Codable, Sendable, Hashable, Identifiable {
+    public enum Kind: String, Codable, Sendable {
+        case controlAction
+        case gesture
+    }
+
+    public var id: String
+    public var kind: Kind
+    public var title: String
+    public var subtitle: String?
+    public var targetActions: [ViewScopeEventTargetAction]
+    public var isEnabled: Bool?
+    public var delegateClassName: String?
+
+    public init(
+        id: String = UUID().uuidString,
+        kind: Kind,
+        title: String,
+        subtitle: String? = nil,
+        targetActions: [ViewScopeEventTargetAction] = [],
+        isEnabled: Bool? = nil,
+        delegateClassName: String? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.subtitle = subtitle
+        self.targetActions = targetActions
+        self.isEnabled = isEnabled
+        self.delegateClassName = delegateClassName
+    }
+}
+
 public struct ViewScopeHierarchyNode: Codable, Sendable, Hashable, Identifiable {
     public enum Kind: String, Codable, Sendable {
         case window
@@ -132,6 +175,10 @@ public struct ViewScopeHierarchyNode: Codable, Sendable, Hashable, Identifiable 
     public var subtitle: String?
     public var ivarName: String?
     public var ivarTraces: [ViewScopeIvarTrace]
+    public var rootViewControllerClassName: String?
+    public var controlTargetClassName: String?
+    public var controlActionName: String?
+    public var eventHandlers: [ViewScopeEventHandler]?
     public var identifier: String?
     public var address: String?
     public var frame: ViewScopeRect
@@ -163,7 +210,11 @@ public struct ViewScopeHierarchyNode: Codable, Sendable, Hashable, Identifiable 
         clippingEnabled: Bool,
         depth: Int,
         ivarName: String? = nil,
-        ivarTraces: [ViewScopeIvarTrace] = []
+        ivarTraces: [ViewScopeIvarTrace] = [],
+        rootViewControllerClassName: String? = nil,
+        controlTargetClassName: String? = nil,
+        controlActionName: String? = nil,
+        eventHandlers: [ViewScopeEventHandler]? = nil
     ) {
         self.id = id
         self.parentID = parentID
@@ -184,6 +235,10 @@ public struct ViewScopeHierarchyNode: Codable, Sendable, Hashable, Identifiable 
         self.depth = depth
         self.ivarName = ivarName
         self.ivarTraces = ivarTraces
+        self.rootViewControllerClassName = rootViewControllerClassName
+        self.controlTargetClassName = controlTargetClassName
+        self.controlActionName = controlActionName
+        self.eventHandlers = eventHandlers
     }
 }
 
@@ -201,6 +256,28 @@ public struct ViewScopeCaptureSummary: Codable, Sendable, Hashable {
     }
 }
 
+public struct ViewScopePreviewBitmap: Codable, Sendable, Hashable {
+    public var rootNodeID: String
+    public var pngBase64: String
+    public var size: ViewScopeSize
+    public var capturedAt: Date
+    public var scale: Double?
+
+    public init(
+        rootNodeID: String,
+        pngBase64: String,
+        size: ViewScopeSize,
+        capturedAt: Date,
+        scale: Double? = nil
+    ) {
+        self.rootNodeID = rootNodeID
+        self.pngBase64 = pngBase64
+        self.size = size
+        self.capturedAt = capturedAt
+        self.scale = scale
+    }
+}
+
 /// Contains a full hierarchy snapshot for the current host capture.
 public struct ViewScopeCapturePayload: Codable, Sendable, Hashable {
     public var host: ViewScopeHostInfo
@@ -208,13 +285,70 @@ public struct ViewScopeCapturePayload: Codable, Sendable, Hashable {
     public var summary: ViewScopeCaptureSummary
     public var rootNodeIDs: [String]
     public var nodes: [String: ViewScopeHierarchyNode]
+    public var captureID: String
+    public var previewBitmaps: [ViewScopePreviewBitmap]
 
-    public init(host: ViewScopeHostInfo, capturedAt: Date, summary: ViewScopeCaptureSummary, rootNodeIDs: [String], nodes: [String: ViewScopeHierarchyNode]) {
+    public init(
+        host: ViewScopeHostInfo,
+        capturedAt: Date,
+        summary: ViewScopeCaptureSummary,
+        rootNodeIDs: [String],
+        nodes: [String: ViewScopeHierarchyNode],
+        captureID: String = UUID().uuidString,
+        previewBitmaps: [ViewScopePreviewBitmap] = []
+    ) {
         self.host = host
         self.capturedAt = capturedAt
         self.summary = summary
         self.rootNodeIDs = rootNodeIDs
         self.nodes = nodes
+        self.captureID = captureID
+        self.previewBitmaps = previewBitmaps
+    }
+}
+
+public struct ViewScopeRemoteObjectReference: Codable, Sendable, Hashable {
+    public enum Kind: String, Codable, Sendable {
+        case window
+        case view
+        case viewController
+        case returnedObject
+    }
+
+    public var captureID: String
+    public var objectID: String
+    public var kind: Kind
+    public var className: String
+    public var address: String?
+    public var sourceNodeID: String?
+
+    public init(
+        captureID: String,
+        objectID: String,
+        kind: Kind,
+        className: String,
+        address: String? = nil,
+        sourceNodeID: String? = nil
+    ) {
+        self.captureID = captureID
+        self.objectID = objectID
+        self.kind = kind
+        self.className = className
+        self.address = address
+        self.sourceNodeID = sourceNodeID
+    }
+}
+
+public struct ViewScopeConsoleTargetDescriptor: Codable, Sendable, Hashable, Identifiable {
+    public var id: String { reference.objectID }
+    public var reference: ViewScopeRemoteObjectReference
+    public var title: String
+    public var subtitle: String?
+
+    public init(reference: ViewScopeRemoteObjectReference, title: String, subtitle: String? = nil) {
+        self.reference = reference
+        self.title = title
+        self.subtitle = subtitle
     }
 }
 
@@ -292,6 +426,7 @@ public struct ViewScopeNodeDetailPayload: Codable, Sendable, Hashable {
     public var screenshotPNGBase64: String?
     public var screenshotSize: ViewScopeSize
     public var highlightedRect: ViewScopeRect
+    public var consoleTargets: [ViewScopeConsoleTargetDescriptor]
 
     public init(
         nodeID: String,
@@ -301,7 +436,8 @@ public struct ViewScopeNodeDetailPayload: Codable, Sendable, Hashable {
         ancestry: [String],
         screenshotPNGBase64: String?,
         screenshotSize: ViewScopeSize,
-        highlightedRect: ViewScopeRect
+        highlightedRect: ViewScopeRect,
+        consoleTargets: [ViewScopeConsoleTargetDescriptor] = []
     ) {
         self.nodeID = nodeID
         self.host = host
@@ -311,6 +447,7 @@ public struct ViewScopeNodeDetailPayload: Codable, Sendable, Hashable {
         self.screenshotPNGBase64 = screenshotPNGBase64
         self.screenshotSize = screenshotSize
         self.highlightedRect = highlightedRect
+        self.consoleTargets = consoleTargets
     }
 }
 
@@ -369,6 +506,38 @@ public struct ViewScopeMutationRequestPayload: Codable, Sendable, Hashable {
     }
 }
 
+public struct ViewScopeConsoleInvokeRequestPayload: Codable, Sendable, Hashable {
+    public var target: ViewScopeRemoteObjectReference
+    public var expression: String
+
+    public init(target: ViewScopeRemoteObjectReference, expression: String) {
+        self.target = target
+        self.expression = expression
+    }
+}
+
+public struct ViewScopeConsoleInvokeResponsePayload: Codable, Sendable, Hashable {
+    public var submittedExpression: String
+    public var target: ViewScopeRemoteObjectReference
+    public var resultDescription: String?
+    public var returnedObject: ViewScopeConsoleTargetDescriptor?
+    public var errorMessage: String?
+
+    public init(
+        submittedExpression: String,
+        target: ViewScopeRemoteObjectReference,
+        resultDescription: String? = nil,
+        returnedObject: ViewScopeConsoleTargetDescriptor? = nil,
+        errorMessage: String? = nil
+    ) {
+        self.submittedExpression = submittedExpression
+        self.target = target
+        self.resultDescription = resultDescription
+        self.returnedObject = returnedObject
+        self.errorMessage = errorMessage
+    }
+}
+
 public struct ViewScopeErrorPayload: Codable, Sendable, Hashable {
     public var message: String
 
@@ -392,6 +561,8 @@ public struct ViewScopeMessage: Codable, Sendable, Hashable {
         case nodeDetailResponse
         case highlightRequest
         case mutationRequest
+        case consoleInvokeRequest
+        case consoleInvokeResponse
         case ack
         case error
     }
@@ -405,6 +576,8 @@ public struct ViewScopeMessage: Codable, Sendable, Hashable {
     public var nodeRequest: ViewScopeNodeRequestPayload?
     public var highlightRequest: ViewScopeHighlightRequestPayload?
     public var mutationRequest: ViewScopeMutationRequestPayload?
+    public var consoleInvokeRequest: ViewScopeConsoleInvokeRequestPayload?
+    public var consoleInvokeResponse: ViewScopeConsoleInvokeResponsePayload?
     public var ack: ViewScopeAckPayload?
     public var error: ViewScopeErrorPayload?
 
@@ -418,6 +591,8 @@ public struct ViewScopeMessage: Codable, Sendable, Hashable {
         nodeRequest: ViewScopeNodeRequestPayload? = nil,
         highlightRequest: ViewScopeHighlightRequestPayload? = nil,
         mutationRequest: ViewScopeMutationRequestPayload? = nil,
+        consoleInvokeRequest: ViewScopeConsoleInvokeRequestPayload? = nil,
+        consoleInvokeResponse: ViewScopeConsoleInvokeResponsePayload? = nil,
         ack: ViewScopeAckPayload? = nil,
         error: ViewScopeErrorPayload? = nil
     ) {
@@ -430,6 +605,8 @@ public struct ViewScopeMessage: Codable, Sendable, Hashable {
         self.nodeRequest = nodeRequest
         self.highlightRequest = highlightRequest
         self.mutationRequest = mutationRequest
+        self.consoleInvokeRequest = consoleInvokeRequest
+        self.consoleInvokeResponse = consoleInvokeResponse
         self.ack = ack
         self.error = error
     }

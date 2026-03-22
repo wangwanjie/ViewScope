@@ -58,6 +58,25 @@ enum L10n {
     static var hierarchyMenuCopyAddress: String { tr("hierarchy.menu.copy_address") }
     static var hierarchyMenuExpandChildren: String { tr("hierarchy.menu.expand_children") }
     static var hierarchyMenuCollapseChildren: String { tr("hierarchy.menu.collapse_children") }
+    static var hierarchyShowHandlers: String { tr("hierarchy.action.show_handlers") }
+    static var hierarchyShowSystemWrappers: String { tr("hierarchy.action.show_system_wrappers") }
+    static var consoleTitle: String { tr("section.console") }
+    static var consoleAutoSync: String { tr("console.action.auto_sync") }
+    static var consoleClearHistory: String { tr("console.action.clear_history") }
+    static var consoleInputPlaceholder: String { tr("console.input.placeholder") }
+    static var consoleSubmit: String { tr("console.action.submit") }
+    static var consoleNoTargets: String { tr("console.target.none") }
+    static var consoleRecentSuffix: String { tr("console.target.recent_suffix") }
+    static var consoleSelectionSuffix: String { tr("console.target.selection_suffix") }
+    static var consoleEmptyState: String { tr("console.state.empty") }
+    static var consoleStatusLoading: String { tr("console.state.loading") }
+    static var consoleStatusNoTarget: String { tr("console.state.no_target") }
+    static var consoleStatusDisconnected: String { tr("console.state.disconnected") }
+    static var consoleStatusStaleTarget: String { tr("console.state.stale_target") }
+    static var consoleStatusUnavailable: String { tr("console.state.unavailable") }
+    static var consoleErrorEmptyInput: String { tr("console.error.empty_input") }
+    static var consoleErrorArgumentsUnsupported: String { tr("console.error.arguments_unsupported") }
+    static var consoleErrorSyntaxUnsupported: String { tr("console.error.syntax_unsupported") }
     static var integrationTitle: String { tr("integration.title") }
     static var integrationSubtitle: String { tr("integration.subtitle") }
     static var integrationSwiftPackageManager: String { tr("integration.package.swiftpm") }
@@ -69,6 +88,9 @@ enum L10n {
     static var previewZoomIn: String { tr("preview.action.zoom_in") }
     static var previewDisplayFlat: String { tr("preview.action.display_flat") }
     static var previewDisplayLayered: String { tr("preview.action.display_layered") }
+    static var previewLayerSettings: String { tr("preview.action.layer_settings") }
+    static var previewLayerSpacing: String { tr("preview.setting.layer_spacing") }
+    static var previewLayerBorders: String { tr("preview.setting.layer_borders") }
     static var previewFocusSelection: String { tr("preview.action.focus_selection") }
     static var previewClearFocus: String { tr("preview.action.clear_focus") }
     static var previewToggleVisibility: String { tr("preview.action.toggle_visibility") }
@@ -148,6 +170,7 @@ enum L10n {
     static var serverNoIntrinsicSize: String { tr("server.value.no_intrinsic_size") }
     static var serverYes: String { tr("server.value.yes") }
     static var serverNo: String { tr("server.value.no") }
+    static var serverFirstResponder: String { tr("server.value.first_responder") }
 
     static func connecting(_ name: String) -> String { tr("status.connecting", name) }
     static func connected(_ name: String) -> String { tr("status.connected", name) }

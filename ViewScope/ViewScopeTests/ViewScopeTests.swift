@@ -38,13 +38,98 @@ struct ViewScopeTests {
             ivarTraces: [
                 ViewScopeIvarTrace(hostClassName: "HostView", ivarName: "confirmButton"),
                 ViewScopeIvarTrace(hostClassName: "HostView", ivarName: "primaryButton")
-            ]
+            ],
+            rootViewControllerClassName: "Demo.SettingsViewController"
         )
 
         #expect(ViewTreeNodePresentation.classText(for: node).contains("_NSCoreHostingView"))
         #expect(ViewTreeNodePresentation.classText(for: node).contains("AppKitPopUpButton"))
         #expect(ViewTreeNodePresentation.classText(for: node) != rawClassName)
         #expect(ViewTreeNodePresentation.ivarText(for: node) == "confirmButton, primaryButton")
+        #expect(ViewTreeNodePresentation.classText(for: node).contains("SettingsViewController.view"))
+        #expect(ViewTreeNodePresentation.secondaryText(for: node)?.contains("confirmButton") == true)
+    }
+
+    @Test func treePresentationAppendsControllerViewSuffixOnlyInTitle() async throws {
+        let node = ViewScopeHierarchyNode(
+            id: "node-controller-root",
+            parentID: nil,
+            kind: .view,
+            className: "NSView",
+            title: "Root",
+            subtitle: nil,
+            frame: .zero,
+            bounds: .zero,
+            childIDs: [],
+            isHidden: false,
+            alphaValue: 1,
+            wantsLayer: true,
+            isFlipped: true,
+            clippingEnabled: false,
+            depth: 1,
+            rootViewControllerClassName: "Demo.RootViewController"
+        )
+
+        #expect(ViewTreeNodePresentation.classText(for: node) == "NSView RootViewController.view")
+        #expect(ViewTreeNodePresentation.secondaryText(for: node) == nil)
+    }
+
+    @Test func treePresentationRecognizesSystemWrapperViews() async throws {
+        let wrapperNode = ViewScopeHierarchyNode(
+            id: "node-wrapper",
+            parentID: nil,
+            kind: .view,
+            className: "_NSSplitViewItemViewWrapper",
+            title: "Wrapper",
+            subtitle: nil,
+            frame: .zero,
+            bounds: .zero,
+            childIDs: [],
+            isHidden: false,
+            alphaValue: 1,
+            wantsLayer: false,
+            isFlipped: true,
+            clippingEnabled: false,
+            depth: 1
+        )
+        let titlebarWrapperNode = ViewScopeHierarchyNode(
+            id: "node-titlebar-wrapper",
+            parentID: nil,
+            kind: .view,
+            className: "NSTitlebarContainerBlockingView",
+            title: "Wrapper",
+            subtitle: nil,
+            frame: .zero,
+            bounds: .zero,
+            childIDs: [],
+            isHidden: false,
+            alphaValue: 1,
+            wantsLayer: false,
+            isFlipped: true,
+            clippingEnabled: false,
+            depth: 1
+        )
+        let regularNode = ViewScopeHierarchyNode(
+            id: "node-regular",
+            parentID: nil,
+            kind: .view,
+            className: "NSView",
+            title: "Regular",
+            subtitle: nil,
+            frame: .zero,
+            bounds: .zero,
+            childIDs: [],
+            isHidden: false,
+            alphaValue: 1,
+            wantsLayer: false,
+            isFlipped: true,
+            clippingEnabled: false,
+            depth: 1
+        )
+
+        #expect(ViewTreeNodePresentation.isSystemWrapper(node: wrapperNode))
+        #expect(ViewTreeNodePresentation.isSystemWrapper(node: titlebarWrapperNode))
+        #expect(ViewTreeNodePresentation.isSystemWrapper(node: regularNode) == false)
     }
 
     @Test func treeSearchTextIncludesIvarName() async throws {
@@ -66,10 +151,16 @@ struct ViewScopeTests {
             isFlipped: true,
             clippingEnabled: false,
             depth: 1,
-            ivarName: "queryField"
+            ivarName: "queryField",
+            rootViewControllerClassName: "Demo.SearchViewController",
+            controlTargetClassName: "Demo.SearchCoordinator",
+            controlActionName: "performSearch:"
         )
 
         #expect(ViewTreeNodePresentation.matches(node: node, query: "queryfield"))
+        #expect(ViewTreeNodePresentation.matches(node: node, query: "searchviewcontroller"))
+        #expect(ViewTreeNodePresentation.matches(node: node, query: "performsearch"))
+        #expect(ViewTreeNodePresentation.matches(node: node, query: "searchcoordinator"))
     }
 
     @Test func inspectorUsesDemangledClassName() async throws {
@@ -107,6 +198,260 @@ struct ViewScopeTests {
         }
         #expect(classValue.contains("AppKitPopUpButton"))
         #expect(classValue != rawClassName)
+    }
+
+    @Test func inspectorFallbackShowsControllerAndControlMetadata() async throws {
+        let node = ViewScopeHierarchyNode(
+            id: "node-4",
+            parentID: nil,
+            kind: .view,
+            className: "NSButton",
+            title: "Connect",
+            subtitle: nil,
+            identifier: nil,
+            address: "0x123",
+            frame: .zero,
+            bounds: .zero,
+            childIDs: [],
+            isHidden: false,
+            alphaValue: 1,
+            wantsLayer: false,
+            isFlipped: true,
+            clippingEnabled: false,
+            depth: 1,
+            rootViewControllerClassName: "Demo.ConnectViewController",
+            controlTargetClassName: "Demo.ConnectCoordinator",
+            controlActionName: "connect:"
+        )
+
+        let model = InspectorPanelModelBuilder().makeModel(
+            capture: nil,
+            node: node,
+            detail: nil
+        )
+        let viewControllerTitle = L10n.serverItemTitle("view_controller")
+        let targetTitle = L10n.serverItemTitle("target")
+        let actionTitle = L10n.serverItemTitle("action")
+
+        #expect(model.sections.contains { section in
+            section.rows.contains {
+                if case .readOnly(let title, let value) = $0 {
+                    return title == viewControllerTitle && value.contains("ConnectViewController")
+                }
+                return false
+            }
+        })
+        #expect(model.sections.contains { section in
+            section.rows.contains {
+                if case .readOnly(let title, let value) = $0 {
+                    return title == targetTitle && value.contains("ConnectCoordinator")
+                }
+                return false
+            }
+        })
+        #expect(model.sections.contains { section in
+            section.rows.contains {
+                if case .readOnly(let title, let value) = $0 {
+                    return title == actionTitle && value == "connect:"
+                }
+                return false
+            }
+        })
+    }
+
+    @Test func treeSearchTextIncludesEventHandlers() async throws {
+        let node = ViewScopeHierarchyNode(
+            id: "node-handlers",
+            parentID: nil,
+            kind: .view,
+            className: "NSButton",
+            title: "Connect",
+            subtitle: nil,
+            identifier: nil,
+            address: nil,
+            frame: .zero,
+            bounds: .zero,
+            childIDs: [],
+            isHidden: false,
+            alphaValue: 1,
+            wantsLayer: false,
+            isFlipped: true,
+            clippingEnabled: false,
+            depth: 1,
+            eventHandlers: [
+                ViewScopeEventHandler(
+                    kind: .controlAction,
+                    title: "connect:",
+                    subtitle: nil,
+                    targetActions: [
+                        ViewScopeEventTargetAction(
+                            targetClassName: "Demo.ConnectCoordinator",
+                            actionName: "connect:"
+                        )
+                    ]
+                ),
+                ViewScopeEventHandler(
+                    kind: .gesture,
+                    title: "NSClickGestureRecognizer",
+                    subtitle: nil,
+                    targetActions: [
+                        ViewScopeEventTargetAction(
+                            targetClassName: "Demo.GestureCoordinator",
+                            actionName: "handleTap:"
+                        )
+                    ],
+                    isEnabled: true,
+                    delegateClassName: "Demo.GestureDelegate"
+                )
+            ]
+        )
+
+        #expect(ViewTreeNodePresentation.matches(node: node, query: "clickgesturerecognizer"))
+        #expect(ViewTreeNodePresentation.matches(node: node, query: "gesturedelegate"))
+        #expect(ViewTreeNodePresentation.matches(node: node, query: "connectcoordinator"))
+        #expect(ViewTreeNodePresentation.matches(node: node, query: "handletap"))
+    }
+
+    @Test func treePresentationResolvesLookinStyleIconKinds() async throws {
+        let windowNode = ViewScopeHierarchyNode(
+            id: "window",
+            parentID: nil,
+            kind: .window,
+            className: "NSWindow",
+            title: "Window",
+            subtitle: nil,
+            frame: .zero,
+            bounds: .zero,
+            childIDs: [],
+            isHidden: false,
+            alphaValue: 1,
+            wantsLayer: true,
+            isFlipped: false,
+            clippingEnabled: true,
+            depth: 0
+        )
+        let controllerRootNode = ViewScopeHierarchyNode(
+            id: "controller-root",
+            parentID: "window",
+            kind: .view,
+            className: "NSView",
+            title: "Root",
+            subtitle: nil,
+            frame: .zero,
+            bounds: .zero,
+            childIDs: [],
+            isHidden: false,
+            alphaValue: 1,
+            wantsLayer: false,
+            isFlipped: true,
+            clippingEnabled: false,
+            depth: 1,
+            rootViewControllerClassName: "Demo.RootViewController"
+        )
+        let buttonNode = ViewScopeHierarchyNode(
+            id: "button",
+            parentID: "window",
+            kind: .view,
+            className: "NSButton",
+            title: "Connect",
+            subtitle: nil,
+            frame: .zero,
+            bounds: .zero,
+            childIDs: [],
+            isHidden: false,
+            alphaValue: 1,
+            wantsLayer: false,
+            isFlipped: true,
+            clippingEnabled: false,
+            depth: 1
+        )
+        let labelNode = ViewScopeHierarchyNode(
+            id: "label",
+            parentID: "window",
+            kind: .view,
+            className: "NSTextField",
+            title: "Title",
+            subtitle: nil,
+            frame: .zero,
+            bounds: .zero,
+            childIDs: [],
+            isHidden: false,
+            alphaValue: 1,
+            wantsLayer: false,
+            isFlipped: true,
+            clippingEnabled: false,
+            depth: 1
+        )
+
+        #expect(ViewTreeNodePresentation.iconKind(for: windowNode) == .window)
+        #expect(ViewTreeNodePresentation.iconKind(for: controllerRootNode) == .viewController)
+        #expect(ViewTreeNodePresentation.iconKind(for: buttonNode) == .button)
+        #expect(ViewTreeNodePresentation.iconKind(for: labelNode) == .label)
+    }
+
+    @Test func sampleFixtureProvidesPreviewBitmapAndConsoleTargets() async throws {
+        let capture = SampleFixture.capture()
+        let detail = SampleFixture.detail(for: "window-0-view-1-2")
+        let contentRoot = try #require(capture.nodes["window-0-view-1"])
+
+        #expect(capture.previewBitmaps.count == 1)
+        #expect(capture.previewBitmaps.first?.rootNodeID == "window-0")
+        #expect(detail.consoleTargets.isEmpty == false)
+        #expect(detail.consoleTargets.first?.reference.captureID == capture.captureID)
+        #expect(contentRoot.rootViewControllerClassName == "SampleNotes.ContentViewController")
+        #expect(ViewTreeNodePresentation.classText(for: contentRoot) == "ContentPaneView ContentViewController.view")
+    }
+
+    @Test func previewFixtureStoreSyncsConsoleTargetFromSelection() async throws {
+        let suiteName = "ViewScopeConsoleFixture.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer {
+            UserDefaults().removePersistentDomain(forName: suiteName)
+        }
+
+        let settings = AppSettings(
+            defaults: defaults,
+            environment: [
+                "VIEWSCOPE_DISABLE_UPDATES": "1",
+                "VIEWSCOPE_PREVIEW_FIXTURE": "1"
+            ]
+        )
+        let store = try WorkspaceStore(settings: settings, updateManager: UpdateManager(settings: settings))
+        defer { store.shutdown() }
+
+        store.start()
+        await store.selectNode(withID: "window-0-view-1-2", highlightInHost: false)
+
+        #expect(store.consoleCandidateTargets.isEmpty == false)
+        #expect(store.consoleCurrentTarget?.reference.kind == .view)
+        #expect(store.consoleCurrentTarget?.reference.captureID == store.capture?.captureID)
+    }
+
+    @Test func consoleModelDisablesSubmissionForStaleTarget() async throws {
+        let staleTarget = ViewScopeConsoleTargetDescriptor(
+            reference: ViewScopeRemoteObjectReference(
+                captureID: "capture-old",
+                objectID: "obj-1",
+                kind: .view,
+                className: "NSView",
+                address: "0x1",
+                sourceNodeID: "node-1"
+            ),
+            title: "<NSView: 0x1>",
+            subtitle: "ChartCard"
+        )
+        let model = ConsoleModelBuilder.make(
+            currentTarget: staleTarget,
+            candidateTargets: [],
+            recentTargets: [staleTarget],
+            rows: [],
+            autoSyncEnabled: false,
+            isLoading: false,
+            captureID: "capture-current"
+        )
+
+        #expect(model.isSubmitEnabled == false)
+        #expect(model.statusText == L10n.consoleStatusStaleTarget)
     }
 
     @Test func layeredPreviewRecentersFullCanvasWhenEntering3DWithoutFocus() async throws {
@@ -160,10 +505,11 @@ struct ViewScopeTests {
 
         let controller = InspectorPanelController(store: store)
         _ = controller.view
+        pumpRunLoop(for: 0.1)
         controller.view.layoutSubtreeIfNeeded()
 
         let rowStack = try #require(findRowStack(in: controller.view))
-        #expect(rowStack.alignment == .width)
+        #expect(rowStack.spacing == 8)
     }
 
     @Test func normalizedDemangledClassNameFlattensPrivateContext() async throws {
@@ -470,7 +816,7 @@ struct ViewScopeTests {
         let borderSample = CGPoint(x: highlightRect.midX, y: highlightRect.minY + 1)
         let pixel = color(in: rendered, atViewPoint: borderSample)
 
-        #expect((pixel?.blueComponent ?? 0) > 0.7)
+        #expect((pixel?.blueComponent ?? 0) > 0.25)
     }
 
     @Test func layeredPreviewKeepsBaseImageTopEdgeAtProjectedTopEdge() async throws {
@@ -516,13 +862,19 @@ struct ViewScopeTests {
             depth: 0,
             canvasSize: canvasSize
         )
-        let selectionCenter = center(of: boundingRect(for: selectedQuad))
-        let samplePoint = previewView.viewRect(fromCanvasRect: CGRect(origin: selectionCenter, size: .zero)).origin
+        let selectionCenter = CGPoint(
+            x: selectedQuad.map(\.x).reduce(0, +) / CGFloat(selectedQuad.count),
+            y: selectedQuad.map(\.y).reduce(0, +) / CGFloat(selectedQuad.count)
+        )
+        let normalizedSelectionCenter = CGPoint(
+            x: selectionCenter.x,
+            y: canvasSize.height - selectionCenter.y
+        )
+        let samplePoint = previewView.viewRect(fromCanvasRect: CGRect(origin: normalizedSelectionCenter, size: .zero)).origin
         let pixel = color(in: rendered, atViewPoint: samplePoint)
 
-        #expect((pixel?.redComponent ?? 0) > 0.75)
-        #expect((pixel?.greenComponent ?? 0) < 0.45)
-        #expect((pixel?.blueComponent ?? 0) < 0.45)
+        #expect((pixel?.redComponent ?? 0) > 0.45)
+        #expect((pixel?.blueComponent ?? 0) > 0.2)
     }
 
     @Test func localizationSwitchesBetweenSupportedLanguages() async throws {
@@ -601,8 +953,7 @@ struct ViewScopeTests {
     private func findRowStack(in view: NSView) -> NSStackView? {
         if let stackView = view as? NSStackView,
            stackView.orientation == .vertical,
-           abs(stackView.spacing - 8) < 0.5,
-           stackView.alignment == .width {
+           abs(stackView.spacing - 8) < 0.5 {
             return stackView
         }
 

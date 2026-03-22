@@ -113,9 +113,43 @@ struct InspectorPanelModelBuilder {
         if let address = node.address, !address.isEmpty {
             rows.append(.readOnly(title: L10n.serverItemTitle("address"), value: address))
         }
-        return [
+        if let rootViewControllerClassName = node.rootViewControllerClassName, !rootViewControllerClassName.isEmpty {
+            rows.append(
+                .readOnly(
+                    title: L10n.serverItemTitle("view_controller"),
+                    value: ViewScopeClassNameFormatter.displayName(for: rootViewControllerClassName)
+                )
+            )
+        }
+
+        var sections = [
             InspectorSectionModel(title: L10n.serverSectionTitle("identity"), rows: rows)
         ]
+
+        var controlRows: [InspectorRowModel] = []
+        if let targetClassName = node.controlTargetClassName, !targetClassName.isEmpty {
+            controlRows.append(
+                .readOnly(
+                    title: L10n.serverItemTitle("target"),
+                    value: ViewScopeClassNameFormatter.displayName(for: targetClassName)
+                )
+            )
+        } else if let actionName = node.controlActionName, !actionName.isEmpty {
+            controlRows.append(
+                .readOnly(
+                    title: L10n.serverItemTitle("target"),
+                    value: L10n.serverFirstResponder
+                )
+            )
+        }
+        if let actionName = node.controlActionName, !actionName.isEmpty {
+            controlRows.append(.readOnly(title: L10n.serverItemTitle("action"), value: actionName))
+        }
+        if !controlRows.isEmpty {
+            sections.append(InspectorSectionModel(title: L10n.serverSectionTitle("control"), rows: controlRows))
+        }
+
+        return sections
     }
 
     private func makeSections(from detail: ViewScopeNodeDetailPayload) -> [InspectorSectionModel] {

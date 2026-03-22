@@ -48,6 +48,9 @@ final class AppSettings: ObservableObject {
     @Published var updateCheckStrategy: UpdateCheckStrategy {
         didSet { defaults.set(updateCheckStrategy.rawValue, forKey: Keys.updateCheckStrategy) }
     }
+    @Published var showsSystemWrapperViews: Bool {
+        didSet { defaults.set(showsSystemWrapperViews, forKey: Keys.showsSystemWrapperViews) }
+    }
 
     let environment: [String: String]
     private let defaults: UserDefaults
@@ -61,6 +64,7 @@ final class AppSettings: ObservableObject {
         self.showConnectedCountInStatusBar = defaults.object(forKey: Keys.showConnectedCountInStatusBar) as? Bool ?? true
         self.showsSessionSidebar = defaults.object(forKey: Keys.showsSessionSidebar) as? Bool ?? true
         self.showsInspector = defaults.object(forKey: Keys.showsInspector) as? Bool ?? true
+        self.showsSystemWrapperViews = defaults.object(forKey: Keys.showsSystemWrapperViews) as? Bool ?? false
         if let rawValue = defaults.string(forKey: Keys.updateCheckStrategy),
            let strategy = UpdateCheckStrategy(rawValue: rawValue) {
             self.updateCheckStrategy = strategy
@@ -78,6 +82,7 @@ final class AppSettings: ObservableObject {
         static let showsSessionSidebar = "ViewScope.showsSessionSidebar"
         static let showsInspector = "ViewScope.showsInspector"
         static let updateCheckStrategy = "ViewScope.updateCheckStrategy"
+        static let showsSystemWrapperViews = "ViewScope.showsSystemWrapperViews"
     }
 
     private static func resolveLanguage(defaults: UserDefaults, environment: [String: String]) -> AppLanguage {
