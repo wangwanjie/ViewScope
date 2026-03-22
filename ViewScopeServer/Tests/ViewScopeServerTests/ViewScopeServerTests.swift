@@ -13,6 +13,37 @@ final class ViewScopeServerTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testRuntimeIvarReaderReturnsRawPointersForObjectIvars() throws {
+        final class FixtureRootView: NSView {
+            unowned(unsafe) var unsafeSubview: NSView?
+            weak var weakSubview: NSView?
+            var strongSubview: NSView?
+        }
+
+        let root = FixtureRootView(frame: .zero)
+        let child = NSView(frame: .zero)
+        root.addSubview(child)
+        root.unsafeSubview = child
+        root.weakSubview = child
+        root.strongSubview = child
+
+        let expectedPointer = UnsafeRawPointer(Unmanaged.passUnretained(child).toOpaque())
+
+        XCTAssertEqual(
+            ViewScopeRuntimeIvarReader.storedObjectPointer(in: root, ivarNamed: "unsafeSubview"),
+            expectedPointer
+        )
+        XCTAssertEqual(
+            ViewScopeRuntimeIvarReader.storedObjectPointer(in: root, ivarNamed: "weakSubview"),
+            expectedPointer
+        )
+        XCTAssertEqual(
+            ViewScopeRuntimeIvarReader.storedObjectPointer(in: root, ivarNamed: "strongSubview"),
+            expectedPointer
+        )
+    }
+
     func testMessageRoundTrip() throws {
         let message = ViewScopeMessage(
             kind: .clientHello,
@@ -150,6 +181,66 @@ final class ViewScopeServerTests: XCTestCase {
 
         XCTAssertTrue(ivarNames.contains("titleLabel"))
         XCTAssertTrue(ivarNames.contains("actionButton"))
+    }
+
+    @MainActor
+    func testSnapshotBuilderIgnoresDanglingUnsafeSubviewIvars() {
+        final class FixtureRootView: NSView {
+            unowned(unsafe) var danglingSubview: NSView?
+            let persistentSubview = NSTextField(labelWithString: "Hello")
+
+            override init(frame frameRect: NSRect) {
+                super.init(frame: frameRect)
+                persistentSubview.frame = NSRect(x: 20, y: 20, width: 120, height: 22)
+                addSubview(persistentSubview)
+            }
+
+            @available(*, unavailable)
+            required init?(coder: NSCoder) {
+                fatalError("init(coder:) has not been implemented")
+            }
+        }
+
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "Unsafe Ivar Fixture"
+        defer {
+            window.orderOut(nil)
+            window.close()
+        }
+
+        let root = FixtureRootView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        weak var releasedSubview: NSView?
+        autoreleasepool {
+            let transientSubview = NSView(frame: NSRect(x: 20, y: 60, width: 120, height: 22))
+            releasedSubview = transientSubview
+            root.addSubview(transientSubview)
+            root.danglingSubview = transientSubview
+            transientSubview.removeFromSuperview()
+        }
+        XCTAssertNil(releasedSubview)
+        window.contentView = root
+        window.orderFrontRegardless()
+
+        let builder = ViewScopeSnapshotBuilder(
+            hostInfo: ViewScopeHostInfo(
+                displayName: "Fixture",
+                bundleIdentifier: "fixture.tests",
+                version: "1.0",
+                build: "1",
+                processIdentifier: 1,
+                runtimeVersion: viewScopeServerRuntimeVersion,
+                supportsHighlighting: true
+            )
+        )
+
+        let (capture, _) = builder.makeCapture()
+        let ivarNames = capture.nodes.values
+            .filter { $0.parentID != nil }
+            .flatMap(\.ivarTraces)
+            .map(\.ivarName)
+
+        XCTAssertTrue(ivarNames.contains("persistentSubview"))
+        XCTAssertFalse(ivarNames.contains("danglingSubview"))
     }
 
     @MainActor

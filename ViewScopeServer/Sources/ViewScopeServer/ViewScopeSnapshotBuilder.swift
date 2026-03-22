@@ -2,6 +2,42 @@ import AppKit
 import Foundation
 import ObjectiveC.runtime
 
+enum ViewScopeRuntimeIvarReader {
+    static func storedObjectPointer(in object: AnyObject, ivarNamed name: String) -> UnsafeRawPointer? {
+        var currentClass: AnyClass? = type(of: object)
+
+        while let targetClass = currentClass {
+            if let ivar = class_getInstanceVariable(targetClass, name) {
+                return storedObjectPointer(in: object, ivar: ivar)
+            }
+            currentClass = class_getSuperclass(targetClass)
+        }
+
+        return nil
+    }
+
+    static func storedObjectPointer(in object: AnyObject, ivar: Ivar) -> UnsafeRawPointer? {
+        guard mayStoreObjectReference(ivar) else {
+            return nil
+        }
+
+        let basePointer = UnsafeRawPointer(Unmanaged.passUnretained(object).toOpaque())
+        let slotPointer = basePointer
+            .advanced(by: ivar_getOffset(ivar))
+            .assumingMemoryBound(to: Optional<UnsafeRawPointer>.self)
+        return slotPointer.pointee
+    }
+
+    static func mayStoreObjectReference(_ ivar: Ivar) -> Bool {
+        guard let encodingPointer = ivar_getTypeEncoding(ivar) else {
+            return true
+        }
+
+        let encoding = String(cString: encodingPointer)
+        return encoding.isEmpty || encoding.hasPrefix("@")
+    }
+}
+
 @MainActor
 /// Builds hierarchy captures, detail payloads, and live object references for an inspected host.
 final class ViewScopeSnapshotBuilder {
@@ -237,6 +273,9 @@ final class ViewScopeSnapshotBuilder {
 
     private func directSubviewIvarTraces(in hostView: NSView) -> [ObjectIdentifier: [ViewScopeIvarTrace]] {
         var tracesBySubview: [ObjectIdentifier: Set<ViewScopeIvarTrace>] = [:]
+        let subviewsByAddress = Dictionary(uniqueKeysWithValues: hostView.subviews.map { subview in
+            (UInt(bitPattern: Unmanaged.passUnretained(subview).toOpaque()), subview)
+        })
         var currentClass: AnyClass? = type(of: hostView)
 
         while let targetClass = currentClass,
@@ -253,16 +292,8 @@ final class ViewScopeSnapshotBuilder {
 
             for index in 0 ..< Int(count) {
                 let ivar = ivars[index]
-                if let encodingPointer = ivar_getTypeEncoding(ivar) {
-                    let encoding = String(cString: encodingPointer)
-                    if !encoding.isEmpty, !encoding.hasPrefix("@") {
-                        continue
-                    }
-                }
-
-                let object = object_getIvar(hostView, ivar)
-                guard let subview = object as? NSView,
-                      subview.superview === hostView,
+                guard let rawObjectPointer = ViewScopeRuntimeIvarReader.storedObjectPointer(in: hostView, ivar: ivar),
+                      let subview = subviewsByAddress[UInt(bitPattern: rawObjectPointer)],
                       let namePointer = ivar_getName(ivar) else {
                     continue
                 }
