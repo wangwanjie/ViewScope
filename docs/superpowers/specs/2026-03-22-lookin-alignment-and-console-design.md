@@ -133,6 +133,70 @@ The existing server-side hierarchy payload is sufficient as the base contract, b
 
 Implementation planning should verify and tighten the snapshot builder so this value is only emitted for `controller.view === nodeView`, not for arbitrary descendants. Control-action and gesture metadata already exist and should continue to populate `eventHandlers`.
 
+The protocol must also expand in this round:
+
+- bump the wire protocol version from `1` to `2`,
+- extend `ViewScopeCapturePayload` with capture-scope preview bitmap assets,
+- add console invocation request/response payloads and remote-object references,
+- make console object handles explicitly session-scoped and capture-scoped.
+
+### 1.1 Preview asset contract
+
+The layered preview must stop depending on `ViewScopeNodeDetailPayload.screenshotPNGBase64` as its primary image source.
+
+- `ViewScopeCapturePayload` gains one preview bitmap per window root, keyed by the window root node ID.
+- Each preview bitmap represents the full `window.contentView` image in the same normalized canvas coordinate space already used by hierarchy node `frame` values.
+- Each preview bitmap payload carries:
+  - `rootNodeID`,
+  - `pngBase64`,
+  - `size`,
+  - `capturedAt`,
+  - an optional `scale` value if the implementation needs pixel-density fidelity.
+- The client uses the window-root bitmap for both flat preview and layered preview.
+- When a focused subtree is active, the client derives the focused crop and layered masks from that window-root bitmap using hierarchy geometry already present in `ViewScopeCapturePayload`.
+- Toggling wrapper filtering only changes visible nodes; it does not require a second preview-bitmap format.
+- `ViewScopeNodeDetailPayload.screenshotPNGBase64` may remain temporarily for inspector compatibility, but layered-preview planning should treat capture-scope preview bitmaps as the long-term source of truth.
+
+This contract removes the current dependence on “selected node must already have detail” and gives the planner a stable no-selection path.
+
+### 1.2 Console protocol appendix
+
+The console feature requires new bridge messages and reference models in protocol version `2`.
+
+- Add `ViewScopeRemoteObjectReference`:
+  - `captureID`: the capture/reference-context identifier that minted the handle,
+  - `objectID`: a host-generated opaque identifier stable only within that capture context,
+  - `kind`: `window`, `view`, `viewController`, or `returnedObject`,
+  - `className`,
+  - `address` when available,
+  - `sourceNodeID` when the object is derived from a hierarchy node.
+- Add `ViewScopeConsoleTargetDescriptor`:
+  - wraps one `ViewScopeRemoteObjectReference`,
+  - includes a user-facing title and subtitle for popup rows.
+- Extend `ViewScopeNodeDetailPayload` with `consoleTargets` for the currently selected node:
+  - for a view node, include the view object target,
+  - include the owning view-controller target when the selected node is that controller’s root view,
+  - include the window target when it materially helps debugging and the implementation chooses to surface it.
+- Add `ViewScopeConsoleInvokeRequestPayload`:
+  - `target`: `ViewScopeRemoteObjectReference`,
+  - `expression`: the submitted zero-argument selector/property-like text.
+- Add `ViewScopeConsoleInvokeResponsePayload`:
+  - `submittedExpression`,
+  - `target`,
+  - `resultDescription`,
+  - optional `returnedObject`,
+  - optional `errorMessage`.
+- Add message kinds:
+  - `consoleInvokeRequest`,
+  - `consoleInvokeResponse`.
+
+Handle lifetime rules:
+
+- every `captureResponse` carries a new `captureID` that identifies the active reference context,
+- any console target or returned object minted under an older `captureID` expires after the next successful capture refresh,
+- all handles expire immediately on disconnect,
+- if the client sends a stale handle, the host returns a console error instead of crashing or silently succeeding.
+
 ### 2. Client hierarchy presentation
 
 The hierarchy row presenter will be adjusted as follows:
@@ -248,6 +312,30 @@ The first implementation round follows Lookin’s concrete helper-console model 
   - disconnected-host and remote invocation failures surface as console errors without corrupting history state,
   - clear-history resets the history rows while preserving the input row and current target.
 
+### 9. Console target state rules
+
+The console target must follow one deterministic precedence model.
+
+- If auto-sync is `on`:
+  - selection changes replace the current target with the preferred target from the latest selected node detail,
+  - the default preferred target is the selected view object,
+  - if the selected node is an exact controller root view, the owning controller target is exposed as an alternate target but does not replace the view target automatically.
+- If the user manually chooses a recent object or alternate target while auto-sync is `on`, auto-sync is immediately turned `off`, matching Lookin’s behavior.
+- If auto-sync is `off`:
+  - hierarchy selection changes update the available candidate list,
+  - but they do not overwrite the current target.
+- On capture refresh:
+  - if the current target handle belongs to an older `captureID`, it becomes invalid,
+  - if auto-sync is `on`, the client retargets to the latest selected node’s preferred target when available,
+  - otherwise the current target is cleared and the input becomes disabled until the user chooses a valid target.
+- If filtering or selection normalization removes the previously selected node:
+  - auto-sync `on`: retarget to the normalized selection if it exists,
+  - auto-sync `off`: retain the current target only if its handle is still valid for the latest `captureID`; otherwise clear it.
+- On disconnect:
+  - clear the current target,
+  - clear selectable recent-object handles,
+  - keep textual history rows visible until the user clears them, but disable further submission.
+
 ## Implementation Boundaries
 
 ### Client files
@@ -263,8 +351,9 @@ The first implementation round follows Lookin’s concrete helper-console model 
 
 ### Server files
 
-- [`ViewScopeSnapshotBuilder.swift`](/Users/VanJay/Documents/Work/Private/ViewScope/ViewScopeServer/Sources/ViewScopeServer/ViewScopeSnapshotBuilder.swift): tighten exact controller-root tagging semantics and preserve action/gesture metadata.
-- [`ViewScopeBridge.swift`](/Users/VanJay/Documents/Work/Private/ViewScope/ViewScopeServer/Sources/ViewScopeServer/ViewScopeBridge.swift): only if additional payload metadata is required during implementation.
+- [`ViewScopeSnapshotBuilder.swift`](/Users/VanJay/Documents/Work/Private/ViewScope/ViewScopeServer/Sources/ViewScopeServer/ViewScopeSnapshotBuilder.swift): tighten exact controller-root tagging semantics, add capture-scope preview bitmaps, mint capture-scoped console targets, and preserve action/gesture metadata.
+- [`ViewScopeBridge.swift`](/Users/VanJay/Documents/Work/Private/ViewScope/ViewScopeServer/Sources/ViewScopeServer/ViewScopeBridge.swift): define protocol version `2`, preview-bitmap payloads, console request/response payloads, and remote-object references.
+- [`ViewScopeInspector.swift`](/Users/VanJay/Documents/Work/Private/ViewScope/ViewScopeServer/Sources/ViewScopeServer/ViewScopeInspector.swift): route console invocation requests and stale-handle failures.
 
 ## Testing Strategy
 
