@@ -3,6 +3,16 @@ import XCTest
 @testable import ViewScopeServer
 
 final class ViewScopeServerTests: XCTestCase {
+    func testPodspecInjectsBootstrapAnchorIntoHostLinkerFlags() throws {
+        for podspecURL in podspecURLs() {
+            let contents = try String(contentsOf: podspecURL, encoding: .utf8)
+
+            XCTAssertTrue(contents.contains("user_target_xcconfig"), podspecURL.path)
+            XCTAssertTrue(contents.contains("OTHER_LDFLAGS"), podspecURL.path)
+            XCTAssertTrue(contents.contains("_ViewScopeServerBootstrapAnchor"), podspecURL.path)
+        }
+    }
+
     func testMessageRoundTrip() throws {
         let message = ViewScopeMessage(
             kind: .clientHello,
@@ -473,6 +483,21 @@ final class ViewScopeServerTests: XCTestCase {
                 height: expectedRect.height
             )
         )
+    }
+
+    private func podspecURLs(filePath: StaticString = #filePath) -> [URL] {
+        let packageRootURL = URL(fileURLWithPath: "\(filePath)")
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let nestedPodspecURL = packageRootURL.appendingPathComponent("ViewScopeServer.podspec")
+        let repositoryPodspecURL = packageRootURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("ViewScopeServer.podspec")
+
+        return [nestedPodspecURL, repositoryPodspecURL].filter {
+            FileManager.default.fileExists(atPath: $0.path)
+        }
     }
 }
 
