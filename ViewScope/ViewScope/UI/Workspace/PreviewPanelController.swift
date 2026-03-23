@@ -329,6 +329,7 @@ struct PreviewPanelRenderDecisions {
         capture: ViewScopeCapturePayload?,
         selectedNodeID: String?,
         detail: ViewScopeNodeDetailPayload?,
+        previewRootNodeID: String? = nil,
         geometry: ViewHierarchyGeometry = ViewHierarchyGeometry()
     ) -> PreviewCanvasGeometryMode? {
         guard let capture,
@@ -341,11 +342,13 @@ struct PreviewPanelRenderDecisions {
         guard let directRect = geometry.canvasRect(
                 for: selectedNodeID,
                 in: capture,
+                coordinateRootNodeID: previewRootNodeID,
                 mode: .directGlobalCanvasRect
               ),
               let legacyRect = geometry.canvasRect(
                 for: selectedNodeID,
                 in: capture,
+                coordinateRootNodeID: previewRootNodeID,
                 mode: .legacyLocalFrames
               ) else {
             return nil
@@ -360,6 +363,7 @@ struct PreviewPanelRenderDecisions {
         capture: ViewScopeCapturePayload?,
         selectedNodeID: String?,
         detail: ViewScopeNodeDetailPayload?,
+        previewRootNodeID: String? = nil,
         geometryMode: PreviewCanvasGeometryMode,
         geometry: ViewHierarchyGeometry = ViewHierarchyGeometry()
     ) -> CGRect? {
@@ -371,7 +375,12 @@ struct PreviewPanelRenderDecisions {
             return detail.highlightedRect.cgRect
         }
         if let capture,
-           let rect = geometry.canvasRect(for: selectedNodeID, in: capture, mode: geometryMode) {
+           let rect = geometry.canvasRect(
+            for: selectedNodeID,
+            in: capture,
+            coordinateRootNodeID: previewRootNodeID,
+            mode: geometryMode
+           ) {
             return rect
         }
         return nil

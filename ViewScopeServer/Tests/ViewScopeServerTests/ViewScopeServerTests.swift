@@ -296,7 +296,57 @@ final class ViewScopeServerTests: XCTestCase {
     }
 
     @MainActor
-    func testSnapshotBuilderIncludesCapturePreviewBitmapsAndConsoleTargets() throws {
+    func testSnapshotBuilderDoesNotLoadUnloadedChildViewControllers() throws {
+        final class LazyChildViewController: NSViewController {
+            private(set) var loadViewCallCount = 0
+
+            override func loadView() {
+                loadViewCallCount += 1
+                view = NSView(frame: NSRect(x: 0, y: 0, width: 80, height: 80))
+            }
+        }
+
+        final class ParentViewController: NSViewController {
+            let inspectedView = NSView(frame: NSRect(x: 20, y: 20, width: 160, height: 120))
+            let childController = LazyChildViewController()
+
+            override func loadView() {
+                let rootView = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+                rootView.addSubview(inspectedView)
+                addChild(childController)
+                view = rootView
+            }
+        }
+
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "Lazy Child Controller Fixture"
+        defer {
+            window.orderOut(nil)
+            window.close()
+        }
+
+        let controller = ParentViewController()
+        window.contentViewController = controller
+        window.orderFrontRegardless()
+
+        XCTAssertFalse(controller.childController.isViewLoaded)
+
+        let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
+        let (capture, context) = builder.makeCapture()
+
+        XCTAssertFalse(controller.childController.isViewLoaded)
+        XCTAssertEqual(controller.childController.loadViewCallCount, 0)
+
+        let controllerRootNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
+            guard case .view(let capturedView) = reference else { return false }
+            return capturedView === controller.view
+        })?.key)
+        let controllerRootNode = try XCTUnwrap(capture.nodes[controllerRootNodeID])
+        XCTAssertEqual(controllerRootNode.rootViewControllerClassName, NSStringFromClass(ParentViewController.self))
+    }
+
+    @MainActor
+    func testSnapshotBuilderOmitsCapturePreviewBitmapsAndIncludesConsoleTargets() throws {
         final class FixtureViewController: NSViewController {
             let rootView = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 300))
             let titleLabel = NSTextField(labelWithString: "Hello")
@@ -323,9 +373,7 @@ final class ViewScopeServerTests: XCTestCase {
         let (capture, context) = builder.makeCapture()
 
         XCTAssertFalse(capture.captureID.isEmpty)
-        XCTAssertEqual(capture.previewBitmaps.count, 1)
-        XCTAssertEqual(capture.previewBitmaps.first?.rootNodeID, "window-0")
-        XCTAssertEqual(capture.previewBitmaps.first?.size.width, Double(window.contentView?.bounds.width ?? 0))
+        XCTAssertTrue(capture.previewBitmaps.isEmpty)
 
         let controllerRootID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
             guard case .view(let capturedView) = reference else { return false }
@@ -337,6 +385,237 @@ final class ViewScopeServerTests: XCTestCase {
         XCTAssertTrue(kinds.contains(.view))
         XCTAssertTrue(kinds.contains(.viewController))
         XCTAssertTrue(detail.consoleTargets.allSatisfy { $0.reference.captureID == capture.captureID })
+    }
+
+    @MainActor
+    func testDetailScreenshotForSplitSidebarUsesOwningPaneCanvas() throws {
+        final class SidebarViewController: NSViewController {
+            let sidebarRoot = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 384))
+
+            override func loadView() {
+                sidebarRoot.wantsLayer = true
+                sidebarRoot.layer?.backgroundColor = NSColor.systemRed.cgColor
+                let label = NSTextField(labelWithString: "Sidebar")
+                label.frame = NSRect(x: 20, y: 20, width: 100, height: 20)
+                label.textColor = .white
+                sidebarRoot.addSubview(label)
+                view = sidebarRoot
+            }
+        }
+
+        final class DetailViewController: NSViewController {
+            let detailRoot = NSView(frame: NSRect(x: 0, y: 0, width: 580, height: 400))
+
+            override func loadView() {
+                detailRoot.wantsLayer = true
+                detailRoot.layer?.backgroundColor = NSColor.systemBlue.cgColor
+                view = detailRoot
+            }
+        }
+
+        final class SplitFixtureController: NSSplitViewController {}
+
+        let sidebarController = SidebarViewController()
+        let splitController = SplitFixtureController()
+        let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebarController)
+        let detailItem = NSSplitViewItem(viewController: DetailViewController())
+        splitController.addSplitViewItem(sidebarItem)
+        splitController.addSplitViewItem(detailItem)
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 400),
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Split Screenshot Fixture"
+        defer {
+            window.orderOut(nil)
+            window.close()
+        }
+        window.contentViewController = splitController
+        window.orderFrontRegardless()
+        window.layoutIfNeeded()
+        window.contentView?.layoutSubtreeIfNeeded()
+        splitController.view.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+
+        let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
+        let (_, context) = builder.makeCapture()
+        let sidebarNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
+            guard case .view(let capturedView) = reference else { return false }
+            return capturedView === sidebarController.sidebarRoot
+        })?.key)
+        let detail = try XCTUnwrap(builder.makeDetail(for: sidebarNodeID, in: context))
+        let screenshot = try XCTUnwrap(decodedImage(fromBase64PNG: detail.screenshotPNGBase64))
+        let pixel = try XCTUnwrap(
+            rgbaPixel(
+                in: screenshot,
+                atDisplayPoint: CGPoint(
+                    x: sidebarController.sidebarRoot.bounds.midX,
+                    y: sidebarController.sidebarRoot.bounds.midY
+                )
+            )
+        )
+
+        XCTAssertEqual(detail.screenshotRootNodeID, sidebarNodeID)
+        XCTAssertEqual(screenshot.size.width, sidebarController.sidebarRoot.bounds.width)
+        XCTAssertEqual(screenshot.size.height, sidebarController.sidebarRoot.bounds.height)
+        XCTAssertGreaterThan(pixel.red, 0.7)
+        XCTAssertLessThan(pixel.green, 0.45)
+        XCTAssertLessThan(pixel.blue, 0.45)
+    }
+
+    @MainActor
+    func testDetailScreenshotForSplitSubviewUsesOwningPaneCanvas() throws {
+        final class SidebarViewController: NSViewController {
+            let sidebarRoot = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 384))
+
+            override func loadView() {
+                sidebarRoot.wantsLayer = true
+                sidebarRoot.layer?.backgroundColor = NSColor.systemRed.cgColor
+                view = sidebarRoot
+            }
+        }
+
+        final class DetailViewController: NSViewController {
+            let detailRoot = NSView(frame: NSRect(x: 0, y: 0, width: 580, height: 400))
+            let detailSubview = NSView(frame: NSRect(x: 120, y: 120, width: 180, height: 120))
+
+            override func loadView() {
+                detailRoot.wantsLayer = true
+                detailRoot.layer?.backgroundColor = NSColor.systemBlue.cgColor
+                detailSubview.wantsLayer = true
+                detailSubview.layer?.backgroundColor = NSColor.systemGreen.cgColor
+                detailRoot.addSubview(detailSubview)
+                view = detailRoot
+            }
+        }
+
+        final class SplitFixtureController: NSSplitViewController {}
+
+        let sidebarController = SidebarViewController()
+        let detailController = DetailViewController()
+        let splitController = SplitFixtureController()
+        splitController.addSplitViewItem(NSSplitViewItem(sidebarWithViewController: sidebarController))
+        splitController.addSplitViewItem(NSSplitViewItem(viewController: detailController))
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 400),
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Split Detail Root Fixture"
+        defer {
+            window.orderOut(nil)
+            window.close()
+        }
+        window.contentViewController = splitController
+        window.orderFrontRegardless()
+        window.layoutIfNeeded()
+        window.contentView?.layoutSubtreeIfNeeded()
+        splitController.view.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+
+        let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
+        let (_, context) = builder.makeCapture()
+        let detailRootNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
+            guard case .view(let capturedView) = reference else { return false }
+            return capturedView === detailController.detailRoot
+        })?.key)
+        let detailSubviewNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
+            guard case .view(let capturedView) = reference else { return false }
+            return capturedView === detailController.detailSubview
+        })?.key)
+        let detail = try XCTUnwrap(builder.makeDetail(for: detailSubviewNodeID, in: context))
+        let screenshot = try XCTUnwrap(decodedImage(fromBase64PNG: detail.screenshotPNGBase64))
+
+        XCTAssertEqual(screenshot.size.width, detailController.detailRoot.bounds.width)
+        XCTAssertEqual(screenshot.size.height, detailController.detailRoot.bounds.height)
+        XCTAssertEqual(detail.screenshotRootNodeID, detailRootNodeID)
+        XCTAssertEqual(detail.highlightedRect.x, detailController.detailSubview.frame.minX)
+        XCTAssertEqual(detail.highlightedRect.width, detailController.detailSubview.frame.width)
+    }
+
+    @available(macOS 26.0, *)
+    @MainActor
+    func testDetailScreenshotPreservesGlassSidebarContentInsideSplitView() throws {
+        @available(macOS 26.0, *)
+        final class SidebarViewController: NSViewController {
+            let sidebarRoot = NSGlassEffectView(frame: NSRect(x: 0, y: 0, width: 220, height: 384))
+            let marker = NSView(frame: NSRect(x: 20, y: 20, width: 48, height: 28))
+
+            override func loadView() {
+                sidebarRoot.wantsLayer = true
+                marker.wantsLayer = true
+                marker.layer?.backgroundColor = NSColor.systemRed.cgColor
+                sidebarRoot.addSubview(marker)
+                view = sidebarRoot
+            }
+        }
+
+        final class DetailViewController: NSViewController {
+            override func loadView() {
+                let detailRoot = NSView(frame: NSRect(x: 0, y: 0, width: 580, height: 400))
+                detailRoot.wantsLayer = true
+                detailRoot.layer?.backgroundColor = NSColor.systemBlue.cgColor
+                view = detailRoot
+            }
+        }
+
+        final class SplitFixtureController: NSSplitViewController {}
+
+        let sidebarController = SidebarViewController()
+        let splitController = SplitFixtureController()
+        splitController.addSplitViewItem(NSSplitViewItem(sidebarWithViewController: sidebarController))
+        splitController.addSplitViewItem(NSSplitViewItem(viewController: DetailViewController()))
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 400),
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Split Glass Sidebar Fixture"
+        defer {
+            window.orderOut(nil)
+            window.close()
+        }
+        window.contentViewController = splitController
+        window.orderFrontRegardless()
+        window.layoutIfNeeded()
+        window.contentView?.layoutSubtreeIfNeeded()
+        splitController.view.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+
+        let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
+        let (_, context) = builder.makeCapture()
+        let markerNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
+            guard case .view(let capturedView) = reference else { return false }
+            return capturedView === sidebarController.marker
+        })?.key)
+        let detail = try XCTUnwrap(builder.makeDetail(for: markerNodeID, in: context))
+        let screenshot = try XCTUnwrap(decodedImage(fromBase64PNG: detail.screenshotPNGBase64))
+        let highlightRect = CGRect(
+            x: detail.highlightedRect.x,
+            y: detail.highlightedRect.y,
+            width: detail.highlightedRect.width,
+            height: detail.highlightedRect.height
+        )
+        let pixel = try XCTUnwrap(
+            rgbaPixel(
+                in: screenshot,
+                atDisplayPoint: CGPoint(
+                    x: highlightRect.midX,
+                    y: highlightRect.midY
+                )
+            )
+        )
+
+        XCTAssertGreaterThan(pixel.red, 0.7)
+        XCTAssertLessThan(pixel.green, 0.45)
+        XCTAssertLessThan(pixel.blue, 0.45)
     }
 
     @MainActor
@@ -839,6 +1118,114 @@ final class ViewScopeServerTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testLayerBackedNonFlippedRootScreenshotUsesTopLeftDisplayCoordinates() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 240, height: 180), styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "Non-Flipped Screenshot Fixture"
+        defer {
+            window.orderOut(nil)
+            window.close()
+        }
+
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
+        root.wantsLayer = true
+        root.layer?.backgroundColor = NSColor.white.cgColor
+
+        let marker = NSView(frame: NSRect(x: 8, y: 8, width: 40, height: 24))
+        marker.wantsLayer = true
+        marker.layer?.backgroundColor = NSColor.systemRed.cgColor
+        root.addSubview(marker)
+
+        window.contentView = root
+        window.orderFrontRegardless()
+        window.contentView?.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+
+        let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
+        let (_, context) = builder.makeCapture()
+        let rootNodeID = try! XCTUnwrap(context.nodeReferences.first(where: { _, reference in
+            guard case .view(let capturedView) = reference else { return false }
+            return capturedView === root
+        })?.key)
+        let detail = try! XCTUnwrap(builder.makeDetail(for: rootNodeID, in: context))
+        let screenshot = try! XCTUnwrap(decodedImage(fromBase64PNG: detail.screenshotPNGBase64))
+
+        let topPixel = try! XCTUnwrap(
+            rgbaPixel(
+                in: screenshot,
+                x: 16,
+                y: Int(screenshot.size.height) - 16
+            )
+        )
+        let bottomPixel = try! XCTUnwrap(
+            rgbaPixel(
+                in: screenshot,
+                x: 16,
+                y: 16
+            )
+        )
+
+        XCTAssertGreaterThan(bottomPixel.red, 0.75)
+        XCTAssertLessThan(bottomPixel.green, 0.5)
+        XCTAssertLessThan(bottomPixel.blue, 0.5)
+        XCTAssertGreaterThan(topPixel.green, 0.8)
+        XCTAssertGreaterThan(topPixel.blue, 0.8)
+    }
+
+    @MainActor
+    func testLayerBackedFlippedRootScreenshotKeepsTopMarkerAtTop() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 240, height: 180), styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "Flipped Screenshot Fixture"
+        defer {
+            window.orderOut(nil)
+            window.close()
+        }
+
+        let root = FlippedFixtureView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
+        root.wantsLayer = true
+        root.layer?.backgroundColor = NSColor.white.cgColor
+
+        let marker = NSView(frame: NSRect(x: 8, y: 8, width: 40, height: 24))
+        marker.wantsLayer = true
+        marker.layer?.backgroundColor = NSColor.systemRed.cgColor
+        root.addSubview(marker)
+
+        window.contentView = root
+        window.orderFrontRegardless()
+        window.contentView?.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+
+        let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
+        let (_, context) = builder.makeCapture()
+        let rootNodeID = try! XCTUnwrap(context.nodeReferences.first(where: { _, reference in
+            guard case .view(let capturedView) = reference else { return false }
+            return capturedView === root
+        })?.key)
+        let detail = try! XCTUnwrap(builder.makeDetail(for: rootNodeID, in: context))
+        let screenshot = try! XCTUnwrap(decodedImage(fromBase64PNG: detail.screenshotPNGBase64))
+
+        let topPixel = try! XCTUnwrap(
+            rgbaPixel(
+                in: screenshot,
+                x: 16,
+                y: Int(screenshot.size.height) - 16
+            )
+        )
+        let bottomPixel = try! XCTUnwrap(
+            rgbaPixel(
+                in: screenshot,
+                x: 16,
+                y: 16
+            )
+        )
+
+        XCTAssertGreaterThan(topPixel.red, 0.75)
+        XCTAssertLessThan(topPixel.green, 0.5)
+        XCTAssertLessThan(topPixel.blue, 0.5)
+        XCTAssertGreaterThan(bottomPixel.green, 0.8)
+        XCTAssertGreaterThan(bottomPixel.blue, 0.8)
+    }
+
     private func podspecURLs(filePath: StaticString = #filePath) -> [URL] {
         let packageRootURL = URL(fileURLWithPath: "\(filePath)")
             .deletingLastPathComponent()
@@ -872,6 +1259,47 @@ final class ViewScopeServerTests: XCTestCase {
             supportsHighlighting: true
         )
     }
+
+    private func decodedImage(fromBase64PNG base64PNG: String?) -> NSImage? {
+        guard let base64PNG,
+              let data = Data(base64Encoded: base64PNG) else {
+            return nil
+        }
+        return NSImage(data: data)
+    }
+
+    private func rgbaPixel(in image: NSImage, x: Int, y: Int) -> (red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat)? {
+        guard let tiffRepresentation = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffRepresentation),
+              let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else {
+            return nil
+        }
+
+        return (
+            red: color.redComponent,
+            green: color.greenComponent,
+            blue: color.blueComponent,
+            alpha: color.alphaComponent
+        )
+    }
+
+    private func rgbaPixel(in image: NSImage, atDisplayPoint point: CGPoint) -> (red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat)? {
+        guard image.size.width > 0,
+              image.size.height > 0 else {
+            return nil
+        }
+
+        let scaleX = CGFloat((image.representations.first as? NSBitmapImageRep)?.pixelsWide ?? 0) / image.size.width
+        let scaleY = CGFloat((image.representations.first as? NSBitmapImageRep)?.pixelsHigh ?? 0) / image.size.height
+        guard scaleX > 0, scaleY > 0 else {
+            return nil
+        }
+
+        let pixelX = Int((point.x * scaleX).rounded())
+        let pixelY = Int((point.y * scaleY).rounded())
+        return rgbaPixel(in: image, x: pixelX, y: pixelY)
+    }
+
 }
 
 private final class FlippedFixtureView: NSView {

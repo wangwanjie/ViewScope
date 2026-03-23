@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Testing
+import ViewScopeServer
 @testable import ViewScope
 
 @Suite(.serialized)

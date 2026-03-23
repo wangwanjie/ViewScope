@@ -423,6 +423,7 @@ public struct ViewScopeNodeDetailPayload: Codable, Sendable, Hashable {
     public var sections: [ViewScopePropertySection]
     public var constraints: [String]
     public var ancestry: [String]
+    public var screenshotRootNodeID: String?
     public var screenshotPNGBase64: String?
     public var screenshotSize: ViewScopeSize
     public var highlightedRect: ViewScopeRect
@@ -434,6 +435,7 @@ public struct ViewScopeNodeDetailPayload: Codable, Sendable, Hashable {
         sections: [ViewScopePropertySection],
         constraints: [String],
         ancestry: [String],
+        screenshotRootNodeID: String? = nil,
         screenshotPNGBase64: String?,
         screenshotSize: ViewScopeSize,
         highlightedRect: ViewScopeRect,
@@ -444,6 +446,7 @@ public struct ViewScopeNodeDetailPayload: Codable, Sendable, Hashable {
         self.sections = sections
         self.constraints = constraints
         self.ancestry = ancestry
+        self.screenshotRootNodeID = screenshotRootNodeID
         self.screenshotPNGBase64 = screenshotPNGBase64
         self.screenshotSize = screenshotSize
         self.highlightedRect = highlightedRect

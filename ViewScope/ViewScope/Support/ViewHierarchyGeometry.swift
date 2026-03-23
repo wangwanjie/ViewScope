@@ -11,11 +11,18 @@ struct ViewHierarchyGeometry {
         at canvasPoint: CGPoint,
         in capture: ViewScopeCapturePayload,
         rootNodeID: String? = nil,
+        coordinateRootNodeID: String? = nil,
         mode: PreviewCanvasGeometryMode = .directGlobalCanvasRect
     ) -> String? {
+        let resolvedCanvasPoint = translatedCanvasPoint(
+            canvasPoint,
+            in: capture,
+            coordinateRootNodeID: coordinateRootNodeID,
+            mode: mode
+        )
         let rootNodeIDs = rootNodeID.map { [$0] } ?? capture.rootNodeIDs
         for nodeID in rootNodeIDs.reversed() {
-            if let match = deepestNodeID(for: nodeID, at: canvasPoint, in: capture.nodes, mode: mode) {
+            if let match = deepestNodeID(for: nodeID, at: resolvedCanvasPoint, in: capture.nodes, mode: mode) {
                 return match
             }
         }
@@ -25,11 +32,17 @@ struct ViewHierarchyGeometry {
     func canvasRect(
         for nodeID: String,
         in capture: ViewScopeCapturePayload,
+        coordinateRootNodeID: String? = nil,
         mode: PreviewCanvasGeometryMode = .directGlobalCanvasRect
     ) -> CGRect? {
         for rootNodeID in capture.rootNodeIDs {
             if let rect = canvasRect(for: nodeID, searchNodeID: rootNodeID, in: capture.nodes, mode: mode) {
-                return rect
+                return translatedRect(
+                    rect,
+                    in: capture,
+                    coordinateRootNodeID: coordinateRootNodeID,
+                    mode: mode
+                )
             }
         }
         return nil
@@ -134,6 +147,33 @@ struct ViewHierarchyGeometry {
         }
         result.append(nodeID)
         node.childIDs.forEach { appendVisibleNodeIDs($0, nodes: nodes, into: &result) }
+    }
+
+    private func translatedCanvasPoint(
+        _ point: CGPoint,
+        in capture: ViewScopeCapturePayload,
+        coordinateRootNodeID: String?,
+        mode: PreviewCanvasGeometryMode
+    ) -> CGPoint {
+        guard let coordinateRootNodeID,
+              let rootRect = canvasRect(for: coordinateRootNodeID, in: capture, coordinateRootNodeID: nil, mode: mode) else {
+            return point
+        }
+        return CGPoint(x: point.x + rootRect.minX, y: point.y + rootRect.minY)
+    }
+
+    private func translatedRect(
+        _ rect: CGRect,
+        in capture: ViewScopeCapturePayload,
+        coordinateRootNodeID: String?,
+        mode: PreviewCanvasGeometryMode
+    ) -> CGRect {
+        guard let coordinateRootNodeID,
+              let rootRect = canvasRect(for: coordinateRootNodeID, in: capture, coordinateRootNodeID: nil, mode: mode) else {
+            return rect
+        }
+
+        return rect.offsetBy(dx: -rootRect.minX, dy: -rootRect.minY)
     }
 
     private func resolvedRect(

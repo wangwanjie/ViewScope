@@ -75,7 +75,6 @@ final class ViewScopeSnapshotBuilder {
         var nodes: [String: ViewScopeHierarchyNode] = [:]
         var references: [String: ViewScopeInspectableReference] = [:]
         var rootNodeIDs: [String] = []
-        var previewBitmaps: [ViewScopePreviewBitmap] = []
 
         for (index, window) in windows.enumerated() {
             let windowID = "window-\(index)"
@@ -103,18 +102,6 @@ final class ViewScopeSnapshotBuilder {
             rootNodeIDs.append(windowID)
 
             if let contentView = window.contentView {
-                if let image = makeWindowScreenshot(window: window),
-                   let pngBase64 = ViewScopeImageEncoder().base64PNG(for: image) {
-                    previewBitmaps.append(
-                        ViewScopePreviewBitmap(
-                            rootNodeID: windowID,
-                            pngBase64: pngBase64,
-                            size: image.size.viewScopeSize,
-                            capturedAt: Date(),
-                            scale: Double(window.backingScaleFactor)
-                        )
-                    )
-                }
                 let contentViewNodeID = "\(windowID)-view-root"
                 let title = sanitizedDisplayText(contentView.viewScopeTitle(interfaceLanguage: interfaceLanguage))
                     ?? ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(type(of: contentView)))
@@ -174,7 +161,7 @@ final class ViewScopeSnapshotBuilder {
                 rootNodeIDs: rootNodeIDs,
                 nodes: nodes,
                 captureID: captureID,
-                previewBitmaps: previewBitmaps
+                previewBitmaps: []
             ),
             ReferenceContext(nodeReferences: references, rootNodeIDs: rootNodeIDs, captureID: captureID)
         )
@@ -194,15 +181,18 @@ final class ViewScopeSnapshotBuilder {
                 sections: windowSections(for: window),
                 constraints: [],
                 ancestry: [window.title.isEmpty ? interfaceLanguage.text("server.value.window_fallback") : window.title],
+                screenshotRootNodeID: nodeID,
                 screenshotPNGBase64: image.flatMap(ViewScopeImageEncoder().base64PNG),
                 screenshotSize: image?.size.viewScopeSize ?? .zero,
                 highlightedRect: window.contentView?.bounds.viewScopeRect ?? .zero,
                 consoleTargets: makeConsoleTargets(for: .window(window), nodeID: nodeID, context: context)
             )
         case .view(let view):
-            let rootView = view.window?.contentView
-            let image = rootView.flatMap(makeViewScreenshot)
-            let highlightRect = rootView.map { root in
+            let screenshotRootView = screenshotRootView(for: view)
+            let image = screenshotRootView.flatMap { root in
+                makeViewScreenshot(view: root)
+            }
+            let highlightRect = screenshotRootView.map { root in
                 normalizedCanvasRect(for: view, in: root).viewScopeRect
             } ?? .zero
             return ViewScopeNodeDetailPayload(
@@ -211,6 +201,7 @@ final class ViewScopeSnapshotBuilder {
                 sections: viewSections(for: view),
                 constraints: constraintDescriptions(for: view),
                 ancestry: ancestry(for: view),
+                screenshotRootNodeID: screenshotRootView.flatMap { screenshotRootNodeID(for: $0, in: context) },
                 screenshotPNGBase64: image.flatMap(ViewScopeImageEncoder().base64PNG),
                 screenshotSize: image?.size.viewScopeSize ?? .zero,
                 highlightedRect: highlightRect,
@@ -233,6 +224,7 @@ final class ViewScopeSnapshotBuilder {
                 ],
                 constraints: [],
                 ancestry: [],
+                screenshotRootNodeID: nil,
                 screenshotPNGBase64: nil,
                 screenshotSize: .zero,
                 highlightedRect: .zero,
@@ -255,6 +247,7 @@ final class ViewScopeSnapshotBuilder {
                 ],
                 constraints: [],
                 ancestry: [],
+                screenshotRootNodeID: nil,
                 screenshotPNGBase64: nil,
                 screenshotSize: .zero,
                 highlightedRect: .zero,
@@ -417,10 +410,55 @@ final class ViewScopeSnapshotBuilder {
         }
     }
 
-    private func makeViewScreenshot(view: NSView) -> NSImage? {
+    private func screenshotRootView(for view: NSView) -> NSView? {
+        var candidate: NSView? = view
+        var fallbackControllerRoot: NSView?
+
+        while let current = candidate {
+            if let controller = current.viewScopeOwningViewController,
+               controller.isViewLoaded,
+               controller.view === current,
+               current.bounds.width > 0,
+               current.bounds.height > 0 {
+                fallbackControllerRoot = fallbackControllerRoot ?? current
+            }
+            candidate = current.superview
+        }
+
+        return fallbackControllerRoot ?? view.window?.contentView
+    }
+
+    private func screenshotRootNodeID(for view: NSView, in context: ReferenceContext) -> String? {
+        context.nodeReferences.first { _, reference in
+            guard case .view(let capturedView) = reference else { return false }
+            return capturedView === view
+        }?.key
+    }
+
+    private func makeViewScreenshot(
+        view: NSView,
+        inheritsCompositeCapture: Bool = false
+    ) -> NSImage? {
         guard view.bounds.width > 0, view.bounds.height > 0 else {
             return nil
         }
+
+        let prefersCompositeCapture = prefersDescendantCompositeCapture(for: view) ||
+            (inheritsCompositeCapture && view.subviews.isEmpty == false)
+        if prefersCompositeCapture {
+            return makeCompositeScreenshot(
+                view: view,
+                inheritsCompositeCapture: prefersCompositeCapture
+            )
+        }
+
+        guard let image = makeDirectViewScreenshot(view: view) else {
+            return nil
+        }
+        return normalizedScreenshot(image, for: view)
+    }
+
+    private func makeDirectViewScreenshot(view: NSView) -> NSImage? {
         guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
             return nil
         }
@@ -430,11 +468,130 @@ final class ViewScopeSnapshotBuilder {
         return image
     }
 
+    private func makeCompositeScreenshot(
+        view: NSView,
+        inheritsCompositeCapture: Bool
+    ) -> NSImage? {
+        let image = NSImage(size: view.bounds.size)
+        image.lockFocusFlipped(true)
+        NSColor.clear.setFill()
+        CGRect(origin: .zero, size: view.bounds.size).fill()
+
+        if !shouldSkipDirectCompositeBase(for: view, inheritsCompositeCapture: inheritsCompositeCapture),
+           let baseImage = makeDirectViewScreenshot(view: view) {
+            normalizedScreenshot(baseImage, for: view).draw(
+                in: CGRect(origin: .zero, size: view.bounds.size),
+                from: .zero,
+                operation: .sourceOver,
+                fraction: 1,
+                respectFlipped: false,
+                hints: [.interpolation: NSImageInterpolation.high]
+            )
+        }
+
+        for child in capturedChildViews(of: view) where child.isHidden == false {
+            guard let childImage = makeViewScreenshot(
+                view: child,
+                inheritsCompositeCapture: inheritsCompositeCapture
+            ) else {
+                continue
+            }
+            let childRect = normalizedCanvasRect(for: child, in: view)
+            childImage.draw(
+                in: childRect,
+                from: .zero,
+                operation: .sourceOver,
+                fraction: CGFloat(child.alphaValue),
+                respectFlipped: false,
+                hints: [.interpolation: NSImageInterpolation.high]
+            )
+        }
+
+        image.unlockFocus()
+        return image
+    }
+
+    private func prefersDescendantCompositeCapture(for view: NSView) -> Bool {
+        guard view.subviews.isEmpty == false else {
+            return false
+        }
+
+        let className = NSStringFromClass(type(of: view))
+        if view is NSSplitView {
+            return true
+        }
+        if view === view.window?.contentView,
+           view.subviews.contains(where: { NSStringFromClass(type(of: $0)).contains("SplitView") }) {
+            return true
+        }
+        let compositeKeywords = [
+            "SplitView",
+            "VisualEffect",
+            "GlassEffect",
+            "Wrapper"
+        ]
+        return compositeKeywords.contains { className.contains($0) }
+    }
+
+    private func shouldSkipDirectCompositeBase(
+        for view: NSView,
+        inheritsCompositeCapture: Bool
+    ) -> Bool {
+        if view is NSSplitView {
+            return true
+        }
+        if inheritsCompositeCapture,
+           type(of: view) == NSView.self,
+           view.wantsLayer == false,
+           view.layer == nil {
+            return true
+        }
+        return false
+    }
+
     private func makeWindowScreenshot(window: NSWindow) -> NSImage? {
         guard let contentView = window.contentView else {
             return nil
         }
         return makeViewScreenshot(view: contentView)
+    }
+
+    private func normalizedScreenshot(_ image: NSImage, for view: NSView) -> NSImage {
+        _ = view
+        return verticallyFlippedImage(image)
+    }
+
+    private func verticallyFlippedImage(_ image: NSImage) -> NSImage {
+        let width = Int(round(image.size.width))
+        let height = Int(round(image.size.height))
+        guard width > 0,
+              height > 0,
+              let tiffRepresentation = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffRepresentation),
+              let cgImage = bitmap.cgImage else {
+            return image
+        }
+
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return image
+        }
+
+        context.translateBy(x: 0, y: CGFloat(height))
+        context.scaleBy(x: 1, y: -1)
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        guard let flippedCGImage = context.makeImage() else {
+            return image
+        }
+        return NSImage(cgImage: flippedCGImage, size: image.size)
     }
 
     private func normalizedCanvasRect(for view: NSView, in rootView: NSView) -> NSRect {
@@ -857,6 +1014,13 @@ enum ViewScopeInspectableReference {
 }
 
 private extension NSView {
+    var viewScopeOwningViewController: NSViewController? {
+        guard let windowController = window?.contentViewController else {
+            return nil
+        }
+        return windowController.viewScopeOwningController(containing: self)
+    }
+
     var viewScopeExactRootViewControllerClassName: String? {
         viewScopeExactRootOwningViewController.map { NSStringFromClass(type(of: $0)) }
     }
@@ -964,6 +1128,10 @@ private extension NSView {
 
 private extension NSViewController {
     func viewScopeOwningController(containing view: NSView) -> NSViewController? {
+        guard isViewLoaded else {
+            return nil
+        }
+
         for child in children {
             if let controller = child.viewScopeOwningController(containing: view) {
                 return controller
