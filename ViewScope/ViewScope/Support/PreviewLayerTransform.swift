@@ -69,18 +69,10 @@ struct PreviewLayerTransform {
 
     func contains(_ point: CGPoint, in quad: [CGPoint]) -> Bool {
         guard quad.count >= 3 else { return false }
-
-        var containsPoint = false
-        var previous = quad[quad.count - 1]
-        for current in quad {
-            let intersects = ((current.y > point.y) != (previous.y > point.y)) &&
-                (point.x < (previous.x - current.x) * (point.y - current.y) / max(previous.y - current.y, 0.0001) + current.x)
-            if intersects {
-                containsPoint.toggle()
-            }
-            previous = current
-        }
-        return containsPoint
+        let path = CGMutablePath()
+        path.addLines(between: quad)
+        path.closeSubpath()
+        return path.contains(point)
     }
 
     func bounds(for quad: [CGPoint]) -> CGRect {
@@ -119,6 +111,7 @@ struct PreviewLayerTransform {
         let yawedZ = -x * sinYaw + pitchedZ * cosYaw
 
         let perspective = perspectiveDistance / max(perspectiveDistance - yawedZ, perspectiveDistance * 0.25)
+
         return CGPoint(
             x: center.x + yawedX * perspective,
             y: center.y + pitchedY * perspective
@@ -134,6 +127,8 @@ struct PreviewHitTestResolver {
         capture: ViewScopeCapturePayload,
         viewportState: PreviewViewportState,
         focusedNodeID: String?,
+        previewRootNodeID: String? = nil,
+        expandedNodeIDs: Set<String>,
         displayMode: WorkspacePreviewDisplayMode,
         geometryMode: PreviewCanvasGeometryMode,
         layerTransform: PreviewLayerTransform
@@ -150,7 +145,8 @@ struct PreviewHitTestResolver {
             return geometry.deepestNodeID(
                 at: normalizedPoint,
                 in: capture,
-                rootNodeID: focusedNodeID,
+                rootNodeID: previewRootNodeID ?? focusedNodeID,
+                coordinateRootNodeID: previewRootNodeID,
                 mode: geometryMode
             )
         case .layered:
@@ -160,6 +156,8 @@ struct PreviewHitTestResolver {
                 canvasSize: viewportState.canvasSize,
                 selectedNodeID: nil,
                 focusedNodeID: focusedNodeID,
+                previewRootNodeID: previewRootNodeID,
+                expandedNodeIDs: expandedNodeIDs,
                 geometryMode: geometryMode,
                 geometry: geometry,
                 layerTransform: layerTransform

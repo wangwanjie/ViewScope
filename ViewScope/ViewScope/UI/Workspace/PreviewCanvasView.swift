@@ -8,6 +8,8 @@ final class PreviewCanvasView: NSView {
     private let focusMaskResolver = PreviewFocusMaskResolver()
     private var viewportState = PreviewViewportState()
     private var layerTransform = PreviewLayerTransform()
+    private var expandedNodeIDs = Set<String>()
+    private var suppressDisplayInvalidation = false
     private var mouseDownViewPoint: CGPoint?
     private var lastDragViewPoint: CGPoint?
     private var didRotateDuringDrag = false
@@ -17,39 +19,61 @@ final class PreviewCanvasView: NSView {
     var onScaleChanged: ((CGFloat) -> Void)?
 
     var capture: ViewScopeCapturePayload? {
-        didSet { needsDisplay = true }
+        didSet { invalidateDisplay() }
     }
 
     var image: NSImage? {
-        didSet { needsDisplay = true }
+        didSet { invalidateDisplay() }
     }
 
     var canvasSize: CGSize = .zero {
         didSet {
             updateDocumentSize()
-            needsDisplay = true
+            invalidateDisplay()
         }
     }
 
     var selectedNodeID: String? {
-        didSet { needsDisplay = true }
+        didSet { invalidateDisplay() }
     }
 
     var focusedNodeID: String? {
-        didSet { needsDisplay = true }
+        didSet { invalidateDisplay() }
     }
 
     var highlightedCanvasRect: CGRect? {
-        didSet { needsDisplay = true }
+        didSet { invalidateDisplay() }
+    }
+
+    var previewRootNodeID: String? {
+        didSet { invalidateDisplay() }
     }
 
     var geometryMode: PreviewCanvasGeometryMode = .directGlobalCanvasRect {
-        didSet { needsDisplay = true }
+        didSet { invalidateDisplay() }
     }
 
     var displayMode: WorkspacePreviewDisplayMode = .flat {
         didSet {
-            needsDisplay = true
+            invalidateDisplay()
+        }
+    }
+
+    var previewLayerSpacing: CGFloat = 22 {
+        didSet {
+            layerTransform.depthSpacing = previewLayerSpacing
+            invalidateDisplay()
+        }
+    }
+
+    var previewShowsLayerBorders = true {
+        didSet { invalidateDisplay() }
+    }
+
+    var previewExpandedNodeIDs = Set<String>() {
+        didSet {
+            expandedNodeIDs = previewExpandedNodeIDs
+            invalidateDisplay()
         }
     }
 
@@ -58,7 +82,7 @@ final class PreviewCanvasView: NSView {
             if abs(viewportState.scale - zoomScale) > 0.0001 {
                 viewportState.setScale(zoomScale)
             }
-            needsDisplay = true
+            invalidateDisplay()
         }
     }
 
@@ -83,6 +107,7 @@ final class PreviewCanvasView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
+        layer?.masksToBounds = true
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityIdentifier("workspace.previewCanvas")
@@ -116,6 +141,8 @@ final class PreviewCanvasView: NSView {
                 canvasSize: canvasSize,
                 selectedNodeID: selectedNodeID,
                 focusedNodeID: focusedNodeID,
+                previewRootNodeID: previewRootNodeID,
+                expandedNodeIDs: expandedNodeIDs,
                 geometryMode: geometryMode,
                 layerTransform: layerTransform
             )
@@ -123,22 +150,37 @@ final class PreviewCanvasView: NSView {
         if displayMode == .layered {
             drawLayeredCanvasBackdrop(in: layeredRenderPlan?.baseImageQuad ?? layerTransform.projectedQuad(for: canvasRect, depth: 0, canvasSize: canvasSize))
             if let image, let layeredRenderPlan {
-                drawLayeredImage(
-                    image,
-                    in: canvasRect,
-                    projectedQuad: layeredRenderPlan.baseImageQuad,
-                    context: context
-                )
-                drawLayeredPreview(plan: layeredRenderPlan)
+                if layeredRenderPlan.planes.isEmpty {
+                    drawLayeredImage(
+                        image,
+                        in: canvasRect,
+                        projectedQuad: layeredRenderPlan.baseImageQuad,
+                        context: context
+                    )
+                } else {
+                    drawLayeredPlanes(image, plan: layeredRenderPlan, in: canvasRect, context: context)
+                }
             } else {
                 drawLayeredWireframeFallback(plan: layeredRenderPlan)
             }
-            if let selectedRect = resolvedSelectedRect() {
-                drawLayeredSelection(for: selectedRect, depth: resolvedSelectedRelativeDepth())
+            if let selectedNodeID,
+               let overlayQuad = layeredRenderPlan?.overlay(for: selectedNodeID)?.quad {
+                drawLayeredSelection(for: overlayQuad)
+            } else if let selectedRect = resolvedSelectedRect() {
+                drawLayeredSelection(
+                    for: layerTransform.projectedQuad(for: selectedRect, depth: 0, canvasSize: canvasSize)
+                )
             }
         } else {
             if let image {
-                image.draw(in: canvasRect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: false, hints: nil)
+                image.draw(
+                    in: canvasRect,
+                    from: .zero,
+                    operation: .sourceOver,
+                    fraction: 1,
+                    respectFlipped: false,
+                    hints: nil
+                )
             } else {
                 drawWireframeFallback()
             }
@@ -156,7 +198,12 @@ final class PreviewCanvasView: NSView {
         context.restoreGState()
 
         if let capture, let focusedNodeID,
-           let focusRect = geometry.canvasRect(for: focusedNodeID, in: capture, mode: geometryMode) {
+           let focusRect = geometry.canvasRect(
+            for: focusedNodeID,
+            in: capture,
+            coordinateRootNodeID: previewRootNodeID,
+            mode: geometryMode
+           ) {
             guard let focusViewRect = focusMaskResolver.cutoutViewRect(
                 displayMode: displayMode,
                 focusRect: displayCanvasRect(fromNormalizedRect: focusRect),
@@ -176,6 +223,7 @@ final class PreviewCanvasView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
         let point = convert(event.locationInWindow, from: nil)
         mouseDownViewPoint = point
         lastDragViewPoint = point
@@ -254,6 +302,39 @@ final class PreviewCanvasView: NSView {
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         viewportState.setViewportSize(newSize)
+        invalidateDisplay()
+    }
+
+    func applyRenderState(
+        capture: ViewScopeCapturePayload?,
+        image: NSImage?,
+        canvasSize: CGSize,
+        selectedNodeID: String?,
+        focusedNodeID: String?,
+        highlightedCanvasRect: CGRect?,
+        previewRootNodeID: String?,
+        geometryMode: PreviewCanvasGeometryMode,
+        displayMode: WorkspacePreviewDisplayMode,
+        zoomScale: CGFloat,
+        previewLayerSpacing: CGFloat,
+        previewShowsLayerBorders: Bool,
+        previewExpandedNodeIDs: Set<String>
+    ) {
+        suppressDisplayInvalidation = true
+        self.capture = capture
+        self.image = image
+        self.canvasSize = canvasSize
+        self.selectedNodeID = selectedNodeID
+        self.focusedNodeID = focusedNodeID
+        self.highlightedCanvasRect = highlightedCanvasRect
+        self.previewRootNodeID = previewRootNodeID
+        self.geometryMode = geometryMode
+        self.displayMode = displayMode
+        self.zoomScale = zoomScale
+        self.previewLayerSpacing = previewLayerSpacing
+        self.previewShowsLayerBorders = previewShowsLayerBorders
+        self.previewExpandedNodeIDs = previewExpandedNodeIDs
+        suppressDisplayInvalidation = false
         needsDisplay = true
     }
 
@@ -276,8 +357,14 @@ final class PreviewCanvasView: NSView {
         NSColor.textBackgroundColor.setFill()
         NSBezierPath(rect: CGRect(origin: .zero, size: canvasSize)).fill()
 
-        for nodeID in geometry.visibleNodeIDs(in: capture, rootNodeID: focusedNodeID) {
-            guard let normalizedRect = geometry.canvasRect(for: nodeID, in: capture, mode: geometryMode) else { continue }
+        let rootNodeID = previewRootNodeID ?? focusedNodeID
+        for nodeID in geometry.visibleNodeIDs(in: capture, rootNodeID: rootNodeID) {
+            guard let normalizedRect = geometry.canvasRect(
+                for: nodeID,
+                in: capture,
+                coordinateRootNodeID: rootNodeID,
+                mode: geometryMode
+            ) else { continue }
             let rect = displayCanvasRect(fromNormalizedRect: normalizedRect)
             let path = NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4)
             NSColor.systemGray.withAlphaComponent(0.16).setFill()
@@ -296,14 +383,69 @@ final class PreviewCanvasView: NSView {
 
     private func drawLayeredWireframeFallback(plan: PreviewLayeredRenderPlan?) {
         guard let plan else { return }
-        for overlay in plan.overlayQuads {
-            let path = bezierPath(for: overlay.quad)
+        for plane in plan.planes {
+            let path = bezierPath(for: plane.quad)
             NSColor.systemGray.withAlphaComponent(0.16).setFill()
             path.fill()
+            guard previewShowsLayerBorders else { continue }
             NSColor.systemGray.withAlphaComponent(0.45).setStroke()
             path.lineWidth = 1 / max(viewportState.scale, 0.001)
             path.stroke()
         }
+    }
+
+    private func drawLayeredPlanes(_ image: NSImage, plan: PreviewLayeredRenderPlan, in canvasRect: CGRect, context: CGContext) {
+        for plane in plan.planes {
+            guard let planeImage = makeLayeredPlaneImage(from: image, plane: plane, canvasRect: canvasRect) else {
+                continue
+            }
+            drawLayeredImage(
+                planeImage,
+                in: canvasRect,
+                projectedQuad: plane.quad,
+                context: context
+            )
+            guard previewShowsLayerBorders else { continue }
+            let planeBorder = bezierPath(for: plane.quad)
+            NSColor.systemBlue.withAlphaComponent(0.18).setStroke()
+            planeBorder.lineWidth = 1 / max(viewportState.scale, 0.001)
+            planeBorder.stroke()
+        }
+    }
+
+    private func makeLayeredPlaneImage(
+        from image: NSImage,
+        plane: PreviewLayeredRenderPlan.Plane,
+        canvasRect: CGRect
+    ) -> NSImage? {
+        guard plane.regions.isEmpty == false else { return nil }
+
+        let planeImage = NSImage(size: canvasRect.size)
+        planeImage.lockFocusFlipped(true)
+        NSColor.clear.setFill()
+        canvasRect.fill()
+
+        for region in plane.regions {
+            NSGraphicsContext.saveGraphicsState()
+            let clipPath = NSBezierPath(rect: region.rect)
+            for punchedOutRect in region.punchedOutRects {
+                clipPath.append(NSBezierPath(rect: punchedOutRect))
+            }
+            clipPath.windingRule = .evenOdd
+            clipPath.addClip()
+            image.draw(
+                in: canvasRect,
+                from: .zero,
+                operation: .sourceOver,
+                fraction: 1,
+                respectFlipped: false,
+                hints: nil
+            )
+            NSGraphicsContext.restoreGraphicsState()
+        }
+
+        planeImage.unlockFocus()
+        return planeImage
     }
 
     private func drawLayeredImage(_ image: NSImage, in canvasRect: CGRect, projectedQuad: [CGPoint], context: CGContext) {
@@ -351,20 +493,15 @@ final class PreviewCanvasView: NSView {
             let outline = bezierPath(for: overlay.quad)
             NSColor.white.withAlphaComponent(overlay.style.fillAlpha).setFill()
             outline.fill()
+            guard previewShowsLayerBorders else { continue }
             NSColor.systemBlue.withAlphaComponent(overlay.style.strokeAlpha).setStroke()
             outline.lineWidth = overlay.style.strokeWidth / max(viewportState.scale, 0.001)
             outline.stroke()
         }
     }
 
-    private func drawLayeredSelection(for rect: CGRect, depth: CGFloat) {
-        let path = bezierPath(
-            for: layerTransform.projectedQuad(
-                for: rect,
-                depth: depth,
-                canvasSize: canvasSize
-            )
-        )
+    private func drawLayeredSelection(for quad: [CGPoint]) {
+        let path = bezierPath(for: quad)
         NSColor.systemBlue.withAlphaComponent(0.14).setFill()
         path.fill()
         NSColor.systemBlue.setStroke()
@@ -392,25 +529,28 @@ final class PreviewCanvasView: NSView {
         needsDisplay = true
     }
 
+    func visibleCanvasRect() -> CGRect {
+        PreviewCanvasCoordinateSpace.normalizedRect(
+            fromDisplayRect: viewportState.visibleCanvasRect,
+            canvasSize: canvasSize
+        )
+    }
+
     private func resolvedSelectedRect() -> CGRect? {
         if let highlightedCanvasRect {
             return displayCanvasRect(fromNormalizedRect: highlightedCanvasRect)
         }
         guard let capture, let selectedNodeID else { return nil }
-        guard let normalizedRect = geometry.canvasRect(for: selectedNodeID, in: capture, mode: geometryMode) else {
+        let rootNodeID = previewRootNodeID
+        guard let normalizedRect = geometry.canvasRect(
+            for: selectedNodeID,
+            in: capture,
+            coordinateRootNodeID: rootNodeID,
+            mode: geometryMode
+        ) else {
             return nil
         }
         return displayCanvasRect(fromNormalizedRect: normalizedRect)
-    }
-
-    private func resolvedSelectedRelativeDepth() -> CGFloat {
-        guard let capture,
-              let selectedNodeID,
-              let node = capture.nodes[selectedNodeID] else {
-            return 0
-        }
-        let focusDepth = capture.nodes[focusedNodeID ?? ""]?.depth ?? 0
-        return PreviewLayerTransform.relativeDepth(nodeDepth: node.depth, focusDepth: focusDepth)
     }
 
     private func nodeID(atViewPoint point: CGPoint) -> String? {
@@ -420,6 +560,8 @@ final class PreviewCanvasView: NSView {
             capture: capture,
             viewportState: viewportState,
             focusedNodeID: focusedNodeID,
+            previewRootNodeID: previewRootNodeID,
+            expandedNodeIDs: expandedNodeIDs,
             displayMode: displayMode,
             geometryMode: geometryMode,
             layerTransform: layerTransform
@@ -428,6 +570,11 @@ final class PreviewCanvasView: NSView {
 
     private func applyViewportTransform(to context: CGContext) {
         context.concatenate(viewportState.canvasToViewTransform)
+    }
+
+    private func invalidateDisplay() {
+        guard suppressDisplayInvalidation == false else { return }
+        needsDisplay = true
     }
 
     private func bezierPath(for quad: [CGPoint]) -> NSBezierPath {
@@ -442,6 +589,9 @@ final class PreviewCanvasView: NSView {
     }
 
     private func displayCanvasRect(fromNormalizedRect rect: CGRect) -> CGRect {
-        PreviewCanvasCoordinateSpace.displayRect(fromNormalizedRect: rect, canvasSize: canvasSize)
+        PreviewCanvasCoordinateSpace.displayRect(
+            fromNormalizedRect: rect,
+            canvasSize: canvasSize
+        )
     }
 }

@@ -359,7 +359,6 @@ final class WorkspaceStore: NSObject {
 
         let geometry = ViewHierarchyGeometry()
         let previewRootNodeID = resolvedPreviewRootNodeID(capture: capture, detail: selectedNodeDetail)
-        let previewRootIsFlipped = resolvedPreviewRootIsFlipped(capture: capture, previewRootNodeID: previewRootNodeID)
         let geometryMode = PreviewPanelRenderDecisions.geometryMode(
             capture: capture,
             selectedNodeID: selectedNodeID,
@@ -383,7 +382,6 @@ final class WorkspaceStore: NSObject {
                 selectedNodeID: selectedNodeID,
                 focusedNodeID: focusedNodeID,
                 previewRootNodeID: previewRootNodeID,
-                previewRootIsFlipped: previewRootIsFlipped,
                 geometryMode: geometryMode == .directGlobalCanvasRect ? "directGlobalCanvasRect" : "legacyLocalFrames",
                 previewScale: Double(previewScale),
                 previewDisplayMode: previewDisplayMode,
@@ -732,14 +730,6 @@ final class WorkspaceStore: NSObject {
             currentNodeID = parentID
         }
         return currentNodeID
-    }
-
-    private func resolvedPreviewRootIsFlipped(
-        capture: ViewScopeCapturePayload,
-        previewRootNodeID: String?
-    ) -> Bool {
-        let rootNodeID = previewRootNodeID ?? capture.rootNodeIDs.first
-        return rootNodeID.flatMap { capture.nodes[$0]?.isFlipped } ?? false
     }
 
     private func resolvedPreviewBitmap(

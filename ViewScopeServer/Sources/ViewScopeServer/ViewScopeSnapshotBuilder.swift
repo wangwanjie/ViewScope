@@ -558,40 +558,7 @@ final class ViewScopeSnapshotBuilder {
 
     private func normalizedScreenshot(_ image: NSImage, for view: NSView) -> NSImage {
         _ = view
-        return verticallyFlippedImage(image)
-    }
-
-    private func verticallyFlippedImage(_ image: NSImage) -> NSImage {
-        let width = Int(round(image.size.width))
-        let height = Int(round(image.size.height))
-        guard width > 0,
-              height > 0,
-              let tiffRepresentation = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiffRepresentation),
-              let cgImage = bitmap.cgImage else {
-            return image
-        }
-
-        guard let context = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: width * 4,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else {
-            return image
-        }
-
-        context.translateBy(x: 0, y: CGFloat(height))
-        context.scaleBy(x: 1, y: -1)
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-
-        guard let flippedCGImage = context.makeImage() else {
-            return image
-        }
-        return NSImage(cgImage: flippedCGImage, size: image.size)
+        return image
     }
 
     private func normalizedCanvasRect(for view: NSView, in rootView: NSView) -> NSRect {

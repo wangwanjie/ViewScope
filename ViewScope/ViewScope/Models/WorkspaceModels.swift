@@ -80,7 +80,6 @@ struct WorkspaceRawPreviewExport: Codable, Equatable {
         var selectedNodeID: String?
         var focusedNodeID: String?
         var previewRootNodeID: String?
-        var previewRootIsFlipped: Bool
         var geometryMode: String
         var previewScale: Double
         var previewDisplayMode: WorkspacePreviewDisplayMode

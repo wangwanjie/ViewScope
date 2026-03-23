@@ -23,6 +23,15 @@ struct PreviewLayerTransformTests {
         #expect(rect == CGRect(x: 0, y: 0, width: 100, height: 80))
     }
 
+    @Test func previewCanvasDisplayRectAlsoFlipsDisplayOrientedRectsForFlippedRoots() async throws {
+        let rect = PreviewCanvasCoordinateSpace.displayRect(
+            fromNormalizedRect: CGRect(x: 10, y: 20, width: 30, height: 40),
+            canvasSize: CGSize(width: 100, height: 100)
+        )
+
+        #expect(rect == CGRect(x: 10, y: 40, width: 30, height: 40))
+    }
+
     @Test func relativeDepthPinsFocusedNodeToCanvasPlane() async throws {
         #expect(PreviewLayerTransform.relativeDepth(nodeDepth: 3, focusDepth: 3) == 0)
         #expect(PreviewLayerTransform.relativeDepth(nodeDepth: 5, focusDepth: 3) == 2)
@@ -46,7 +55,7 @@ struct PreviewLayerTransformTests {
         #expect(transform.pitch > 0)
     }
 
-    @Test func projectedQuadCreatesVisiblePerspectiveTilt() async throws {
+    @Test func projectedQuadCreatesVisibleParallelTilt() async throws {
         let transform = PreviewLayerTransform(yaw: 0.24, pitch: -0.18)
         let rect = CGRect(x: 292, y: 152, width: 760, height: 408)
 
@@ -59,6 +68,9 @@ struct PreviewLayerTransformTests {
         #expect(quad.count == 4)
         #expect(abs(quad[0].y - quad[1].y) > 1)
         #expect(abs(quad[0].x - quad[3].x) > 1)
+        let topWidth = hypot(quad[1].x - quad[0].x, quad[1].y - quad[0].y)
+        let bottomWidth = hypot(quad[2].x - quad[3].x, quad[2].y - quad[3].y)
+        #expect(abs(topWidth - bottomWidth) < 40)
     }
 
     @Test func layeredImagePerspectiveMappingUsesProjectedQuadOrderDirectly() async throws {
@@ -107,6 +119,7 @@ struct PreviewLayerTransformTests {
             capture: capture,
             viewportState: viewport,
             focusedNodeID: focusedNodeID,
+            expandedNodeIDs: [],
             displayMode: .layered,
             geometryMode: .directGlobalCanvasRect,
             layerTransform: transform
@@ -129,6 +142,7 @@ struct PreviewLayerTransformTests {
             canvasSize: viewport.canvasSize,
             selectedNodeID: nil,
             focusedNodeID: nil,
+            expandedNodeIDs: ["window-0-view-1"],
             geometryMode: .directGlobalCanvasRect,
             layerTransform: transform
         )
@@ -144,6 +158,7 @@ struct PreviewLayerTransformTests {
             capture: capture,
             viewportState: viewport,
             focusedNodeID: nil,
+            expandedNodeIDs: ["window-0-view-1"],
             displayMode: .layered,
             geometryMode: .directGlobalCanvasRect,
             layerTransform: transform
@@ -152,23 +167,26 @@ struct PreviewLayerTransformTests {
         #expect(resolved == "window-0-view-1-2")
     }
 
-    @Test func layeredHitTestingIgnoresFocusedSubtreeRoot() async throws {
+    @Test func layeredHitTestingPrefersExpandedFocusedSubviewOverFocusedRootPlane() async throws {
         let capture = SampleFixture.capture()
         let viewport = PreviewViewportState(
             canvasSize: CGSize(width: 1200, height: 640),
             viewportSize: CGSize(width: 900, height: 700)
         )
+        let focusedNodeID = "window-0-view-1"
+        let expandedNodeIDs: Set<String> = [focusedNodeID]
 
         let transform = PreviewLayerTransform(yaw: 0.18, pitch: 0.1)
         let plan = PreviewLayeredRenderPlan.make(
             capture: capture,
             canvasSize: viewport.canvasSize,
             selectedNodeID: nil,
-            focusedNodeID: "window-0-view-1-2",
+            focusedNodeID: focusedNodeID,
+            expandedNodeIDs: expandedNodeIDs,
             geometryMode: .directGlobalCanvasRect,
             layerTransform: transform
         )
-        let quad = try #require(plan.overlay(for: "window-0-view-0-0")?.quad)
+        let quad = try #require(plan.overlay(for: "window-0-view-1-2")?.quad)
         let canvasPoint = CGPoint(
             x: quad.map(\.x).reduce(0, +) / CGFloat(quad.count),
             y: quad.map(\.y).reduce(0, +) / CGFloat(quad.count)
@@ -179,13 +197,14 @@ struct PreviewLayerTransformTests {
             atViewPoint: viewPoint,
             capture: capture,
             viewportState: viewport,
-            focusedNodeID: "window-0-view-1-2",
+            focusedNodeID: focusedNodeID,
+            expandedNodeIDs: expandedNodeIDs,
             displayMode: .layered,
             geometryMode: .directGlobalCanvasRect,
             layerTransform: transform
         )
 
-        #expect(resolved == "window-0-view-0-0")
+        #expect(resolved == "window-0-view-1-2")
     }
 
     @Test func layeredModeDoesNotCreateFocusMaskCutout() async throws {
