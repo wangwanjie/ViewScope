@@ -39,7 +39,12 @@ enum ViewScopeRuntimeIvarReader {
 }
 
 @MainActor
-/// Builds hierarchy captures, detail payloads, and live object references for an inspected host.
+/// 抓取端总入口：负责把宿主 AppKit 视图树转换成 ViewScope 可传输的数据模型。
+///
+/// 预览相关的关键职责有三件：
+/// 1. 产出 capture：节点树、frame、bounds、isFlipped 等基础几何信息。
+/// 2. 产出 detail：截图、高亮 rect、属性面板内容。
+/// 3. 维持统一的“左上角原点”画布语义，给客户端 2D / 3D 共用。
 final class ViewScopeSnapshotBuilder {
     struct ReferenceContext {
         var nodeReferences: [String: ViewScopeInspectableReference]
@@ -55,6 +60,9 @@ final class ViewScopeSnapshotBuilder {
         self.interfaceLanguage = interfaceLanguage
     }
 
+    /// 抓取当前应用所有窗口，构造完整 capture。
+    ///
+    /// 这里写入到 `node.frame` 的值，优先就是客户端可直接消费的统一画布坐标。
     func makeCapture() -> (ViewScopeCapturePayload, ReferenceContext) {
         let start = Date()
         let captureID = UUID().uuidString
@@ -265,6 +273,7 @@ final class ViewScopeSnapshotBuilder {
         nodes: inout [String: ViewScopeHierarchyNode],
         references: inout [String: ViewScopeInspectableReference]
     ) -> [String] {
+        // 递归构建子树时，child.frame 会立即被归一成相对 rootView 的统一画布坐标。
         var childIDs: [String] = []
         let ivarTracesBySubview = directSubviewIvarTraces(in: view)
 
@@ -557,11 +566,16 @@ final class ViewScopeSnapshotBuilder {
     }
 
     private func normalizedScreenshot(_ image: NSImage, for view: NSView) -> NSImage {
+        // 当前观察到 `cacheDisplay` 产出的截图已经与统一画布坐标保持一致，
+        // 因此这里不再额外做垂直翻转，避免客户端再出现重复翻转。
         _ = view
         return image
     }
 
     private func normalizedCanvasRect(for view: NSView, in rootView: NSView) -> NSRect {
+        // 把 AppKit 的实际 view 坐标统一成“左上角原点”的画布坐标：
+        // - 如果截图根本身就是 flipped，`convert(_:to:)` 的结果可直接使用
+        // - 如果截图根不是 flipped，则在这里翻一次 y
         let rect = view.convert(view.bounds, to: rootView)
         guard rootView.isFlipped == false else {
             return rect

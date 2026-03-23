@@ -4,6 +4,11 @@ import QuartzCore
 import SnapKit
 import ViewScopeServer
 
+/// 决定当前预览图应该来自 capture bitmap 还是 detail screenshot。
+///
+/// 原则：
+/// - 优先使用与当前 preview root 匹配的 capture 级截图。
+/// - 如果 capture 没有对应 bitmap，再回退到 detail 里的截图。
 struct PreviewImageResolver {
     struct Resolution: Equatable {
         let cacheKey: String
@@ -43,6 +48,11 @@ struct PreviewImageResolver {
 }
 
 @MainActor
+/// 预览面板总控。
+///
+/// 它不直接实现几何或渲染，而是把 `WorkspaceStore` 当前状态编排给两套渲染器：
+/// - `PreviewCanvasView`：2D / 伪 3D
+/// - `PreviewLayeredSceneView`：真实 3D
 final class PreviewPanelController: NSViewController {
     private enum Layout {
         static let consoleHeight: CGFloat = 240
@@ -260,6 +270,8 @@ final class PreviewPanelController: NSViewController {
     }
 
     private func renderCurrentState() {
+        // 这里是预览链路真正的汇合点：
+        // store -> 解析 preview root -> 选图 -> 推断 geometry mode -> 算 selection rect -> 下发到 2D / 3D。
         let capture = store.capture
         let consoleAvailable = store.connectionState.supportsConsole
         let isEnteringLayeredFromFlat = store.previewDisplayMode == .layered && lastRenderedDisplayMode == .flat
@@ -323,6 +335,7 @@ final class PreviewPanelController: NSViewController {
                 previewExpandedNodeIDs: store.expandedNodeIDs
             )
             if isEnteringLayeredFromFlat {
+                // 进入 3D 时沿用 2D 当前可见区域，避免用户视角突然跳回全局中心。
                 layeredSceneView.enterLayeredMode(fromVisibleCanvasRect: entryVisibleCanvasRect)
                 pendingLayeredEntryVisibleCanvasRect = nil
             }
@@ -492,6 +505,8 @@ final class PreviewPanelController: NSViewController {
         capture: ViewScopeCapturePayload?,
         detail: ViewScopeNodeDetailPayload?
     ) -> String? {
+        // 无 focus 时优先使用 detail 告诉我们的 screenshot root；
+        // 否则从当前锚点节点一路向上回溯到真正的预览根。
         guard let capture else { return nil }
         if store.focusedNodeID == nil,
            let detail,
@@ -746,6 +761,7 @@ private final class PreviewLayerSettingsPopoverController: NSViewController {
 }
 
 struct PreviewPanelRenderDecisions {
+    /// 在 direct / legacy 两套几何模式之间自动选择更贴近 detail.highlightedRect 的那一套。
     static func geometryMode(
         capture: ViewScopeCapturePayload?,
         selectedNodeID: String?,

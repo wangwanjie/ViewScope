@@ -76,6 +76,10 @@ struct HostListItem: Identifiable, Equatable {
 }
 
 struct WorkspaceRawPreviewExport: Codable, Equatable {
+    /// 导出预览文件时顺带保存的“当前预览状态”。
+    ///
+    /// 这部分并不是抓取数据本身，而是为了让导入后仍能恢复当时的预览上下文：
+    /// 选中了谁、focus 在哪、当前是 2D 还是 3D、缩放多少、展开了哪些节点。
     struct PreviewContext: Codable, Equatable {
         var selectedNodeID: String?
         var focusedNodeID: String?
@@ -96,6 +100,8 @@ struct WorkspaceRawPreviewExport: Codable, Equatable {
     var previewContext: PreviewContext
 }
 
+/// 预览归档编解码器。
+/// 外层用 `NSKeyedArchiver` 打包文档对象，内层 payload 仍然是 plist，方便未来演进版本。
 enum WorkspaceArchiveCodec {
     static let typeIdentifier = "cn.vanjay.viewscope.capture"
     static let fileExtension = "viewscope"

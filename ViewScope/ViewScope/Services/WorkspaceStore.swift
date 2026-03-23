@@ -354,6 +354,9 @@ final class WorkspaceStore: NSObject {
         loadPreviewExport(export, sourceName: url.deletingPathExtension().lastPathComponent)
     }
 
+    /// 生成一个包含 capture + 当前预览上下文的可移植快照。
+    ///
+    /// 这样导入到另一台机器后，预览面板仍能尽量恢复当时的 2D/3D 状态。
     func makeRawPreviewExport() -> WorkspaceRawPreviewExport? {
         guard let capture else { return nil }
 
@@ -682,6 +685,7 @@ final class WorkspaceStore: NSObject {
     }
 
     private func loadPreviewExport(_ export: WorkspaceRawPreviewExport, sourceName: String?) {
+        // 导入归档等价于切换到一个新的只读“离线连接”。
         _ = beginNewConnectionGeneration()
         prepareForHostSwitch()
         captureInsight = .empty
@@ -717,6 +721,8 @@ final class WorkspaceStore: NSObject {
         capture: ViewScopeCapturePayload,
         detail: ViewScopeNodeDetailPayload?
     ) -> String? {
+        // 没有 focus 时优先使用 detail 指定的 screenshot root；
+        // 否则从当前锚点节点向上回溯到整棵预览树真正的根。
         if focusedNodeID == nil,
            let detail,
            detail.nodeID == selectedNodeID,

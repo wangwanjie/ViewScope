@@ -1,6 +1,10 @@
 import CoreGraphics
 import ViewScopeServer
 
+/// 2.5D 预览使用的透视变换模型。
+///
+/// 它不关心节点树，也不关心 AppKit / SceneKit。
+/// 输入永远是“统一画布坐标里的 rect + 深度”，输出是投影后的四边形。
 struct PreviewLayerTransform {
     static let defaultYaw: CGFloat = -0.22
     static let defaultPitch: CGFloat = 0.16
@@ -23,15 +27,18 @@ struct PreviewLayerTransform {
         self.depthSpacing = depthSpacing
     }
 
+    /// 2D layered 预览里的相对深度。
     static func relativeDepth(nodeDepth: Int, focusDepth: Int) -> CGFloat {
         CGFloat(max(0, nodeDepth - focusDepth))
     }
 
+    /// 由拖拽手势更新 yaw / pitch。
     mutating func drag(by delta: CGSize) {
         yaw = normalizedAngle(yaw + delta.width * 0.01)
         pitch = normalizedAngle(pitch + delta.height * 0.01)
     }
 
+    /// 把矩形投影成透视四边形，供 2D 伪 3D 预览使用。
     func projectedQuad(for rect: CGRect, depth: CGFloat, canvasSize: CGSize) -> [CGPoint] {
         let corners = [
             CGPoint(x: rect.minX, y: rect.minY),
@@ -67,6 +74,7 @@ struct PreviewLayerTransform {
             .translatedBy(x: -center.x, y: -center.y)
     }
 
+    /// layered hit-test 通过投影后的四边形判断鼠标是否命中某一层。
     func contains(_ point: CGPoint, in quad: [CGPoint]) -> Bool {
         guard quad.count >= 3 else { return false }
         let path = CGMutablePath()
@@ -119,6 +127,8 @@ struct PreviewLayerTransform {
     }
 }
 
+/// 命中测试路由器。
+/// flat 模式直接走几何树命中，layered 模式走投影后的 overlay 命中。
 struct PreviewHitTestResolver {
     private let geometry = ViewHierarchyGeometry()
 
@@ -135,6 +145,7 @@ struct PreviewHitTestResolver {
     ) -> String? {
         switch displayMode {
         case .flat:
+            // 2D 视口内部是 display 坐标，命中前需要翻回数据源的 top-left 坐标。
             guard let canvasPoint = viewportState.canvasPoint(forViewPoint: point) else {
                 return nil
             }
@@ -173,6 +184,8 @@ struct PreviewHitTestResolver {
     }
 }
 
+/// focus 遮罩目前只用于 2D。
+/// 3D 模式下，节点自身已经有选中/聚焦表现，不再额外开洞。
 struct PreviewFocusMaskResolver {
     func cutoutViewRect(
         displayMode: WorkspacePreviewDisplayMode,

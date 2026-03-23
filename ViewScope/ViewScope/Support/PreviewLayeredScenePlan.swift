@@ -1,6 +1,12 @@
 import CoreGraphics
 import ViewScopeServer
 
+/// 供 `PreviewLayeredSceneView` 使用的 3D scene 计划。
+///
+/// 和 `PreviewLayeredRenderPlan` 的核心区别：
+/// - 这里保留数据源的 top-left 画布 rect，直接用于 SceneKit 布局。
+/// - 这里会计算 Lookin 风格的 `zIndex`，决定真实前后遮挡。
+/// - 这里会提前算好 punch-out rect，供节点纹理裁切使用。
 struct PreviewLayeredScenePlan: Equatable {
     struct Plane: Equatable {
         let depth: Int
@@ -41,6 +47,9 @@ struct PreviewLayeredScenePlan: Equatable {
         items.first { $0.nodeID == nodeID }
     }
 
+    /// 生成 3D scene 的结构描述。
+    ///
+    /// `displayRect` 在 3D 里其实是“统一画布 rect”，名称沿用只是为了保持调用方兼容。
     static func make(
         capture: ViewScopeCapturePayload,
         canvasSize: CGSize,
@@ -98,6 +107,7 @@ struct PreviewLayeredScenePlan: Equatable {
             }
         }
 
+        // 先算 Lookin 风格 zIndex，再把前景层对后景层的遮挡转换成纹理 punch-out。
         let items = assignZIndexes(to: pendingItems)
         let punchedOutItems = addOverlapPunchOuts(to: items)
 
@@ -128,6 +138,8 @@ struct PreviewLayeredScenePlan: Equatable {
         for pendingItem in pendingItems {
             let zIndex: Int
             if pendingItem.displayingIndependently {
+                // 独立显示的节点会向前找所有已出现且有交叠的节点，
+                // zIndex 取这些节点的最大值 + 1，和 Lookin 的策略一致。
                 let overlappedZIndex = items
                     .filter { $0.displayRect.intersects(pendingItem.displayRect) }
                     .map(\.zIndex)
@@ -197,6 +209,8 @@ struct PreviewLayeredScenePlan: Equatable {
         capture: ViewScopeCapturePayload,
         expandedNodeIDs: Set<String>
     ) -> [VisibleNode] {
+        // 这里把“是否独立分层”和“节点是否存在于 scene 中”拆开：
+        // collapsed 节点依然保留 item，只是会继承父节点的 zIndex/平面语义。
         var result: [VisibleNode] = []
 
         func visit(

@@ -1,12 +1,25 @@
 import CoreGraphics
 import ViewScopeServer
 
+/// 描述抓取到的节点 frame 属于哪一种几何语义。
+///
+/// - `directGlobalCanvasRect`：服务端已经归一成相对截图根节点的全局画布坐标。
+/// - `legacyLocalFrames`：历史数据仍然是父子相对坐标，需要客户端递归换算并处理 flipped。
 enum PreviewCanvasGeometryMode {
     case directGlobalCanvasRect
     case legacyLocalFrames
 }
 
+/// 负责把节点树恢复成“可命中、可高亮、可绘制”的统一画布矩形。
+///
+/// 预览模块的几何链路都先经过这里：
+/// 服务端抓取 -> `ViewHierarchyGeometry` 还原 rect -> 2D / 3D 各自渲染。
 struct ViewHierarchyGeometry {
+    /// 在统一画布坐标中做命中测试。
+    ///
+    /// - `rootNodeID` 决定遍历哪棵子树。
+    /// - `coordinateRootNodeID` 决定传入点属于哪个局部坐标系；
+    ///   如果当前只预览某个子树，需要先把点平移回全局画布再命中。
     func deepestNodeID(
         at canvasPoint: CGPoint,
         in capture: ViewScopeCapturePayload,
@@ -29,6 +42,10 @@ struct ViewHierarchyGeometry {
         return nil
     }
 
+    /// 返回节点在统一画布坐标下的矩形。
+    ///
+    /// 如果指定了 `coordinateRootNodeID`，结果会减去该根节点的原点，
+    /// 让调用方拿到“相对当前 preview root”的局部画布坐标。
     func canvasRect(
         for nodeID: String,
         in capture: ViewScopeCapturePayload,
@@ -48,6 +65,9 @@ struct ViewHierarchyGeometry {
         return nil
     }
 
+    /// 返回可见节点的遍历顺序。
+    ///
+    /// 后续 layered render/scene plan 都依赖这个顺序建立 plane 与 overlay。
     func visibleNodeIDs(in capture: ViewScopeCapturePayload, rootNodeID: String? = nil) -> [String] {
         let rootNodeIDs = rootNodeID.map { [$0] } ?? capture.rootNodeIDs
         var orderedNodeIDs: [String] = []
@@ -149,6 +169,7 @@ struct ViewHierarchyGeometry {
         node.childIDs.forEach { appendVisibleNodeIDs($0, nodes: nodes, into: &result) }
     }
 
+    /// 把“相对 preview root 的点”平移回全局画布坐标。
     private func translatedCanvasPoint(
         _ point: CGPoint,
         in capture: ViewScopeCapturePayload,
@@ -162,6 +183,7 @@ struct ViewHierarchyGeometry {
         return CGPoint(x: point.x + rootRect.minX, y: point.y + rootRect.minY)
     }
 
+    /// 把全局画布 rect 转成“相对 preview root”的局部画布 rect。
     private func translatedRect(
         _ rect: CGRect,
         in capture: ViewScopeCapturePayload,
@@ -176,6 +198,7 @@ struct ViewHierarchyGeometry {
         return rect.offsetBy(dx: -rootRect.minX, dy: -rootRect.minY)
     }
 
+    /// 根据几何模式决定是直接信任服务端 frame，还是走旧的递归换算。
     private func resolvedRect(
         for nodeID: String,
         in nodes: [String: ViewScopeHierarchyNode],
@@ -198,6 +221,10 @@ struct ViewHierarchyGeometry {
         }
     }
 
+    /// 历史数据兼容路径。
+    ///
+    /// 这里是客户端少数仍然需要认真处理 `isFlipped` 的地方：
+    /// 如果父视图不是 flipped，子视图的 y 必须绕父 bounds 高度翻转一次。
     private func legacyGlobalRect(
         for node: ViewScopeHierarchyNode,
         parentOrigin: CGPoint,

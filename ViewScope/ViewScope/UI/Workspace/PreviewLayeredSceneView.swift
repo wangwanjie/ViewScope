@@ -2,6 +2,16 @@ import AppKit
 import SceneKit
 import ViewScopeServer
 
+/// 真实 3D 预览视图。
+///
+/// 和 `PreviewCanvasView.layered` 的区别：
+/// - `PreviewCanvasView.layered` 是在 2D 里模拟 3D 效果
+/// - 这里是真的创建 SceneKit 节点，并支持旋转、平移、缩放
+///
+/// 核心约定：
+/// - 节点位置直接使用统一的 top-left 画布坐标
+/// - 节点纹理从根截图按各自 rect 裁切
+/// - 节点前后关系由 `PreviewLayeredScenePlan` 的 zIndex 决定
 final class PreviewLayeredSceneView: SCNView {
     private struct StructuralState: Equatable {
         let captureID: String?
@@ -237,6 +247,7 @@ final class PreviewLayeredSceneView: SCNView {
     }
 
     func enterLayeredMode(fromVisibleCanvasRect visibleCanvasRect: CGRect?) {
+        // 从 flat 进入 3D 时，尽量让用户当前看到的区域落在舞台中心。
         if let visibleCanvasRect,
            visibleCanvasRect.width > 0.5,
            visibleCanvasRect.height > 0.5 {
@@ -264,6 +275,7 @@ final class PreviewLayeredSceneView: SCNView {
         previewShowsLayerBorders: Bool,
         previewExpandedNodeIDs: Set<String>
     ) {
+        // 先比较结构性变化，决定是整棵 scene 重建，还是只刷新选中态 / 相机。
         let needsSceneRefresh =
             capture?.captureID != self.capture?.captureID ||
             image?.size != self.image?.size ||
@@ -301,6 +313,7 @@ final class PreviewLayeredSceneView: SCNView {
     }
 
     private func commonInit() {
+        // SceneKit 只负责舞台和相机，真正的节点构造在 `rebuildScene` 里。
         let scene = SCNScene()
         self.scene = scene
         allowsCameraControl = false
@@ -393,6 +406,7 @@ final class PreviewLayeredSceneView: SCNView {
         updateCamera()
     }
 
+    /// 当 capture / 几何 / 展开状态等结构变化时，直接整棵重建 scene。
     private func rebuildScene(plan: PreviewLayeredScenePlan, rootImage: NSImage) {
         stageNode.childNodes.forEach { $0.removeFromParentNode() }
         displayNodes.removeAll(keepingCapacity: true)
@@ -409,6 +423,8 @@ final class PreviewLayeredSceneView: SCNView {
             : max(0.08, previewLayerSpacing * 0.005)
 
         for plane in plan.planes {
+            // plane marker 只表达“这一代内容位于哪个 z 平面”，
+            // 真实可见内容仍由 display node 承载。
             let planeNode = SCNNode()
             planeNode.name = "content-plane-\(plane.depth)"
             planeNode.position.z = (CGFloat(plane.depth) - centeredPlaneDepth) * zStep
@@ -572,6 +588,7 @@ final class PreviewLayeredSceneView: SCNView {
         )
 
         let center = sceneCenter(for: displayRect)
+        // overlay 永远放在目标节点前面一点，避免被节点自身深度挡住。
         let overlayZ = (displayNodes[selectedNodeID]?.zPosition ?? (displayNodes.values.map(\.zPosition).max() ?? 0)) +
             PreviewLayeredSceneConstants.selectionOverlayZOffset
         selectionOverlayNode.position = SCNVector3(Float(center.x), Float(center.y), Float(overlayZ))
@@ -678,6 +695,8 @@ private final class PreviewLayeredDisplayNode {
         showsBorder: Bool,
         selectableCategoryMask: Int
     ) {
+        // 一个 scene item 对应一个真正可见的 SceneKit 平面节点。
+        // 几何位置来自 scene plan，纹理则从根截图裁切。
         self.item = item
         node.name = "display-\(item.nodeID)"
         contentNode.name = item.nodeID
@@ -758,6 +777,9 @@ private enum PreviewLayeredSceneSnapshotFactory {
         rootImage: NSImage,
         canvasSize: CGSize
     ) -> NSImage {
+        // 这里是 3D 纹理裁切的关键边界：
+        // - `item.displayRect` 仍保持数据源 top-left 语义，供 scene 布局使用
+        // - `textureRect` 只在这里临时转成图像对应的 display 坐标，供像素裁切使用
         let targetSize = item.displayRect.size
         let textureRect = PreviewCanvasCoordinateSpace.displayRect(
             fromNormalizedRect: item.displayRect,
@@ -792,6 +814,8 @@ private enum PreviewLayeredSceneSnapshotFactory {
         let clipPath = CGMutablePath()
         clipPath.addRect(bounds)
         for punchedOutRect in item.punchedOutRects {
+            // punch-out 使用 item 自己的局部纹理坐标；
+            // 清掉后该区域的内容交给更前面的图层自己显示。
             let localRect = punchedOutRect
                 .offsetBy(dx: -item.displayRect.minX, dy: -item.displayRect.minY)
                 .intersection(bounds)

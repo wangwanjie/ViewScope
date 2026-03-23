@@ -1,6 +1,11 @@
 import CoreGraphics
 import ViewScopeServer
 
+/// 供 `PreviewCanvasView` 使用的 2D layered 渲染计划。
+///
+/// 这份计划不创建真实 SceneKit 节点，只回答两件事：
+/// 1. 哪些区域要落到哪一层平面上。
+/// 2. 哪些节点要绘制 overlay / selection overlay。
 struct PreviewLayeredRenderPlan {
     struct Overlay {
         struct Style {
@@ -32,6 +37,10 @@ struct PreviewLayeredRenderPlan {
     let planes: [Plane]
     let overlayQuads: [Overlay]
 
+    /// 从 capture 生成 2D layered 预览所需的平面和 overlay。
+    ///
+    /// 注意这里会把统一画布 rect 转成 `displayRect`，
+    /// 因为 2D 画布最终仍要喂给 AppKit / CoreImage。
     static func make(
         capture: ViewScopeCapturePayload,
         canvasSize: CGSize,
@@ -140,6 +149,8 @@ struct PreviewLayeredRenderPlan {
         overlayQuads.first { $0.nodeID == nodeID }
     }
 
+    /// 分层预览里的描边/填充策略。
+    /// 深层节点会稍微更明显一些，选中节点使用固定高亮样式。
     private static func style(
         for nodeID: String,
         selectedNodeID: String?,
@@ -166,6 +177,8 @@ struct PreviewLayeredRenderPlan {
         capture: ViewScopeCapturePayload,
         expandedNodeIDs: Set<String>
     ) -> [VisibleNode] {
+        // planeDepth 表示“当前节点属于第几代展开平面”，
+        // 它不是 SceneKit 的 zIndex，只用于 2D layered preview 切层。
         var result: [VisibleNode] = []
 
         func visit(nodeID: String, planeDepth: Int, expandsAutomatically: Bool) {

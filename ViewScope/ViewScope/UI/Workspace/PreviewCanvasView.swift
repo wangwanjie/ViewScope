@@ -2,6 +2,13 @@ import AppKit
 import CoreImage
 import ViewScopeServer
 
+/// 2D 预览画布。
+///
+/// 它承担两种模式：
+/// - `flat`：直接显示截图并叠加高亮。
+/// - `layered`：仍在 2D 画布里绘制，但把各层截图投影成透视四边形，模拟进入 3D 的效果。
+///
+/// 这个类型最重要的职责，是把“统一画布坐标”接到 AppKit 的视口系统上。
 final class PreviewCanvasView: NSView {
     private let geometry = ViewHierarchyGeometry()
     private let hitTestResolver = PreviewHitTestResolver()
@@ -132,9 +139,11 @@ final class PreviewCanvasView: NSView {
         }
 
         context.saveGState()
+        // 之后所有绘制都在统一 canvas 空间里进行，实际显示由 viewport transform 负责。
         applyViewportTransform(to: context)
 
         let canvasRect = CGRect(origin: .zero, size: canvasSize)
+        // layered 模式先把节点树折叠成“平面 + overlay”，再决定如何绘制。
         let layeredRenderPlan = capture.map {
             PreviewLayeredRenderPlan.make(
                 capture: $0,
@@ -197,6 +206,7 @@ final class PreviewCanvasView: NSView {
 
         context.restoreGState()
 
+        // focus 遮罩故意放在最后，这样能同时盖住截图、平面和高亮。
         if let capture, let focusedNodeID,
            let focusRect = geometry.canvasRect(
             for: focusedNodeID,
@@ -320,6 +330,7 @@ final class PreviewCanvasView: NSView {
         previewShowsLayerBorders: Bool,
         previewExpandedNodeIDs: Set<String>
     ) {
+        // 面板层批量下发状态，避免多个 didSet 触发多次无意义重绘。
         suppressDisplayInvalidation = true
         self.capture = capture
         self.image = image
@@ -395,6 +406,7 @@ final class PreviewCanvasView: NSView {
     }
 
     private func drawLayeredPlanes(_ image: NSImage, plan: PreviewLayeredRenderPlan, in canvasRect: CGRect, context: CGContext) {
+        // 每个 plane 都是“从根截图裁出若干区域，再整体投影成一张图”。
         for plane in plan.planes {
             guard let planeImage = makeLayeredPlaneImage(from: image, plane: plane, canvasRect: canvasRect) else {
                 continue
@@ -426,6 +438,8 @@ final class PreviewCanvasView: NSView {
         canvasRect.fill()
 
         for region in plane.regions {
+            // `region.rect` 是本层需要保留的区域；
+            // `punchedOutRects` 是需要从父层挖掉的洞，防止内容重复显示。
             NSGraphicsContext.saveGraphicsState()
             let clipPath = NSBezierPath(rect: region.rect)
             for punchedOutRect in region.punchedOutRects {
@@ -449,6 +463,7 @@ final class PreviewCanvasView: NSView {
     }
 
     private func drawLayeredImage(_ image: NSImage, in canvasRect: CGRect, projectedQuad: [CGPoint], context: CGContext) {
+        // CoreImage 的透视变换天然更适合 2D 伪 3D 预览。
         guard let imageData = image.tiffRepresentation,
               let baseImage = CIImage(data: imageData) else {
             return
@@ -530,6 +545,8 @@ final class PreviewCanvasView: NSView {
     }
 
     func visibleCanvasRect() -> CGRect {
+        // viewport 内部保存的是 displayRect 语义；
+        // 对外必须翻回统一画布语义，供 PreviewPanelController / 3D 入口复用。
         PreviewCanvasCoordinateSpace.normalizedRect(
             fromDisplayRect: viewportState.visibleCanvasRect,
             canvasSize: canvasSize
@@ -538,6 +555,7 @@ final class PreviewCanvasView: NSView {
 
     private func resolvedSelectedRect() -> CGRect? {
         if let highlightedCanvasRect {
+            // detail 接口返回的高亮框已经是统一画布坐标。
             return displayCanvasRect(fromNormalizedRect: highlightedCanvasRect)
         }
         guard let capture, let selectedNodeID else { return nil }
@@ -555,6 +573,7 @@ final class PreviewCanvasView: NSView {
 
     private func nodeID(atViewPoint point: CGPoint) -> String? {
         guard let capture else { return nil }
+        // 命中测试统一走 resolver，避免 flat/layered 两套坐标逻辑散落在 view 内部。
         return hitTestResolver.nodeID(
             atViewPoint: point,
             capture: capture,
