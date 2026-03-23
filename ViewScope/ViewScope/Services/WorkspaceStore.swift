@@ -55,6 +55,8 @@ final class WorkspaceStore: NSObject {
         self.sessionFactory = sessionFactory
         self.previewFixtureEnabled = settings.environment["VIEWSCOPE_PREVIEW_FIXTURE"] == "1"
         self.showsSystemWrapperViews = settings.showsSystemWrapperViews
+        self.previewLayerSpacing = CGFloat(settings.previewLayerSpacing)
+        self.previewShowsLayerBorders = settings.previewShowsLayerBorders
 
         let appSupportDirectory = try FileManager.default.url(
             for: .applicationSupportDirectory,
@@ -337,11 +339,59 @@ final class WorkspaceStore: NSObject {
     }
 
     func setPreviewLayerSpacing(_ value: CGFloat) {
-        previewLayerSpacing = min(max(value, 6), 60)
+        previewLayerSpacing = min(max(value, 10), 150)
+        settings.previewLayerSpacing = Double(previewLayerSpacing)
     }
 
     func setPreviewShowsLayerBorders(_ showsLayerBorders: Bool) {
         previewShowsLayerBorders = showsLayerBorders
+        settings.previewShowsLayerBorders = showsLayerBorders
+    }
+
+    func loadPreviewExport(from url: URL) throws {
+        let data = try Data(contentsOf: url)
+        let export = try WorkspaceArchiveCodec.decode(data)
+        loadPreviewExport(export, sourceName: url.deletingPathExtension().lastPathComponent)
+    }
+
+    func makeRawPreviewExport() -> WorkspaceRawPreviewExport? {
+        guard let capture else { return nil }
+
+        let geometry = ViewHierarchyGeometry()
+        let previewRootNodeID = resolvedPreviewRootNodeID(capture: capture, detail: selectedNodeDetail)
+        let previewRootIsFlipped = resolvedPreviewRootIsFlipped(capture: capture, previewRootNodeID: previewRootNodeID)
+        let geometryMode = PreviewPanelRenderDecisions.geometryMode(
+            capture: capture,
+            selectedNodeID: selectedNodeID,
+            detail: selectedNodeDetail,
+            previewRootNodeID: previewRootNodeID,
+            geometry: geometry
+        ) ?? .directGlobalCanvasRect
+        let previewBitmap = resolvedPreviewBitmap(
+            capture: capture,
+            previewRootNodeID: previewRootNodeID,
+            detail: selectedNodeDetail
+        )
+
+        return WorkspaceRawPreviewExport(
+            formatVersion: 1,
+            exportedAt: Date(),
+            capture: capture,
+            selectedNodeDetail: selectedNodeDetail,
+            previewBitmap: previewBitmap,
+            previewContext: .init(
+                selectedNodeID: selectedNodeID,
+                focusedNodeID: focusedNodeID,
+                previewRootNodeID: previewRootNodeID,
+                previewRootIsFlipped: previewRootIsFlipped,
+                geometryMode: geometryMode == .directGlobalCanvasRect ? "directGlobalCanvasRect" : "legacyLocalFrames",
+                previewScale: Double(previewScale),
+                previewDisplayMode: previewDisplayMode,
+                previewLayerSpacing: Double(previewLayerSpacing),
+                previewShowsLayerBorders: previewShowsLayerBorders,
+                expandedNodeIDs: expandedNodeIDs.sorted()
+            )
+        )
     }
 
     func isNodeExpanded(_ nodeID: String) -> Bool {
@@ -579,6 +629,20 @@ final class WorkspaceStore: NSObject {
                 self?.showsSystemWrapperViews = value
             }
             .store(in: &cancellables)
+
+        settings.$previewLayerSpacing
+            .receive(on: RunLoop.main)
+            .sink { [weak self] value in
+                self?.previewLayerSpacing = CGFloat(min(max(value, 10), 150))
+            }
+            .store(in: &cancellables)
+
+        settings.$previewShowsLayerBorders
+            .receive(on: RunLoop.main)
+            .sink { [weak self] value in
+                self?.previewShowsLayerBorders = value
+            }
+            .store(in: &cancellables)
     }
 
     private func reloadRecentHosts() {
@@ -619,12 +683,88 @@ final class WorkspaceStore: NSObject {
         errorMessage = nil
     }
 
+    private func loadPreviewExport(_ export: WorkspaceRawPreviewExport, sourceName: String?) {
+        _ = beginNewConnectionGeneration()
+        prepareForHostSwitch()
+        captureInsight = .empty
+
+        let selectedNodeID = export.previewContext.selectedNodeID.flatMap { export.capture.nodes[$0] != nil ? $0 : nil }
+        let focusedNodeID = export.previewContext.focusedNodeID.flatMap { export.capture.nodes[$0] != nil ? $0 : nil }
+        let expandedNodeIDs = Set(export.previewContext.expandedNodeIDs.filter {
+            export.capture.nodes[$0] != nil && export.capture.rootNodeIDs.contains($0) == false
+        })
+
+        capture = export.capture
+        selectedNodeDetail = export.selectedNodeDetail
+        self.selectedNodeID = selectedNodeID
+        self.focusedNodeID = focusedNodeID
+        previewScale = clampedPreviewScale(CGFloat(export.previewContext.previewScale))
+        previewDisplayMode = export.previewContext.previewDisplayMode
+        previewLayerSpacing = CGFloat(min(max(export.previewContext.previewLayerSpacing, 10), 150))
+        previewShowsLayerBorders = export.previewContext.previewShowsLayerBorders
+        self.expandedNodeIDs = expandedNodeIDs
+        connectionState = .imported(sourceName ?? export.capture.host.displayName)
+        errorMessage = nil
+    }
+
     private func clearVisibleWorkspaceState() {
         capture = nil
         selectedNodeID = nil
         selectedNodeDetail = nil
         focusedNodeID = nil
         expandedNodeIDs = []
+    }
+
+    private func resolvedPreviewRootNodeID(
+        capture: ViewScopeCapturePayload,
+        detail: ViewScopeNodeDetailPayload?
+    ) -> String? {
+        if focusedNodeID == nil,
+           let detail,
+           detail.nodeID == selectedNodeID,
+           let screenshotRootNodeID = detail.screenshotRootNodeID {
+            return screenshotRootNodeID
+        }
+        let anchorNodeID = focusedNodeID ?? selectedNodeID ?? capture.rootNodeIDs.first
+        guard var currentNodeID = anchorNodeID else { return capture.rootNodeIDs.first }
+
+        while let parentID = capture.nodes[currentNodeID]?.parentID {
+            currentNodeID = parentID
+        }
+        return currentNodeID
+    }
+
+    private func resolvedPreviewRootIsFlipped(
+        capture: ViewScopeCapturePayload,
+        previewRootNodeID: String?
+    ) -> Bool {
+        let rootNodeID = previewRootNodeID ?? capture.rootNodeIDs.first
+        return rootNodeID.flatMap { capture.nodes[$0]?.isFlipped } ?? false
+    }
+
+    private func resolvedPreviewBitmap(
+        capture: ViewScopeCapturePayload,
+        previewRootNodeID: String?,
+        detail: ViewScopeNodeDetailPayload?
+    ) -> ViewScopePreviewBitmap? {
+        if let previewRootNodeID,
+           let bitmap = capture.previewBitmaps.first(where: { $0.rootNodeID == previewRootNodeID }) {
+            return bitmap
+        }
+
+        guard let detail,
+              let pngBase64 = detail.screenshotPNGBase64,
+              pngBase64.isEmpty == false else {
+            return nil
+        }
+
+        let rootNodeID = previewRootNodeID ?? detail.screenshotRootNodeID ?? detail.nodeID
+        return ViewScopePreviewBitmap(
+            rootNodeID: rootNodeID,
+            pngBase64: pngBase64,
+            size: detail.screenshotSize,
+            capturedAt: capture.capturedAt
+        )
     }
 
     private func normalizeExpandedNodes() {

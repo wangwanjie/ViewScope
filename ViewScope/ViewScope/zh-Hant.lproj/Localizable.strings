@@ -22,7 +22,10 @@
 "badge.idle" = "閒置";
 "badge.link" = "連線";
 "badge.live" = "在線";
+"badge.loaded" = "檔案";
 "badge.error" = "錯誤";
+"archive.error.unsupported_file" = "該檔案不是有效的 ViewScope 擷取檔。";
+"archive.error.corrupted_file" = "該 ViewScope 擷取檔已損壞，或格式暫不受支援。";
 "detail.session_summary" = "工作階段摘要";
 "detail.canvas_preview" = "畫布預覽";
 "detail.field.host" = "宿主";
@@ -74,6 +77,8 @@
 "preview.action.zoom_in" = "放大";
 "preview.action.display_flat" = "平面預覽";
 "preview.action.display_layered" = "分層預覽";
+"preview.action.show_console" = "展開控制台";
+"preview.action.hide_console" = "收起控制台";
 "preview.action.layer_settings" = "3D 圖層設定";
 "preview.setting.layer_spacing" = "圖層間距";
 "preview.setting.layer_borders" = "顯示圖層邊框";
@@ -81,6 +86,7 @@
 "preview.action.clear_focus" = "清除聚焦";
 "preview.action.toggle_visibility" = "切換顯示狀態";
 "preview.action.highlight_selection" = "在宿主中高亮選取視圖";
+"menu.file" = "檔案";
 "menu.about" = "關於 ViewScope";
 "menu.preferences" = "偏好設定";
 "menu.check_updates" = "檢查更新";
@@ -89,8 +95,10 @@
 "menu.show_all" = "顯示全部";
 "menu.quit_app" = "結束 ViewScope";
 "menu.view" = "顯示";
+"menu.open_capture_file" = "打開擷取檔…";
 "menu.show_main_window" = "顯示主視窗";
 "menu.refresh_capture" = "重新整理擷取";
+"menu.export_capture_file" = "匯出擷取檔…";
 "menu.window" = "視窗";
 "menu.close_window" = "關閉視窗";
 "menu.minimize" = "最小化";
@@ -129,6 +137,7 @@
 "status.check_updates" = "檢查更新";
 "status.quit" = "結束";
 "status.waiting_local_hosts" = "正在等待本機 Debug 宿主";
+"status.loaded_capture_file" = "已載入擷取檔：%1$@";
 "status.hosts_available.one" = "%d 個宿主可用";
 "status.hosts_available.other" = "%d 個宿主可用";
 "status.connecting" = "正在連線到 %@...";

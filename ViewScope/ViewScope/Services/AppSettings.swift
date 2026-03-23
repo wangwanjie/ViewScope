@@ -51,6 +51,12 @@ final class AppSettings: ObservableObject {
     @Published var showsSystemWrapperViews: Bool {
         didSet { defaults.set(showsSystemWrapperViews, forKey: Keys.showsSystemWrapperViews) }
     }
+    @Published var previewLayerSpacing: Double {
+        didSet { defaults.set(previewLayerSpacing, forKey: Keys.previewLayerSpacing) }
+    }
+    @Published var previewShowsLayerBorders: Bool {
+        didSet { defaults.set(previewShowsLayerBorders, forKey: Keys.previewShowsLayerBorders) }
+    }
 
     let environment: [String: String]
     private let defaults: UserDefaults
@@ -65,6 +71,8 @@ final class AppSettings: ObservableObject {
         self.showsSessionSidebar = defaults.object(forKey: Keys.showsSessionSidebar) as? Bool ?? true
         self.showsInspector = defaults.object(forKey: Keys.showsInspector) as? Bool ?? true
         self.showsSystemWrapperViews = defaults.object(forKey: Keys.showsSystemWrapperViews) as? Bool ?? false
+        self.previewLayerSpacing = defaults.object(forKey: Keys.previewLayerSpacing) as? Double ?? 22
+        self.previewShowsLayerBorders = defaults.object(forKey: Keys.previewShowsLayerBorders) as? Bool ?? true
         if let rawValue = defaults.string(forKey: Keys.updateCheckStrategy),
            let strategy = UpdateCheckStrategy(rawValue: rawValue) {
             self.updateCheckStrategy = strategy
@@ -83,6 +91,8 @@ final class AppSettings: ObservableObject {
         static let showsInspector = "ViewScope.showsInspector"
         static let updateCheckStrategy = "ViewScope.updateCheckStrategy"
         static let showsSystemWrapperViews = "ViewScope.showsSystemWrapperViews"
+        static let previewLayerSpacing = "ViewScope.previewLayerSpacing"
+        static let previewShowsLayerBorders = "ViewScope.previewShowsLayerBorders"
     }
 
     private static func resolveLanguage(defaults: UserDefaults, environment: [String: String]) -> AppLanguage {

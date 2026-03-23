@@ -8,6 +8,21 @@
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
     <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>ViewScope Capture</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>cn.vanjay.viewscope.capture</string>
+            </array>
+        </dict>
+    </array>
     <key>CFBundleName</key>
     <string>$(PRODUCT_NAME)</string>
     <key>CFBundlePackageType</key>
@@ -22,6 +37,30 @@
     <string>Copyright © 2026 Wan Jie Wang. All rights reserved.</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+            </array>
+            <key>UTTypeDescription</key>
+            <string>ViewScope Capture</string>
+            <key>UTTypeIdentifier</key>
+            <string>cn.vanjay.viewscope.capture</string>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>viewscope</string>
+                </array>
+                <key>public.mime-type</key>
+                <array>
+                    <string>application/x-viewscope</string>
+                </array>
+            </dict>
+        </dict>
+    </array>
     <key>ViewScopeGitHubLatestReleaseAPIURL</key>
     <string>https://api.github.com/repos/wangwanjie/ViewScope/releases/latest</string>
     <key>ViewScopeGitHubURL</key>

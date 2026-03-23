@@ -113,6 +113,8 @@ final class StatusItemController: NSObject {
             return L10n.connecting(name)
         case .connected(let host):
             return L10n.connected(host.displayName)
+        case .imported(let name):
+            return L10n.loadedCaptureFile(name)
         case .failed(let message):
             return message
         }

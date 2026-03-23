@@ -128,7 +128,7 @@ final class WorkspaceToolbarViewController: NSViewController {
         let activeHost = store.connectionState.activeHost
 
         if liveHosts.isEmpty {
-            let placeholder = activeHost?.displayName ?? L10n.noHostsOnlineTitle
+            let placeholder = activeHost?.displayName ?? store.connectionState.importedCaptureName ?? L10n.noHostsOnlineTitle
             hostPopUpButton.addItem(withTitle: placeholder)
             hostPopUpButton.lastItem?.isEnabled = false
             hostPopUpButton.isEnabled = false
@@ -172,6 +172,10 @@ final class WorkspaceToolbarViewController: NSViewController {
             badgeText = L10n.liveBadge
             textColor = NSColor(calibratedRed: 0.06, green: 0.48, blue: 0.32, alpha: 1)
             backgroundColor = NSColor(calibratedRed: 0.88, green: 0.96, blue: 0.91, alpha: 1)
+        case .imported:
+            badgeText = L10n.loadedBadge
+            textColor = NSColor(calibratedRed: 0.27, green: 0.25, blue: 0.53, alpha: 1)
+            backgroundColor = NSColor(calibratedRed: 0.92, green: 0.91, blue: 0.98, alpha: 1)
         case .failed:
             badgeText = L10n.errorBadge
             textColor = NSColor(calibratedRed: 0.66, green: 0.19, blue: 0.19, alpha: 1)

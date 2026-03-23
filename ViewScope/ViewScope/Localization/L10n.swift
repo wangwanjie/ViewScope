@@ -25,6 +25,7 @@ enum L10n {
     static var idleBadge: String { tr("badge.idle") }
     static var linkingBadge: String { tr("badge.link") }
     static var liveBadge: String { tr("badge.live") }
+    static var loadedBadge: String { tr("badge.loaded") }
     static var errorBadge: String { tr("badge.error") }
     static var sessionSummary: String { tr("detail.session_summary") }
     static var canvasPreview: String { tr("detail.canvas_preview") }
@@ -88,6 +89,8 @@ enum L10n {
     static var previewZoomIn: String { tr("preview.action.zoom_in") }
     static var previewDisplayFlat: String { tr("preview.action.display_flat") }
     static var previewDisplayLayered: String { tr("preview.action.display_layered") }
+    static var previewShowConsole: String { tr("preview.action.show_console") }
+    static var previewHideConsole: String { tr("preview.action.hide_console") }
     static var previewLayerSettings: String { tr("preview.action.layer_settings") }
     static var previewLayerSpacing: String { tr("preview.setting.layer_spacing") }
     static var previewLayerBorders: String { tr("preview.setting.layer_borders") }
@@ -96,6 +99,10 @@ enum L10n {
     static var previewToggleVisibility: String { tr("preview.action.toggle_visibility") }
     static var previewHighlightSelection: String { tr("preview.action.highlight_selection") }
 
+    static var archiveUnsupportedFile: String { tr("archive.error.unsupported_file") }
+    static var archiveCorruptedFile: String { tr("archive.error.corrupted_file") }
+
+    static var menuFile: String { tr("menu.file") }
     static var menuAbout: String { tr("menu.about") }
     static var menuPreferences: String { tr("menu.preferences") }
     static var menuCheckForUpdates: String { tr("menu.check_updates") }
@@ -104,8 +111,10 @@ enum L10n {
     static var menuShowAll: String { tr("menu.show_all") }
     static var menuQuitApp: String { tr("menu.quit_app") }
     static var menuView: String { tr("menu.view") }
+    static var menuOpenCaptureFile: String { tr("menu.open_capture_file") }
     static var menuShowMainWindow: String { tr("menu.show_main_window") }
     static var menuRefreshCapture: String { tr("menu.refresh_capture") }
+    static var menuExportCaptureFile: String { tr("menu.export_capture_file") }
     static var menuWindow: String { tr("menu.window") }
     static var menuCloseWindow: String { tr("menu.close_window") }
     static var menuMinimize: String { tr("menu.minimize") }
@@ -174,6 +183,7 @@ enum L10n {
 
     static func connecting(_ name: String) -> String { tr("status.connecting", name) }
     static func connected(_ name: String) -> String { tr("status.connected", name) }
+    static func loadedCaptureFile(_ name: String) -> String { tr("status.loaded_capture_file", name) }
     static func hostsAvailable(_ count: Int) -> String {
         tr(count == 1 ? "status.hosts_available.one" : "status.hosts_available.other", count)
     }

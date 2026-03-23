@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import UniformTypeIdentifiers
 import ViewScopeServer
 
 @MainActor
@@ -9,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var preferencesWindowController: PreferencesWindowController?
     private var statusItemController: StatusItemController?
     private var hasPresentedInitialWindow = false
+    private var pendingOpenFileURLs: [URL] = []
     private var cancellables = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -36,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store.updateManager.scheduleBackgroundUpdateCheck()
             DispatchQueue.main.async { [weak self] in
                 self?.presentInitialMainWindowIfNeeded()
+                self?.consumePendingOpenFileURLsIfNeeded()
             }
             runAutomationIfNeeded()
         } catch {
@@ -64,6 +67,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard urls.isEmpty == false else { return }
+        if store == nil {
+            pendingOpenFileURLs.append(contentsOf: urls)
+            return
+        }
+        openCaptureFiles(urls)
+    }
+
+    func application(_ sender: NSApplication, openFiles filenames: [String]) {
+        application(sender, open: filenames.map { URL(fileURLWithPath: $0) })
+    }
+
     func applicationShouldRestoreApplicationState(_ app: NSApplication) -> Bool {
         false
     }
@@ -81,6 +97,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func refreshCapture(_ sender: Any?) {
         guard let store else { return }
         Task { await store.refreshCapture(forceReloadSelectionDetail: true, clearingVisibleState: true) }
+    }
+
+    @objc private func openCaptureFile(_ sender: Any?) {
+        let openPanel = NSOpenPanel()
+        openPanel.canChooseFiles = true
+        openPanel.canChooseDirectories = false
+        openPanel.allowsMultipleSelection = true
+        openPanel.allowedContentTypes = [.viewScopeCapture]
+
+        guard openPanel.runModal() == .OK else { return }
+        openCaptureFiles(openPanel.urls)
+    }
+
+    @objc private func exportCaptureFile(_ sender: Any?) {
+        guard let store,
+              let document = store.makeRawPreviewExport() else {
+            NSSound.beep()
+            return
+        }
+
+        let savePanel = NSSavePanel()
+        savePanel.canCreateDirectories = true
+        savePanel.nameFieldStringValue = "ViewScopeCapture-\(document.capture.captureID).\(WorkspaceArchiveCodec.fileExtension)"
+        savePanel.allowedContentTypes = [.viewScopeCapture]
+        savePanel.isExtensionHidden = false
+
+        guard savePanel.runModal() == .OK,
+              let url = savePanel.url else {
+            return
+        }
+
+        do {
+            let data = try WorkspaceArchiveCodec.encode(document)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            presentErrorAlert(error)
+        }
     }
 
     @objc private func openPreferencesWindow(_ sender: Any?) {
@@ -115,6 +168,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appMenu.addItem(NSMenuItem(title: L10n.menuQuitApp, action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         appItem.submenu = appMenu
         mainMenu.addItem(appItem)
+
+        let fileItem = NSMenuItem()
+        let fileMenu = NSMenu(title: L10n.menuFile)
+        let openItem = NSMenuItem(title: L10n.menuOpenCaptureFile, action: #selector(openCaptureFile(_:)), keyEquivalent: "o")
+        openItem.target = self
+        fileMenu.addItem(openItem)
+        let exportItem = NSMenuItem(title: L10n.menuExportCaptureFile, action: #selector(exportCaptureFile(_:)), keyEquivalent: "e")
+        exportItem.target = self
+        exportItem.keyEquivalentModifierMask = [.command, .option]
+        fileMenu.addItem(exportItem)
+        fileItem.title = L10n.menuFile
+        fileItem.submenu = fileMenu
+        mainMenu.addItem(fileItem)
 
         let viewItem = NSMenuItem()
         let viewMenu = NSMenu(title: L10n.menuView)
@@ -166,10 +232,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func presentFatalError(_ error: Error) {
         NSApp.setActivationPolicy(.regular)
         activateAppBringingAllWindowsForward()
-        let alert = NSAlert(error: error)
-        alert.messageText = L10n.fatalLaunchTitle
-        alert.informativeText = error.localizedDescription
-        alert.runModal()
+        presentErrorAlert(error, messageText: L10n.fatalLaunchTitle)
         NSApp.terminate(nil)
     }
 
@@ -189,6 +252,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func activateAppBringingAllWindowsForward() {
         NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func consumePendingOpenFileURLsIfNeeded() {
+        guard pendingOpenFileURLs.isEmpty == false else { return }
+        let urls = pendingOpenFileURLs
+        pendingOpenFileURLs.removeAll()
+        openCaptureFiles(urls)
+    }
+
+    private func openCaptureFiles(_ urls: [URL]) {
+        guard let store else { return }
+
+        for url in urls {
+            do {
+                try store.loadPreviewExport(from: url)
+                openMainWindow(nil)
+            } catch {
+                presentErrorAlert(error)
+            }
+        }
+    }
+
+    private func presentErrorAlert(_ error: Error, messageText: String = L10n.fatalLaunchTitle) {
+        let alert = NSAlert(error: error)
+        alert.messageText = messageText
+        alert.informativeText = error.localizedDescription
+        alert.runModal()
     }
 
     private func runAutomationIfNeeded() {
@@ -227,4 +317,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
+}
+
+private extension JSONEncoder {
+    static var viewScopeDebug: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }
+}
+
+private extension UTType {
+    static let viewScopeCapture = UTType(exportedAs: WorkspaceArchiveCodec.typeIdentifier, conformingTo: .data)
 }
