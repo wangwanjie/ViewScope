@@ -139,12 +139,14 @@ The protocol must also expand in this round:
 - extend `ViewScopeCapturePayload` with capture-scope preview bitmap assets,
 - add console invocation request/response payloads and remote-object references,
 - make console object handles explicitly session-scoped and capture-scoped.
+- add `captureID` directly to `ViewScopeCapturePayload` as the canonical reference-context identifier for that capture response.
 
 ### 1.1 Preview asset contract
 
 The layered preview must stop depending on `ViewScopeNodeDetailPayload.screenshotPNGBase64` as its primary image source.
 
 - `ViewScopeCapturePayload` gains one preview bitmap per window root, keyed by the window root node ID.
+- `ViewScopeCapturePayload` also carries `captureID`, and every preview bitmap entry belongs to that exact capture.
 - Each preview bitmap represents the full `window.contentView` image in the same normalized canvas coordinate space already used by hierarchy node `frame` values.
 - Each preview bitmap payload carries:
   - `rootNodeID`,
@@ -156,6 +158,11 @@ The layered preview must stop depending on `ViewScopeNodeDetailPayload.screensho
 - When a focused subtree is active, the client derives the focused crop and layered masks from that window-root bitmap using hierarchy geometry already present in `ViewScopeCapturePayload`.
 - Toggling wrapper filtering only changes visible nodes; it does not require a second preview-bitmap format.
 - `ViewScopeNodeDetailPayload.screenshotPNGBase64` may remain temporarily for inspector compatibility, but layered-preview planning should treat capture-scope preview bitmaps as the long-term source of truth.
+- Bitmap degradation contract:
+  - a missing bitmap for one window root does not fail the whole capture response,
+  - the server omits only the missing root entry,
+  - if the currently rendered root lacks a capture-scope bitmap and a compatible node-detail screenshot is already available for that same root, the client may use that as a temporary flat-preview fallback only,
+  - otherwise the client falls back to wireframe/outline rendering for that root and disables layered-content rendering until a later refresh provides the bitmap.
 
 This contract removes the current dependence on “selected node must already have detail” and gives the planner a stable no-selection path.
 
@@ -184,7 +191,7 @@ The console feature requires new bridge messages and reference models in protoco
   - `submittedExpression`,
   - `target`,
   - `resultDescription`,
-  - optional `returnedObject`,
+  - optional `returnedObject` as a full `ViewScopeConsoleTargetDescriptor`,
   - optional `errorMessage`.
 - Add message kinds:
   - `consoleInvokeRequest`,
@@ -193,6 +200,7 @@ The console feature requires new bridge messages and reference models in protoco
 Handle lifetime rules:
 
 - every `captureResponse` carries a new `captureID` that identifies the active reference context,
+- `captureID` lives on `ViewScopeCapturePayload.captureID`,
 - any console target or returned object minted under an older `captureID` expires after the next successful capture refresh,
 - all handles expire immediately on disconnect,
 - if the client sends a stale handle, the host returns a console error instead of crashing or silently succeeding.
@@ -305,7 +313,7 @@ The first implementation round follows Lookin’s concrete helper-console model 
   - reuse the existing client/server bridge where possible to ask the inspected host to invoke the submitted text on the selected target object,
   - each submission appends a submit row containing target identity plus the submitted text,
   - each successful return appends a return row containing the textual description returned by the host,
-  - if the host also returns an object reference, that object is stored in recent-target history and can be selected as a later console target.
+  - if the host also returns an object reference, that object is returned as a `ViewScopeConsoleTargetDescriptor`, stored in recent-target history, and can be selected as a later console target without extra client-side label synthesis.
 - Failure handling:
   - empty input is rejected locally,
   - unsupported syntax is rejected locally with guidance,
@@ -328,6 +336,14 @@ The console target must follow one deterministic precedence model.
   - if the current target handle belongs to an older `captureID`, it becomes invalid,
   - if auto-sync is `on`, the client retargets to the latest selected node’s preferred target when available,
   - otherwise the current target is cleared and the input becomes disabled until the user chooses a valid target.
+- While selected-node detail is loading:
+  - if auto-sync is `on`, keep the previous valid target temporarily but mark the console as loading and disable submission,
+  - when the new detail arrives, replace the target using the normal auto-sync rules,
+  - if the new detail has no console targets, clear the target and keep submission disabled.
+- If selected-node detail is unavailable or refresh fails:
+  - auto-sync `on`: keep the previous target only if its `captureID` still matches the latest capture; otherwise clear it,
+  - auto-sync `off`: keep the manual target only if its handle remains valid for the latest capture,
+  - in both cases, disable submission until a valid target is present again.
 - If filtering or selection normalization removes the previously selected node:
   - auto-sync `on`: retarget to the normalized selection if it exists,
   - auto-sync `off`: retain the current target only if its handle is still valid for the latest `captureID`; otherwise clear it.
