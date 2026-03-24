@@ -5,6 +5,12 @@ import ViewScopeServer
 @Suite(.serialized)
 @MainActor
 struct InspectorPanelModelBuilderTests {
+    @Test func inspectorExtractedTypesAreVisibleToModelCoverage() {
+        _ = InspectorPropertyCommitCoordinator.self
+        _ = InspectorSectionCardView.self
+        _ = InspectorEditableNumberRowView.self
+    }
+
     @Test func builderShowsEditableRowsForCurrentWhitelistedProperties() async throws {
         let capture = SampleFixture.capture()
         let node = try #require(capture.nodes["window-0-view-1-2"])
