@@ -721,21 +721,12 @@ final class WorkspaceStore: NSObject {
         capture: ViewScopeCapturePayload,
         detail: ViewScopeNodeDetailPayload?
     ) -> String? {
-        // 没有 focus 时优先使用 detail 指定的 screenshot root；
-        // 否则从当前锚点节点向上回溯到整棵预览树真正的根。
-        if focusedNodeID == nil,
-           let detail,
-           detail.nodeID == selectedNodeID,
-           let screenshotRootNodeID = detail.screenshotRootNodeID {
-            return screenshotRootNodeID
-        }
         let anchorNodeID = focusedNodeID ?? selectedNodeID ?? capture.rootNodeIDs.first
-        guard var currentNodeID = anchorNodeID else { return capture.rootNodeIDs.first }
-
-        while let parentID = capture.nodes[currentNodeID]?.parentID {
-            currentNodeID = parentID
-        }
-        return currentNodeID
+        _ = detail
+        return PreviewPanelRenderDecisions.previewRootNodeID(
+            capture: capture,
+            anchorNodeID: anchorNodeID
+        )
     }
 
     private func resolvedPreviewBitmap(

@@ -388,7 +388,7 @@ final class ViewScopeServerTests: XCTestCase {
     }
 
     @MainActor
-    func testDetailScreenshotForSplitSidebarUsesOwningPaneCanvas() throws {
+    func testDetailScreenshotForSplitSidebarUsesWindowCanvas() throws {
         final class SidebarViewController: NSViewController {
             let sidebarRoot = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 384))
 
@@ -446,28 +446,32 @@ final class ViewScopeServerTests: XCTestCase {
             guard case .view(let capturedView) = reference else { return false }
             return capturedView === sidebarController.sidebarRoot
         })?.key)
+        let contentRootNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
+            guard case .view(let capturedView) = reference else { return false }
+            return capturedView === window.contentView
+        })?.key)
         let detail = try XCTUnwrap(builder.makeDetail(for: sidebarNodeID, in: context))
         let screenshot = try XCTUnwrap(decodedImage(fromBase64PNG: detail.screenshotPNGBase64))
-        let pixel = try XCTUnwrap(
-            rgbaPixel(
-                in: screenshot,
-                atDisplayPoint: CGPoint(
-                    x: sidebarController.sidebarRoot.bounds.midX,
-                    y: sidebarController.sidebarRoot.bounds.midY
-                )
-            )
+        let contentView = try XCTUnwrap(window.contentView)
+        let sidebarRectInContent = sidebarController.sidebarRoot.convert(sidebarController.sidebarRoot.bounds, to: contentView)
+        let expectedHighlightedRect = CGRect(
+            x: sidebarRectInContent.minX,
+            y: contentView.isFlipped ? sidebarRectInContent.minY : contentView.bounds.height - sidebarRectInContent.maxY,
+            width: sidebarRectInContent.width,
+            height: sidebarRectInContent.height
         )
 
-        XCTAssertEqual(detail.screenshotRootNodeID, sidebarNodeID)
-        XCTAssertEqual(screenshot.size.width, sidebarController.sidebarRoot.bounds.width)
-        XCTAssertEqual(screenshot.size.height, sidebarController.sidebarRoot.bounds.height)
-        XCTAssertGreaterThan(pixel.red, 0.7)
-        XCTAssertLessThan(pixel.green, 0.45)
-        XCTAssertLessThan(pixel.blue, 0.45)
+        XCTAssertEqual(detail.screenshotRootNodeID, contentRootNodeID)
+        XCTAssertEqual(screenshot.size.width, contentView.bounds.width)
+        XCTAssertEqual(screenshot.size.height, contentView.bounds.height)
+        XCTAssertEqual(detail.highlightedRect.x, expectedHighlightedRect.minX)
+        XCTAssertEqual(detail.highlightedRect.y, expectedHighlightedRect.minY)
+        XCTAssertEqual(detail.highlightedRect.width, expectedHighlightedRect.width)
+        XCTAssertEqual(detail.highlightedRect.height, expectedHighlightedRect.height)
     }
 
     @MainActor
-    func testDetailScreenshotForSplitSubviewUsesOwningPaneCanvas() throws {
+    func testDetailScreenshotForSplitSubviewUsesWindowCanvas() throws {
         final class SidebarViewController: NSViewController {
             let sidebarRoot = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 384))
 
@@ -520,9 +524,9 @@ final class ViewScopeServerTests: XCTestCase {
 
         let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
         let (_, context) = builder.makeCapture()
-        let detailRootNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
+        let contentRootNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
             guard case .view(let capturedView) = reference else { return false }
-            return capturedView === detailController.detailRoot
+            return capturedView === window.contentView
         })?.key)
         let detailSubviewNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
             guard case .view(let capturedView) = reference else { return false }
@@ -530,12 +534,22 @@ final class ViewScopeServerTests: XCTestCase {
         })?.key)
         let detail = try XCTUnwrap(builder.makeDetail(for: detailSubviewNodeID, in: context))
         let screenshot = try XCTUnwrap(decodedImage(fromBase64PNG: detail.screenshotPNGBase64))
+        let contentView = try XCTUnwrap(window.contentView)
+        let detailSubviewRectInContent = detailController.detailSubview.convert(detailController.detailSubview.bounds, to: contentView)
+        let expectedHighlightedRect = CGRect(
+            x: detailSubviewRectInContent.minX,
+            y: contentView.isFlipped ? detailSubviewRectInContent.minY : contentView.bounds.height - detailSubviewRectInContent.maxY,
+            width: detailSubviewRectInContent.width,
+            height: detailSubviewRectInContent.height
+        )
 
-        XCTAssertEqual(screenshot.size.width, detailController.detailRoot.bounds.width)
-        XCTAssertEqual(screenshot.size.height, detailController.detailRoot.bounds.height)
-        XCTAssertEqual(detail.screenshotRootNodeID, detailRootNodeID)
-        XCTAssertEqual(detail.highlightedRect.x, detailController.detailSubview.frame.minX)
-        XCTAssertEqual(detail.highlightedRect.width, detailController.detailSubview.frame.width)
+        XCTAssertEqual(screenshot.size.width, contentView.bounds.width)
+        XCTAssertEqual(screenshot.size.height, contentView.bounds.height)
+        XCTAssertEqual(detail.screenshotRootNodeID, contentRootNodeID)
+        XCTAssertEqual(detail.highlightedRect.x, expectedHighlightedRect.minX)
+        XCTAssertEqual(detail.highlightedRect.y, expectedHighlightedRect.minY)
+        XCTAssertEqual(detail.highlightedRect.width, expectedHighlightedRect.width)
+        XCTAssertEqual(detail.highlightedRect.height, expectedHighlightedRect.height)
     }
 
     @available(macOS 26.0, *)
@@ -883,6 +897,39 @@ final class ViewScopeServerTests: XCTestCase {
                 cellNode.childIDs.compactMap { capture.nodes[$0]?.className }
             )
             XCTAssertTrue(cellChildClassNames.contains { $0.contains("NSTextField") })
+        }
+    }
+
+    @MainActor
+    func testCompositeCapturePolicyOnlyTargetsKnownSystemEffectViews() {
+        final class CustomSplitViewContainer: NSView {}
+
+        let customSplitNamedView = CustomSplitViewContainer(frame: NSRect(x: 0, y: 0, width: 120, height: 80))
+        customSplitNamedView.addSubview(NSView(frame: NSRect(x: 0, y: 0, width: 40, height: 20)))
+        XCTAssertFalse(
+            ViewScopeCompositeCapturePolicy.prefersDescendantCompositeCapture(for: customSplitNamedView),
+            "User-defined classes should not be matched by broad SplitView/Wrapper keywords."
+        )
+
+        let splitView = NSSplitView(frame: NSRect(x: 0, y: 0, width: 120, height: 80))
+        splitView.addSubview(NSView(frame: NSRect(x: 0, y: 0, width: 40, height: 20)))
+        XCTAssertFalse(
+            ViewScopeCompositeCapturePolicy.prefersDescendantCompositeCapture(for: splitView),
+            "NSSplitView direct capture already contains arranged pane content; forcing composite causes duplicate drawing."
+        )
+
+        let visualEffectView = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 120, height: 80))
+        visualEffectView.addSubview(NSView(frame: NSRect(x: 0, y: 0, width: 40, height: 20)))
+        XCTAssertTrue(
+            ViewScopeCompositeCapturePolicy.prefersDescendantCompositeCapture(for: visualEffectView)
+        )
+
+        if #available(macOS 26.0, *) {
+            let glassEffectView = NSGlassEffectView(frame: NSRect(x: 0, y: 0, width: 120, height: 80))
+            glassEffectView.addSubview(NSView(frame: NSRect(x: 0, y: 0, width: 40, height: 20)))
+            XCTAssertTrue(
+                ViewScopeCompositeCapturePolicy.prefersDescendantCompositeCapture(for: glassEffectView)
+            )
         }
     }
 

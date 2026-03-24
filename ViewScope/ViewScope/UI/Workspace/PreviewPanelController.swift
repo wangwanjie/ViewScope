@@ -99,6 +99,7 @@ final class PreviewPanelController: NSViewController {
     private var cachedPreviewImage: NSImage?
     private var renderScheduled = false
     private var pendingLayeredEntryVisibleCanvasRect: CGRect?
+    private var lastFlatVisibleCanvasRect: CGRect?
 
     init(store: WorkspaceStore) {
         self.store = store
@@ -275,8 +276,17 @@ final class PreviewPanelController: NSViewController {
         let capture = store.capture
         let consoleAvailable = store.connectionState.supportsConsole
         let isEnteringLayeredFromFlat = store.previewDisplayMode == .layered && lastRenderedDisplayMode == .flat
-        let entryVisibleCanvasRect = isEnteringLayeredFromFlat
-            ? (pendingLayeredEntryVisibleCanvasRect ?? canvasView.visibleCanvasRect())
+        let entryVisibleCanvasRect: CGRect? = isEnteringLayeredFromFlat
+            ? ({ () -> CGRect? in
+                let liveVisibleCanvasRect = canvasView.visibleCanvasRect()
+                if let pendingLayeredEntryVisibleCanvasRect {
+                    return pendingLayeredEntryVisibleCanvasRect
+                }
+                if liveVisibleCanvasRect.width > 0.5, liveVisibleCanvasRect.height > 0.5 {
+                    return liveVisibleCanvasRect
+                }
+                return lastFlatVisibleCanvasRect
+            })()
             : nil
         guideView.isHidden = capture != nil
         canvasView.isHidden = capture == nil || store.previewDisplayMode != .flat
@@ -317,6 +327,11 @@ final class PreviewPanelController: NSViewController {
             previewShowsLayerBorders: store.previewShowsLayerBorders,
             previewExpandedNodeIDs: store.expandedNodeIDs
         )
+        if store.previewDisplayMode == .flat,
+           previewCanvasSize.width > 0.5,
+           previewCanvasSize.height > 0.5 {
+            lastFlatVisibleCanvasRect = canvasView.visibleCanvasRect()
+        }
 
         if store.previewDisplayMode == .layered {
             layeredSceneView.applyRenderState(
@@ -505,22 +520,12 @@ final class PreviewPanelController: NSViewController {
         capture: ViewScopeCapturePayload?,
         detail: ViewScopeNodeDetailPayload?
     ) -> String? {
-        // 无 focus 时优先使用 detail 告诉我们的 screenshot root；
-        // 否则从当前锚点节点一路向上回溯到真正的预览根。
         guard let capture else { return nil }
-        if store.focusedNodeID == nil,
-           let detail,
-           detail.nodeID == store.selectedNodeID,
-           let screenshotRootNodeID = detail.screenshotRootNodeID {
-            return screenshotRootNodeID
-        }
         let anchorNodeID = store.focusedNodeID ?? store.selectedNodeID ?? capture.rootNodeIDs.first
-        guard var currentNodeID = anchorNodeID else { return capture.rootNodeIDs.first }
-
-        while let parentID = capture.nodes[currentNodeID]?.parentID {
-            currentNodeID = parentID
-        }
-        return currentNodeID
+        return PreviewPanelRenderDecisions.previewRootNodeID(
+            capture: capture,
+            anchorNodeID: anchorNodeID
+        )
     }
 
     private func selectNode(withID nodeID: String, focusAfterSelection: Bool) {
@@ -613,7 +618,7 @@ final class PreviewPanelController: NSViewController {
     @objc private func changeDisplayMode(_ sender: NSSegmentedControl) {
         let nextDisplayMode: WorkspacePreviewDisplayMode = sender.selectedSegment == 1 ? .layered : .flat
         if nextDisplayMode == .layered, store.previewDisplayMode == .flat {
-            pendingLayeredEntryVisibleCanvasRect = canvasView.visibleCanvasRect()
+            pendingLayeredEntryVisibleCanvasRect = lastFlatVisibleCanvasRect ?? canvasView.visibleCanvasRect()
         }
         store.setPreviewDisplayMode(nextDisplayMode)
     }
@@ -807,10 +812,6 @@ struct PreviewPanelRenderDecisions {
         guard let selectedNodeID else {
             return nil
         }
-        if let detail,
-           detail.nodeID == selectedNodeID {
-            return detail.highlightedRect.cgRect
-        }
         if let capture,
            let rect = geometry.canvasRect(
             for: selectedNodeID,
@@ -819,6 +820,10 @@ struct PreviewPanelRenderDecisions {
             mode: geometryMode
            ) {
             return rect
+        }
+        if let detail,
+           detail.nodeID == selectedNodeID {
+            return detail.highlightedRect.cgRect
         }
         return nil
     }
@@ -841,6 +846,28 @@ struct PreviewPanelRenderDecisions {
             capture?.capturedAt.timeIntervalSinceReferenceDate.description ?? "nil",
             focusedNodeID
         ].joined(separator: "|")
+    }
+
+    static func previewRootNodeID(
+        capture: ViewScopeCapturePayload,
+        anchorNodeID: String?
+    ) -> String? {
+        guard var currentNodeID = anchorNodeID ?? capture.rootNodeIDs.first else {
+            return capture.rootNodeIDs.first
+        }
+
+        if capture.nodes[currentNodeID]?.kind == .window {
+            return capture.nodes[currentNodeID]?.childIDs.first ?? currentNodeID
+        }
+
+        while let parentID = capture.nodes[currentNodeID]?.parentID,
+              let parentNode = capture.nodes[parentID] {
+            if parentNode.kind == .window {
+                return currentNodeID
+            }
+            currentNodeID = parentID
+        }
+        return currentNodeID
     }
 
     static func shouldRecenterFullCanvas(

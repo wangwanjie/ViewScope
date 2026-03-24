@@ -38,6 +38,29 @@ enum ViewScopeRuntimeIvarReader {
     }
 }
 
+enum ViewScopeCompositeCapturePolicy {
+    /// 只有少数系统特效视图在 `cacheDisplay` 时会丢失/错误合成后代内容，
+    /// 才需要走“基底截图 + 子视图递归叠绘”的 composite 路径。
+    ///
+    /// 这里故意不用 `"SplitView" / "Wrapper"` 这类字符串关键字：
+    /// 自定义类名非常容易误命中，反而会把普通视图错误送进 composite，
+    /// 导致父层底图与子层再次叠绘，最终出现重影或翻转。
+    @MainActor
+    static func prefersDescendantCompositeCapture(for view: NSView) -> Bool {
+        guard view.subviews.isEmpty == false else {
+            return false
+        }
+
+        if view is NSVisualEffectView {
+            return true
+        }
+        if #available(macOS 26.0, *), view is NSGlassEffectView {
+            return true
+        }
+        return false
+    }
+}
+
 @MainActor
 /// 抓取端总入口：负责把宿主 AppKit 视图树转换成 ViewScope 可传输的数据模型。
 ///
@@ -326,6 +349,14 @@ final class ViewScopeSnapshotBuilder {
     }
 
     private func capturedChildViews(of view: NSView) -> [NSView] {
+        // `buildNodes` 本身是递归的；
+        // 这里做的是“补齐当前节点的一层直接孩子”。
+        //
+        // AppKit 有一些容器会把逻辑子节点藏在普通 `subviews` 之外，
+        // 或者由复用/虚拟化机制托管，因此这里只补充那些 `subviews` 不稳定覆盖的系统容器：
+        // - `NSTableView` 当前可见 row/header
+        //
+        // 真正的整棵树递归仍由 `buildNodes(from:)` 完成。
         var orderedChildren: [NSView] = []
         var seen = Set<ObjectIdentifier>()
 
@@ -338,10 +369,6 @@ final class ViewScopeSnapshotBuilder {
 
         view.subviews.forEach(append)
 
-        if let clipView = view as? NSClipView {
-            append(clipView.documentView)
-        }
-
         if let tableView = view as? NSTableView {
             append(tableView.headerView)
 
@@ -351,21 +378,6 @@ final class ViewScopeSnapshotBuilder {
                     append(tableView.rowView(atRow: row, makeIfNecessary: false))
                 }
             }
-        }
-
-        if let rowView = view as? NSTableRowView,
-           let tableView = rowView.viewScopeEnclosingTableView {
-            let row = tableView.row(for: rowView)
-            if row >= 0 {
-                for column in 0 ..< tableView.numberOfColumns {
-                    append(tableView.view(atColumn: column, row: row, makeIfNecessary: false))
-                }
-            }
-        }
-
-        if let cellView = view as? NSTableCellView {
-            append(cellView.imageView)
-            append(cellView.textField)
         }
 
         return orderedChildren
@@ -420,21 +432,17 @@ final class ViewScopeSnapshotBuilder {
     }
 
     private func screenshotRootView(for view: NSView) -> NSView? {
-        var candidate: NSView? = view
-        var fallbackControllerRoot: NSView?
-
-        while let current = candidate {
-            if let controller = current.viewScopeOwningViewController,
-               controller.isViewLoaded,
-               controller.view === current,
-               current.bounds.width > 0,
-               current.bounds.height > 0 {
-                fallbackControllerRoot = fallbackControllerRoot ?? current
-            }
-            candidate = current.superview
+        if let contentView = view.window?.contentView,
+           contentView.bounds.width > 0,
+           contentView.bounds.height > 0 {
+            return contentView
         }
 
-        return fallbackControllerRoot ?? view.window?.contentView
+        var current: NSView = view
+        while let parent = current.superview {
+            current = parent
+        }
+        return current.bounds.width > 0 && current.bounds.height > 0 ? current : nil
     }
 
     private func screenshotRootNodeID(for view: NSView, in context: ReferenceContext) -> String? {
@@ -452,7 +460,7 @@ final class ViewScopeSnapshotBuilder {
             return nil
         }
 
-        let prefersCompositeCapture = prefersDescendantCompositeCapture(for: view) ||
+        let prefersCompositeCapture = ViewScopeCompositeCapturePolicy.prefersDescendantCompositeCapture(for: view) ||
             (inheritsCompositeCapture && view.subviews.isEmpty == false)
         if prefersCompositeCapture {
             return makeCompositeScreenshot(
@@ -481,6 +489,9 @@ final class ViewScopeSnapshotBuilder {
         view: NSView,
         inheritsCompositeCapture: Bool
     ) -> NSImage? {
+        // composite 路径会先铺一层当前 view 的直接截图，再把后代节点逐个叠回去；
+        // 因此它只能用于“直接截图缺后代内容”的少数系统特效视图。
+        // 如果把普通容器误送进来，就会出现父层底图和子层重复绘制。
         let image = NSImage(size: view.bounds.size)
         image.lockFocusFlipped(true)
         NSColor.clear.setFill()
@@ -520,35 +531,10 @@ final class ViewScopeSnapshotBuilder {
         return image
     }
 
-    private func prefersDescendantCompositeCapture(for view: NSView) -> Bool {
-        guard view.subviews.isEmpty == false else {
-            return false
-        }
-
-        let className = NSStringFromClass(type(of: view))
-        if view is NSSplitView {
-            return true
-        }
-        if view === view.window?.contentView,
-           view.subviews.contains(where: { NSStringFromClass(type(of: $0)).contains("SplitView") }) {
-            return true
-        }
-        let compositeKeywords = [
-            "SplitView",
-            "VisualEffect",
-            "GlassEffect",
-            "Wrapper"
-        ]
-        return compositeKeywords.contains { className.contains($0) }
-    }
-
     private func shouldSkipDirectCompositeBase(
         for view: NSView,
         inheritsCompositeCapture: Bool
     ) -> Bool {
-        if view is NSSplitView {
-            return true
-        }
         if inheritsCompositeCapture,
            type(of: view) == NSView.self,
            view.wantsLayer == false,
