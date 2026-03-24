@@ -15,6 +15,11 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct ViewScopeTests {
+    @Test func viewTreeCollaboratorsAreVisibleToSharedCoverage() {
+        _ = ViewTreePresentationBuilder.self
+        _ = ViewTreeSelectionSynchronizer.self
+    }
+
     @Test func treePresentationShowsIvarNamesAndDemangledClassName() async throws {
         let rawClassName = "_TtGC6AppKit18_NSCoreHostingViewVS_17AppKitPopUpButton_"
         let node = ViewScopeHierarchyNode(

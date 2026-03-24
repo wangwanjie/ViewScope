@@ -7,6 +7,8 @@ import ViewScopeServer
 @MainActor
 final class ViewTreePanelController: NSViewController {
     private let store: WorkspaceStore
+    private let presentationBuilder = ViewTreePresentationBuilder()
+    private let selectionSynchronizer = ViewTreeSelectionSynchronizer()
     private let panelView = WorkspacePanelContainerView()
     private let searchField = NSSearchField(frame: .zero)
     private let wrapperToggle = NSButton(checkboxWithTitle: "", target: nil, action: nil)
@@ -16,7 +18,6 @@ final class ViewTreePanelController: NSViewController {
     private var cancellables = Set<AnyCancellable>()
     private var rootItems: [ViewTreeNodeItem] = []
     private var currentQuery = ""
-    private var isApplyingProgrammaticSelection = false
 
     init(store: WorkspaceStore) {
         self.store = store
@@ -103,7 +104,12 @@ final class ViewTreePanelController: NSViewController {
     private func rebuildTree() {
         panelView.setTitle(L10n.hierarchy, subtitle: store.focusedNode?.title)
         wrapperToggle.state = store.showsSystemWrapperViews ? .on : .off
-        rootItems = buildFilteredRoots()
+        rootItems = presentationBuilder.buildRoots(
+            capture: store.capture,
+            focusedNodeID: store.focusedNodeID,
+            showsSystemWrappers: store.showsSystemWrapperViews,
+            query: currentQuery
+        )
         updateEmptyState()
         outlineView.reloadData()
         restoreExpansionState(items: rootItems)
@@ -129,26 +135,6 @@ final class ViewTreePanelController: NSViewController {
         )
     }
 
-    private func buildFilteredRoots() -> [ViewTreeNodeItem] {
-        guard let capture = store.capture else { return [] }
-        let rootNodeIDs = store.focusedNodeID.map { [$0] } ?? capture.rootNodeIDs
-        let presentationRootNodeIDs = ViewHierarchyPresentation.presentedRootNodeIDs(
-            from: rootNodeIDs,
-            nodes: capture.nodes,
-            showsSystemWrappers: store.showsSystemWrapperViews
-        )
-        let presentationRoots = presentationRootNodeIDs.compactMap {
-            ViewTreeNodeItem.make(
-                nodeID: $0,
-                nodes: capture.nodes,
-                showsSystemWrappers: store.showsSystemWrapperViews
-            )
-        }
-        let query = currentQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !query.isEmpty else { return presentationRoots }
-        return presentationRoots.compactMap { $0.filtered(matching: query) }
-    }
-
     private func restoreExpansionState(items: [ViewTreeNodeItem]) {
         items.forEach { item in
             if store.isNodeExpanded(item.node.id) || item.parent == nil {
@@ -159,31 +145,13 @@ final class ViewTreePanelController: NSViewController {
     }
 
     private func syncSelectionFromStore() {
-        guard let selectedNodeID = store.selectedNodeID,
-              let item = findItem(nodeID: selectedNodeID, items: rootItems) else {
-            outlineView.deselectAll(nil)
-            return
+        selectionSynchronizer.syncSelection(
+            selectedNodeID: store.selectedNodeID,
+            rootItems: rootItems,
+            outlineView: outlineView
+        ) { [weak self] item in
+            self?.expandAncestors(of: item)
         }
-
-        expandAncestors(of: item)
-        let row = outlineView.row(forItem: item)
-        guard row >= 0 else { return }
-        isApplyingProgrammaticSelection = true
-        outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-        outlineView.scrollRowToVisible(row)
-        isApplyingProgrammaticSelection = false
-    }
-
-    private func findItem(nodeID: String, items: [ViewTreeNodeItem]) -> ViewTreeNodeItem? {
-        for item in items {
-            if item.node.id == nodeID {
-                return item
-            }
-            if let child = findItem(nodeID: nodeID, items: item.children) {
-                return child
-            }
-        }
-        return nil
     }
 
     private func expandAncestors(of item: ViewTreeNodeItem) {
@@ -322,14 +290,17 @@ extension ViewTreePanelController: NSOutlineViewDataSource, NSOutlineViewDelegat
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
-        guard !isApplyingProgrammaticSelection else { return }
-        let row = outlineView.selectedRow
-        guard row >= 0,
-              let item = outlineView.item(atRow: row) as? ViewTreeNodeItem else {
-            Task { await store.selectNode(withID: nil) }
+        switch selectionSynchronizer.userSelectionChange(
+            selectedRow: outlineView.selectedRow,
+            itemAtRow: { row in
+                outlineView.item(atRow: row)
+            }
+        ) {
+        case .ignored:
             return
+        case .update(let nodeID):
+            Task { await store.selectNode(withID: nodeID) }
         }
-        Task { await store.selectNode(withID: item.node.id) }
     }
 
     func outlineViewItemDidExpand(_ notification: Notification) {
