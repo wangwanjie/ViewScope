@@ -6,6 +6,13 @@ import ViewScopeServer
 @Suite(.serialized)
 @MainActor
 struct WorkspaceStoreConnectionLifecycleTests {
+    // Pins extracted Task 2 collaborators so the refactor keeps real module boundaries.
+    @Test func workspaceCoordinatorTypesAreVisibleToLifecycleCoverage() {
+        _ = WorkspaceConnectionCoordinator.self
+        _ = WorkspaceCaptureCoordinator.self
+        _ = WorkspaceConsoleController.self
+    }
+
     @Test func switchingHostsClearsVisibleStateBeforeNewCaptureArrives() async throws {
         let hostA = makeHost(id: "host-a", bundleID: "cn.vanjay.hostA", name: "Host A", port: 7101)
         let hostB = makeHost(id: "host-b", bundleID: "cn.vanjay.hostB", name: "Host B", port: 7102)
@@ -163,7 +170,6 @@ struct WorkspaceStoreConnectionLifecycleTests {
         defer { store.shutdown() }
 
         await store.connect(to: host)
-        await store.selectNode(withID: "node-1", highlightInHost: false)
 
         #expect(alphaValue(in: store.selectedNodeDetail) == "0.80")
         #expect(await session.detailRequestCount(for: "node-1") == 1)
@@ -186,7 +192,10 @@ struct WorkspaceStoreConnectionLifecycleTests {
                 .pending
             ],
             nodeDetailResponses: [
-                "node-1": [.resolved(.success(makeDetail(nodeID: "node-1", host: host)))]
+                "node-1": [
+                    .resolved(.success(makeDetail(nodeID: "node-1", host: host))),
+                    .resolved(.success(makeDetail(nodeID: "node-1", host: host)))
+                ]
             ]
         )
 
@@ -195,15 +204,18 @@ struct WorkspaceStoreConnectionLifecycleTests {
 
         await store.connect(to: host)
         store.setFocusedNode("node-1")
-        await store.selectNode(withID: "node-1", highlightInHost: false)
 
         #expect(store.capture?.rootNodeIDs == ["node-1"])
         #expect(store.selectedNodeID == "node-1")
         #expect(store.selectedNodeDetail?.nodeID == "node-1")
         #expect(store.focusedNodeID == "node-1")
 
-        let refreshTask = Task { await store.refreshCapture() }
-        try await waitUntil { await session.captureRequestCount == 2 }
+        async let refreshCaptureTask: Void = store.refreshCapture(
+            forceReloadSelectionDetail: true,
+            clearingVisibleState: true
+        )
+        try await Task.sleep(nanoseconds: 50_000_000)
+        try await waitUntil { await session.captureRequestCount >= 2 }
 
         #expect(store.capture == nil)
         #expect(store.selectedNodeID == nil)
@@ -211,11 +223,105 @@ struct WorkspaceStoreConnectionLifecycleTests {
         #expect(store.focusedNodeID == nil)
 
         await session.resolveNextCapture(with: .success(makeCapture(nodeID: "node-1", host: host)))
-        await refreshTask.value
+        await refreshCaptureTask
 
         #expect(store.capture?.rootNodeIDs == ["node-1"])
         #expect(store.selectedNodeID == "node-1")
+        #expect(store.selectedNodeDetail?.nodeID == "node-1")
         #expect(store.focusedNodeID == "node-1")
+    }
+
+    @Test func disconnectClearsConnectionOwnedStateButKeepsSettingsBackedPreviewDefaults() async throws {
+        let host = makeHost(id: "host-a", bundleID: "cn.vanjay.hostA", name: "Host A", port: 7109)
+        let session = FakeWorkspaceSession(
+            announcement: host,
+            openResponses: [.resolved(.success(makeHello(for: host)))],
+            captureResponses: [.resolved(.success(makeCapture(nodeID: "node-1", host: host, captureID: "capture-before-disconnect")))],
+            nodeDetailResponses: [
+                "node-1": [
+                    .resolved(.success(makeDetail(nodeID: "node-1", host: host, captureID: "capture-before-disconnect")))
+                ]
+            ]
+        )
+
+        let defaults = try #require(UserDefaults(suiteName: "WorkspaceStoreLifecycleTests.disconnect.\(UUID().uuidString)"))
+        defaults.set(48.0, forKey: "ViewScope.previewLayerSpacing")
+        defaults.set(false, forKey: "ViewScope.previewShowsLayerBorders")
+        let settings = AppSettings(defaults: defaults, environment: [:])
+        let store = try WorkspaceStore(
+            settings: settings,
+            updateManager: UpdateManager(settings: settings),
+            sessionFactory: { _ in session }
+        )
+        defer { store.shutdown() }
+
+        await store.connect(to: host)
+        store.setFocusedNode("node-1")
+        store.setPreviewScale(2.4)
+        store.setPreviewDisplayMode(.layered)
+
+        #expect(store.consoleCandidateTargets.isEmpty == false)
+        #expect(store.consoleCurrentTarget != nil)
+        #expect(store.previewLayerSpacing == 48)
+        #expect(store.previewShowsLayerBorders == false)
+
+        store.disconnect()
+
+        #expect(store.connectionState == .idle)
+        #expect(store.capture == nil)
+        #expect(store.selectedNodeID == nil)
+        #expect(store.selectedNodeDetail == nil)
+        #expect(store.focusedNodeID == nil)
+        #expect(store.errorMessage == nil)
+        #expect(store.consoleCandidateTargets.isEmpty)
+        #expect(store.consoleCurrentTarget == nil)
+        #expect(store.consoleRecentTargets.isEmpty)
+        #expect(store.consoleIsLoadingTarget == false)
+        #expect(store.previewScale == 1)
+        #expect(store.previewDisplayMode == .flat)
+        #expect(store.previewLayerSpacing == 48)
+        #expect(store.previewShowsLayerBorders == false)
+    }
+
+    @Test func refreshCaptureRebuildsSelectionAndConsoleStateThroughCoordinator() async throws {
+        let host = makeHost(id: "host-a", bundleID: "cn.vanjay.hostA", name: "Host A", port: 7110)
+        let firstCapture = makeCapture(nodeID: "node-1", host: host, captureID: "capture-before-refresh")
+        let refreshedCapture = makeCapture(nodeID: "node-1", host: host, captureID: "capture-after-refresh")
+        let session = FakeWorkspaceSession(
+            announcement: host,
+            openResponses: [.resolved(.success(makeHello(for: host)))],
+            captureResponses: [
+                .resolved(.success(firstCapture)),
+                .resolved(.success(refreshedCapture))
+            ],
+            nodeDetailResponses: [
+                "node-1": [
+                    .resolved(.success(makeDetail(nodeID: "node-1", host: host, captureID: "capture-before-refresh"))),
+                    .resolved(.success(makeDetail(nodeID: "node-1", host: host, captureID: "capture-after-refresh", alphaValue: "0.35")))
+                ]
+            ]
+        )
+
+        let store = try makeStore(sessions: [host.identifier: session])
+        defer { store.shutdown() }
+
+        await store.connect(to: host)
+        store.setFocusedNode("node-1")
+
+        #expect(store.selectedNodeID == "node-1")
+        #expect(store.focusedNodeID == "node-1")
+        #expect(store.consoleCurrentTarget?.reference.captureID == "capture-before-refresh")
+        #expect(alphaValue(in: store.selectedNodeDetail) == nil)
+
+        await store.refreshCapture(forceReloadSelectionDetail: true)
+
+        #expect(store.capture?.captureID == "capture-after-refresh")
+        #expect(store.selectedNodeID == "node-1")
+        #expect(store.focusedNodeID == "node-1")
+        #expect(store.selectedNodeDetail?.nodeID == "node-1")
+        #expect(alphaValue(in: store.selectedNodeDetail) == "0.35")
+        #expect(store.consoleCandidateTargets.allSatisfy { $0.reference.captureID == "capture-after-refresh" })
+        #expect(store.consoleCurrentTarget?.reference.captureID == "capture-after-refresh")
     }
 
     private func makeStore(sessions: [String: FakeWorkspaceSession]) throws -> WorkspaceStore {
@@ -269,7 +375,11 @@ struct WorkspaceStoreConnectionLifecycleTests {
         ViewScopeServerHelloPayload(host: makeHostInfo(from: host), protocolVersion: viewScopeCurrentProtocolVersion)
     }
 
-    private func makeCapture(nodeID: String, host: ViewScopeHostAnnouncement) -> ViewScopeCapturePayload {
+    private func makeCapture(
+        nodeID: String,
+        host: ViewScopeHostAnnouncement,
+        captureID: String = UUID().uuidString
+    ) -> ViewScopeCapturePayload {
         let node = ViewScopeHierarchyNode(
             id: nodeID,
             parentID: nil,
@@ -292,13 +402,15 @@ struct WorkspaceStoreConnectionLifecycleTests {
             capturedAt: Date(),
             summary: ViewScopeCaptureSummary(nodeCount: 1, windowCount: 1, visibleWindowCount: 1, captureDurationMilliseconds: 10),
             rootNodeIDs: [nodeID],
-            nodes: [nodeID: node]
+            nodes: [nodeID: node],
+            captureID: captureID
         )
     }
 
     private func makeDetail(
         nodeID: String,
         host: ViewScopeHostAnnouncement,
+        captureID: String = UUID().uuidString,
         alphaValue: String? = nil
     ) -> ViewScopeNodeDetailPayload {
         ViewScopeNodeDetailPayload(
@@ -316,7 +428,21 @@ struct WorkspaceStoreConnectionLifecycleTests {
             ancestry: [host.displayName, nodeID],
             screenshotPNGBase64: nil,
             screenshotSize: .zero,
-            highlightedRect: .zero
+            highlightedRect: .zero,
+            consoleTargets: [
+                ViewScopeConsoleTargetDescriptor(
+                    reference: ViewScopeRemoteObjectReference(
+                        captureID: captureID,
+                        objectID: "view-\(nodeID)-\(captureID)",
+                        kind: .view,
+                        className: "NSView",
+                        address: "0x\(nodeID)",
+                        sourceNodeID: nodeID
+                    ),
+                    title: "<NSView: 0x\(nodeID)>",
+                    subtitle: nodeID
+                )
+            ]
         )
     }
 

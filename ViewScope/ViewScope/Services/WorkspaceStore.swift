@@ -1,5 +1,5 @@
-import AppKit
 import Combine
+import CoreGraphics
 import Foundation
 import ViewScopeServer
 
@@ -36,12 +36,13 @@ final class WorkspaceStore: NSObject {
     private let database: AppDatabase
     private let sessionFactory: SessionFactory
     private let discoveryCenter = DiscoveryCenter()
-    private let maximumRecentConsoleTargets = 5
-    private var session: (any WorkspaceSessionProtocol)?
+    private let consoleController = WorkspaceConsoleController()
+    private let previewState = WorkspacePreviewState()
+    private let selectionController = WorkspaceSelectionController()
+    private let captureCoordinator = WorkspaceCaptureCoordinator()
+    private let connectionCoordinator = WorkspaceConnectionCoordinator()
     private var cancellables = Set<AnyCancellable>()
-    private var autoRefreshTimer: Timer?
     private let previewFixtureEnabled: Bool
-    private var connectionGeneration: UInt64 = 0
 
     init(
         settings: AppSettings = .shared,
@@ -106,15 +107,15 @@ final class WorkspaceStore: NSObject {
             return
         }
 
-        let generation = beginNewConnectionGeneration()
+        let generation = connectionCoordinator.beginNewGeneration()
         prepareForHostSwitch()
         connectionState = .connecting(host.displayName)
         let session = sessionFactory(host)
-        self.session = session
+        connectionCoordinator.activate(session: session)
 
         do {
             _ = try await session.open()
-            guard isActiveConnection(generation: generation, session: session) else {
+            guard connectionCoordinator.isActiveConnection(generation: generation, session: session) else {
                 session.disconnect()
                 return
             }
@@ -124,10 +125,10 @@ final class WorkspaceStore: NSObject {
             startAutoRefreshTimerIfNeeded()
             await refreshCapture()
         } catch {
-            guard isActiveConnection(generation: generation, session: session) else {
+            guard connectionCoordinator.isActiveConnection(generation: generation, session: session) else {
                 return
             }
-            self.session = nil
+            connectionCoordinator.disconnectCurrentSession()
             connectionState = .failed(error.localizedDescription)
             errorMessage = error.localizedDescription
         }
@@ -142,12 +143,11 @@ final class WorkspaceStore: NSObject {
     }
 
     func disconnect() {
-        _ = beginNewConnectionGeneration()
+        _ = connectionCoordinator.beginNewGeneration()
         prepareForHostSwitch()
         captureInsight = .empty
         previewScale = 1
         previewDisplayMode = .flat
-        clearConsoleConnectionState()
         connectionState = .idle
     }
 
@@ -160,10 +160,12 @@ final class WorkspaceStore: NSObject {
         forceReloadSelectionDetail: Bool = false,
         clearingVisibleState: Bool = false
     ) async {
-        let generation = connectionGeneration
+        let generation = connectionCoordinator.generation
         guard case .connected(let host) = connectionState else { return }
-        let preferredNodeID = selectedNodeID
-        let preferredFocusedNodeID = focusedNodeID
+        let selectionSnapshot = captureCoordinator.snapshotSelection(
+            selectedNodeID: selectedNodeID,
+            focusedNodeID: focusedNodeID
+        )
 
         if clearingVisibleState {
             clearVisibleWorkspaceState()
@@ -173,18 +175,18 @@ final class WorkspaceStore: NSObject {
             capture = SampleFixture.capture()
             reconcileConsoleStateForLatestCapture()
             await normalizeSelectionAfterCaptureUpdate(
-                preferredNodeID: preferredNodeID,
-                preferredFocusedNodeID: preferredFocusedNodeID,
+                preferredNodeID: selectionSnapshot.selectedNodeID,
+                preferredFocusedNodeID: selectionSnapshot.focusedNodeID,
                 forceReloadDetail: forceReloadSelectionDetail
             )
             return
         }
 
-        guard let session else { return }
+        guard let session = connectionCoordinator.session else { return }
 
         do {
-            let capture = try await session.requestCapture()
-            guard isActiveConnection(generation: generation, session: session) else {
+            let capture = try await captureCoordinator.requestCapture(using: session)
+            guard connectionCoordinator.isActiveConnection(generation: generation, session: session) else {
                 return
             }
             self.capture = capture
@@ -193,22 +195,22 @@ final class WorkspaceStore: NSObject {
             try database.recordCapture(for: host, summary: capture.summary)
             captureInsight = try database.captureInsight(for: host.bundleIdentifier)
             await normalizeSelectionAfterCaptureUpdate(
-                preferredNodeID: preferredNodeID,
-                preferredFocusedNodeID: preferredFocusedNodeID,
+                preferredNodeID: selectionSnapshot.selectedNodeID,
+                preferredFocusedNodeID: selectionSnapshot.focusedNodeID,
                 forceReloadDetail: forceReloadSelectionDetail
             )
         } catch {
-            guard isActiveConnection(generation: generation, session: session) else {
+            guard connectionCoordinator.isActiveConnection(generation: generation, session: session) else {
                 return
             }
             errorMessage = error.localizedDescription
             connectionState = .failed(error.localizedDescription)
-            self.session = nil
+            connectionCoordinator.disconnectCurrentSession()
         }
     }
 
     func selectNode(withID nodeID: String?, highlightInHost: Bool = true) async {
-        let generation = connectionGeneration
+        let generation = connectionCoordinator.generation
         selectedNodeID = nodeID
         guard let nodeID else {
             selectedNodeDetail = nil
@@ -226,7 +228,7 @@ final class WorkspaceStore: NSObject {
             return
         }
 
-        guard let session else {
+        guard let session = connectionCoordinator.session else {
             if selectedNodeDetail?.nodeID != nodeID {
                 selectedNodeDetail = nil
             }
@@ -238,7 +240,7 @@ final class WorkspaceStore: NSObject {
         }
         do {
             let detail = try await session.requestNodeDetail(nodeID: nodeID)
-            guard isActiveConnection(generation: generation, session: session),
+            guard connectionCoordinator.isActiveConnection(generation: generation, session: session),
                   selectedNodeID == nodeID else {
                 return
             }
@@ -249,7 +251,7 @@ final class WorkspaceStore: NSObject {
                 try await session.highlight(nodeID: nodeID, duration: 1.25)
             }
         } catch {
-            guard isActiveConnection(generation: generation, session: session) else {
+            guard connectionCoordinator.isActiveConnection(generation: generation, session: session) else {
                 return
             }
             errorMessage = error.localizedDescription
@@ -262,14 +264,14 @@ final class WorkspaceStore: NSObject {
     }
 
     func highlightCurrentSelection() async {
-        let generation = connectionGeneration
+        let generation = connectionCoordinator.generation
         guard let selectedNodeID else { return }
         if previewFixtureEnabled { return }
-        guard let session else { return }
+        guard let session = connectionCoordinator.session else { return }
         do {
             try await session.highlight(nodeID: selectedNodeID, duration: 1.25)
         } catch {
-            guard isActiveConnection(generation: generation, session: session) else {
+            guard connectionCoordinator.isActiveConnection(generation: generation, session: session) else {
                 return
             }
             errorMessage = error.localizedDescription
@@ -277,24 +279,24 @@ final class WorkspaceStore: NSObject {
     }
 
     func applyMutation(nodeID: String, property: ViewScopeEditableProperty) async -> Bool {
-        let generation = connectionGeneration
+        let generation = connectionCoordinator.generation
         guard previewFixtureEnabled == false else { return false }
-        guard let session else { return false }
+        guard let session = connectionCoordinator.session else { return false }
 
         selectedNodeID = nodeID
 
         do {
             try await session.applyMutation(nodeID: nodeID, property: property)
-            guard isActiveConnection(generation: generation, session: session) else {
+            guard connectionCoordinator.isActiveConnection(generation: generation, session: session) else {
                 return false
             }
             await refreshCapture(forceReloadSelectionDetail: true)
-            guard generation == connectionGeneration else {
+            guard generation == connectionCoordinator.generation else {
                 return false
             }
             return true
         } catch {
-            guard isActiveConnection(generation: generation, session: session) else {
+            guard connectionCoordinator.isActiveConnection(generation: generation, session: session) else {
                 return false
             }
             errorMessage = error.localizedDescription
@@ -308,12 +310,7 @@ final class WorkspaceStore: NSObject {
     }
 
     func setFocusedNode(_ nodeID: String?) {
-        guard let nodeID else {
-            focusedNodeID = nil
-            return
-        }
-        guard capture?.nodes[nodeID] != nil else { return }
-        focusedNodeID = nodeID
+        focusedNodeID = selectionController.focusedNodeID(for: nodeID, capture: capture)
     }
 
     func focusSelectedNode() {
@@ -337,7 +334,7 @@ final class WorkspaceStore: NSObject {
     }
 
     func setPreviewScale(_ value: CGFloat) {
-        previewScale = clampedPreviewScale(value)
+        previewScale = previewState.clampedScale(value)
     }
 
     func setPreviewDisplayMode(_ mode: WorkspacePreviewDisplayMode) {
@@ -345,7 +342,7 @@ final class WorkspaceStore: NSObject {
     }
 
     func setPreviewLayerSpacing(_ value: CGFloat) {
-        previewLayerSpacing = min(max(value, 10), 150)
+        previewLayerSpacing = previewState.clampedLayerSpacing(value)
         settings.previewLayerSpacing = Double(previewLayerSpacing)
     }
 
@@ -381,23 +378,23 @@ final class WorkspaceStore: NSObject {
             detail: selectedNodeDetail
         )
 
-        return WorkspaceRawPreviewExport(
-            formatVersion: 1,
-            exportedAt: Date(),
+        let previewContext = previewState.makePreviewContext(
+            selectedNodeID: selectedNodeID,
+            focusedNodeID: focusedNodeID,
+            previewRootNodeID: previewRootNodeID,
+            geometryMode: geometryMode == .directGlobalCanvasRect ? "directGlobalCanvasRect" : "legacyLocalFrames",
+            previewScale: previewScale,
+            previewDisplayMode: previewDisplayMode,
+            previewLayerSpacing: previewLayerSpacing,
+            previewShowsLayerBorders: previewShowsLayerBorders,
+            expandedNodeIDs: expandedNodeIDs
+        )
+
+        return captureCoordinator.makePreviewExport(
             capture: capture,
             selectedNodeDetail: selectedNodeDetail,
             previewBitmap: previewBitmap,
-            previewContext: .init(
-                selectedNodeID: selectedNodeID,
-                focusedNodeID: focusedNodeID,
-                previewRootNodeID: previewRootNodeID,
-                geometryMode: geometryMode == .directGlobalCanvasRect ? "directGlobalCanvasRect" : "legacyLocalFrames",
-                previewScale: Double(previewScale),
-                previewDisplayMode: previewDisplayMode,
-                previewLayerSpacing: Double(previewLayerSpacing),
-                previewShowsLayerBorders: previewShowsLayerBorders,
-                expandedNodeIDs: expandedNodeIDs.sorted()
-            )
+            previewContext: previewContext
         )
     }
 
@@ -407,29 +404,31 @@ final class WorkspaceStore: NSObject {
     }
 
     func setNodeExpanded(_ nodeID: String, isExpanded: Bool) {
-        guard let capture, capture.nodes[nodeID] != nil else { return }
-        guard capture.rootNodeIDs.contains(nodeID) == false else { return }
+        let update = selectionController.setNodeExpanded(
+            nodeID: nodeID,
+            isExpanded: isExpanded,
+            capture: capture,
+            expandedNodeIDs: expandedNodeIDs,
+            selectedNodeID: selectedNodeID,
+            focusedNodeID: focusedNodeID,
+            showsSystemWrapperViews: showsSystemWrapperViews
+        )
+        expandedNodeIDs = update.expandedNodeIDs
+        focusedNodeID = update.focusedNodeID
 
-        if isExpanded {
-            expandedNodeIDs.insert(nodeID)
-        } else {
-            expandedNodeIDs.remove(nodeID)
-            collapseExpandedDescendants(of: nodeID)
-            retargetSelectionToVisibleAncestorIfNeeded(in: capture)
+        guard update.selectedNodeID != selectedNodeID else { return }
+        selectedNodeID = update.selectedNodeID
+        Task { [weak self] in
+            await self?.selectNode(withID: update.selectedNodeID, highlightInHost: false)
         }
     }
 
     func expandAncestors(of nodeID: String) {
-        guard let capture else { return }
-        var currentNodeID = capture.nodes[nodeID]?.parentID
-        while let candidateNodeID = currentNodeID {
-            setNodeExpanded(candidateNodeID, isExpanded: true)
-            currentNodeID = capture.nodes[candidateNodeID]?.parentID
-        }
-    }
-
-    private func clampedPreviewScale(_ value: CGFloat) -> CGFloat {
-        min(max(value, 0.35), 4)
+        expandedNodeIDs = selectionController.expandedNodeIDsAfterExpandingAncestors(
+            of: nodeID,
+            capture: capture,
+            expandedNodeIDs: expandedNodeIDs
+        )
     }
 
     func setShowsSystemWrapperViews(_ showsSystemWrapperViews: Bool) {
@@ -441,28 +440,27 @@ final class WorkspaceStore: NSObject {
 
     func setConsoleAutoSyncEnabled(_ enabled: Bool) {
         consoleAutoSyncEnabled = enabled
-        if enabled {
-            if let preferredTarget = ConsoleModelBuilder.preferredTarget(from: consoleCandidateTargets) {
-                consoleCurrentTarget = preferredTarget
-            } else if let capture, consoleCurrentTarget?.reference.captureID != capture.captureID {
-                consoleCurrentTarget = nil
-            }
-        }
+        let update = consoleController.autoSyncUpdate(
+            enabled: enabled,
+            candidateTargets: consoleCandidateTargets,
+            currentTarget: consoleCurrentTarget,
+            captureID: capture?.captureID
+        )
+        consoleCurrentTarget = update.currentTarget
     }
 
     func selectConsoleTarget(objectID: String) {
-        let options = ConsoleModelBuilder.make(
+        guard let descriptor = consoleController.selectedTarget(
+            objectID: objectID,
             currentTarget: consoleCurrentTarget,
             candidateTargets: consoleCandidateTargets,
             recentTargets: consoleRecentTargets,
             rows: consoleRows,
             autoSyncEnabled: consoleAutoSyncEnabled,
-            isLoading: consoleIsLoadingTarget,
+            isLoadingTarget: consoleIsLoadingTarget,
             captureID: capture?.captureID
-        ).targetOptions
-
-        guard let option = options.first(where: { $0.id == objectID }) else { return }
-        consoleCurrentTarget = option.descriptor
+        ) else { return }
+        consoleCurrentTarget = descriptor
         if consoleAutoSyncEnabled {
             consoleAutoSyncEnabled = false
         }
@@ -494,7 +492,7 @@ final class WorkspaceStore: NSObject {
             consoleRows.append(ConsoleRowFactory.makeErrorRow(message: L10n.consoleStatusStaleTarget))
             return
         }
-        guard let session else {
+        guard let session = connectionCoordinator.session else {
             consoleRows.append(ConsoleRowFactory.makeErrorRow(message: L10n.consoleStatusDisconnected))
             return
         }
@@ -509,7 +507,10 @@ final class WorkspaceStore: NSObject {
                 consoleRows.append(ConsoleRowFactory.makeErrorRow(message: errorMessage))
             }
             if let returnedObject = response.returnedObject {
-                upsertRecentConsoleTarget(returnedObject)
+                consoleRecentTargets = consoleController.upsertRecentTarget(
+                    returnedObject,
+                    recentTargets: consoleRecentTargets
+                )
             }
         } catch {
             consoleRows.append(ConsoleRowFactory.makeErrorRow(message: error.localizedDescription))
@@ -521,188 +522,69 @@ final class WorkspaceStore: NSObject {
         preferredFocusedNodeID: String?,
         forceReloadDetail: Bool = false
     ) async {
-        guard let capture else {
+        let result = selectionController.normalizeAfterCaptureUpdate(
+            capture: capture,
+            preferredNodeID: preferredNodeID,
+            preferredFocusedNodeID: preferredFocusedNodeID,
+            currentSelectedNodeID: selectedNodeID,
+            currentFocusedNodeID: focusedNodeID,
+            selectedNodeDetailNodeID: selectedNodeDetail?.nodeID,
+            expandedNodeIDs: expandedNodeIDs,
+            showsSystemWrapperViews: showsSystemWrapperViews,
+            forceReloadDetail: forceReloadDetail
+        )
+
+        expandedNodeIDs = result.expandedNodeIDs
+        selectedNodeID = result.selectedNodeID
+        focusedNodeID = result.focusedNodeID
+
+        guard capture != nil else {
             selectedNodeID = nil
             selectedNodeDetail = nil
             focusedNodeID = nil
             return
         }
 
-        normalizeExpandedNodes()
-        let visibleNodeIDs = ViewHierarchyPresentation.visiblePresentedNodeIDs(
-            rootNodeIDs: capture.rootNodeIDs,
-            nodes: capture.nodes,
-            expandedNodeIDs: expandedNodeIDs,
-            showsSystemWrappers: showsSystemWrapperViews
-        )
-
-        if let preferredFocusedNodeID {
-            focusedNodeID = resolvedVisibleSelectionTarget(
-                from: preferredFocusedNodeID,
-                capture: capture,
-                visibleNodeIDs: visibleNodeIDs
-            )
-        } else if let focusedNodeID, capture.nodes[focusedNodeID] == nil {
-            self.focusedNodeID = nil
-        }
-
-        normalizeVisibleSelection(in: capture, visibleNodeIDs: visibleNodeIDs)
-
-        let targetNodeID: String?
-        if let preferredNodeID {
-            targetNodeID = resolvedVisibleSelectionTarget(
-                from: preferredNodeID,
-                capture: capture,
-                visibleNodeIDs: visibleNodeIDs
-            ) ?? capture.rootNodeIDs.first
-        } else if let selectedNodeID {
-            targetNodeID = resolvedVisibleSelectionTarget(
-                from: selectedNodeID,
-                capture: capture,
-                visibleNodeIDs: visibleNodeIDs
-            ) ?? capture.rootNodeIDs.first
-        } else {
-            targetNodeID = capture.rootNodeIDs.first
-        }
-
-        if let targetNodeID {
-            expandAncestors(of: targetNodeID)
-        }
-
-        if selectedNodeID != targetNodeID ||
-            selectedNodeDetail?.nodeID != targetNodeID ||
-            selectedNodeDetail == nil ||
-            forceReloadDetail {
-            await selectNode(withID: targetNodeID, highlightInHost: false)
-        }
-    }
-
-    private func normalizeVisibleSelection(
-        in capture: ViewScopeCapturePayload,
-        visibleNodeIDs: Set<String>? = nil
-    ) {
-        let resolvedVisibleNodeIDs = visibleNodeIDs ?? ViewHierarchyPresentation.visiblePresentedNodeIDs(
-            rootNodeIDs: capture.rootNodeIDs,
-            nodes: capture.nodes,
-            expandedNodeIDs: expandedNodeIDs,
-            showsSystemWrappers: showsSystemWrapperViews
-        )
-
-        selectedNodeID = resolvedVisibleSelectionTarget(
-            from: selectedNodeID,
-            capture: capture,
-            visibleNodeIDs: resolvedVisibleNodeIDs
-        )
-        focusedNodeID = resolvedVisibleSelectionTarget(
-            from: focusedNodeID,
-            capture: capture,
-            visibleNodeIDs: resolvedVisibleNodeIDs
-        )
-    }
-
-    private func retargetSelectionToVisibleAncestorIfNeeded(in capture: ViewScopeCapturePayload) {
-        let visibleNodeIDs = ViewHierarchyPresentation.visiblePresentedNodeIDs(
-            rootNodeIDs: capture.rootNodeIDs,
-            nodes: capture.nodes,
-            expandedNodeIDs: expandedNodeIDs,
-            showsSystemWrappers: showsSystemWrapperViews
-        )
-        let nextSelectedNodeID = resolvedVisibleSelectionTarget(
-            from: selectedNodeID,
-            capture: capture,
-            visibleNodeIDs: visibleNodeIDs
-        )
-        let nextFocusedNodeID = resolvedVisibleSelectionTarget(
-            from: focusedNodeID,
-            capture: capture,
-            visibleNodeIDs: visibleNodeIDs
-        )
-
-        focusedNodeID = nextFocusedNodeID
-
-        guard nextSelectedNodeID != selectedNodeID else {
+        guard result.shouldReloadDetail else {
             return
         }
-
-        selectedNodeID = nextSelectedNodeID
-        Task { [weak self] in
-            await self?.selectNode(withID: nextSelectedNodeID, highlightInHost: false)
-        }
-    }
-
-    private func resolvedVisibleSelectionTarget(
-        from nodeID: String?,
-        capture: ViewScopeCapturePayload,
-        visibleNodeIDs: Set<String>
-    ) -> String? {
-        var currentNodeID = nodeID
-
-        while let candidateNodeID = currentNodeID {
-            if visibleNodeIDs.contains(candidateNodeID) {
-                return candidateNodeID
-            }
-            currentNodeID = ViewHierarchyPresentation.presentedParentNodeID(
-                of: candidateNodeID,
-                nodes: capture.nodes,
-                showsSystemWrappers: showsSystemWrapperViews
-            )
-        }
-
-        return nil
+        await selectNode(withID: result.targetNodeID, highlightInHost: false)
     }
 
     private func reconcileConsoleStateForLatestCapture() {
-        guard let capture else {
-            clearConsoleConnectionState()
-            return
-        }
-
-        consoleRecentTargets.removeAll { $0.reference.captureID != capture.captureID }
-        if let currentTarget = consoleCurrentTarget,
-           currentTarget.reference.captureID != capture.captureID {
-            consoleCurrentTarget = nil
-        }
-        if consoleAutoSyncEnabled {
-            consoleIsLoadingTarget = selectedNodeID != nil
-        } else {
-            consoleIsLoadingTarget = false
+        let update = consoleController.reconcileForLatestCapture(
+            capture: capture,
+            selectedNodeID: selectedNodeID,
+            currentTarget: consoleCurrentTarget,
+            recentTargets: consoleRecentTargets,
+            autoSyncEnabled: consoleAutoSyncEnabled
+        )
+        consoleCurrentTarget = update.currentTarget
+        consoleRecentTargets = update.recentTargets
+        consoleIsLoadingTarget = update.isLoadingTarget
+        if capture == nil {
+            consoleCandidateTargets = []
         }
     }
 
     private func updateConsoleTargets(from detail: ViewScopeNodeDetailPayload?) {
-        consoleCandidateTargets = detail?.consoleTargets ?? []
-        consoleIsLoadingTarget = false
-
-        if consoleAutoSyncEnabled {
-            consoleCurrentTarget = ConsoleModelBuilder.preferredTarget(from: consoleCandidateTargets)
-            return
-        }
-
-        guard let capture else {
-            consoleCurrentTarget = nil
-            return
-        }
-
-        if let currentTarget = consoleCurrentTarget,
-           currentTarget.reference.captureID == capture.captureID {
-            return
-        }
-        consoleCurrentTarget = nil
-    }
-
-    private func upsertRecentConsoleTarget(_ descriptor: ViewScopeConsoleTargetDescriptor) {
-        consoleRecentTargets.removeAll { $0.reference.objectID == descriptor.reference.objectID }
-        consoleRecentTargets.insert(descriptor, at: 0)
-        if consoleRecentTargets.count > maximumRecentConsoleTargets {
-            consoleRecentTargets = Array(consoleRecentTargets.prefix(maximumRecentConsoleTargets))
-        }
+        let update = consoleController.updateTargets(
+            from: detail,
+            capture: capture,
+            currentTarget: consoleCurrentTarget,
+            autoSyncEnabled: consoleAutoSyncEnabled
+        )
+        consoleCurrentTarget = update.currentTarget
+        consoleCandidateTargets = update.candidateTargets
+        consoleIsLoadingTarget = update.isLoadingTarget
     }
 
     private func clearConsoleConnectionState() {
-        consoleCurrentTarget = nil
-        consoleCandidateTargets = []
-        consoleRecentTargets = []
-        consoleIsLoadingTarget = false
+        let clearedState = consoleController.clearConnectionState()
+        consoleCurrentTarget = clearedState.currentTarget
+        consoleCandidateTargets = clearedState.candidateTargets
+        consoleRecentTargets = clearedState.recentTargets
+        consoleIsLoadingTarget = clearedState.isLoadingTarget
     }
 
     private func bindDiscovery() {
@@ -716,7 +598,7 @@ final class WorkspaceStore: NSObject {
                 if case .connected(let host) = self.connectionState,
                    announcements.contains(where: { $0.identifier == host.identifier }) == false {
                     self.connectionState = .failed(L10n.connectedHostDisappeared)
-                    self.session = nil
+                    self.connectionCoordinator.disconnectCurrentSession()
                 }
             }
             .store(in: &cancellables)
@@ -740,7 +622,7 @@ final class WorkspaceStore: NSObject {
         settings.$previewLayerSpacing
             .receive(on: RunLoop.main)
             .sink { [weak self] value in
-                self?.previewLayerSpacing = CGFloat(min(max(value, 10), 150))
+                self?.previewLayerSpacing = self?.previewState.clampedLayerSpacing(CGFloat(value)) ?? CGFloat(value)
             }
             .store(in: &cancellables)
 
@@ -757,34 +639,19 @@ final class WorkspaceStore: NSObject {
     }
 
     private func startAutoRefreshTimerIfNeeded() {
-        autoRefreshTimer?.invalidate()
-        autoRefreshTimer = nil
-        guard settings.autoRefreshEnabled, previewFixtureEnabled == false else { return }
-        guard case .connected = connectionState else { return }
-
-        let timer = Timer(timeInterval: 2.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                await self?.refreshCapture(clearingVisibleState: false)
-            }
+        connectionCoordinator.configureAutoRefreshTimer(
+            isEnabled: settings.autoRefreshEnabled && previewFixtureEnabled == false,
+            isConnected: {
+                guard case .connected = connectionState else { return false }
+                return true
+            }()
+        ) { [weak self] in
+            await self?.refreshCapture(clearingVisibleState: false)
         }
-        RunLoop.main.add(timer, forMode: .common)
-        autoRefreshTimer = timer
-    }
-
-    private func beginNewConnectionGeneration() -> UInt64 {
-        connectionGeneration &+= 1
-        return connectionGeneration
-    }
-
-    private func isActiveConnection(generation: UInt64, session: any WorkspaceSessionProtocol) -> Bool {
-        generation == connectionGeneration && self.session === session
     }
 
     private func prepareForHostSwitch() {
-        session?.disconnect()
-        session = nil
-        autoRefreshTimer?.invalidate()
-        autoRefreshTimer = nil
+        connectionCoordinator.disconnectCurrentSession()
         clearVisibleWorkspaceState()
         clearConsoleConnectionState()
         errorMessage = nil
@@ -792,31 +659,22 @@ final class WorkspaceStore: NSObject {
 
     private func loadPreviewExport(_ export: WorkspaceRawPreviewExport, sourceName: String?) {
         // 导入归档等价于切换到一个新的只读“离线连接”。
-        _ = beginNewConnectionGeneration()
+        _ = connectionCoordinator.beginNewGeneration()
         prepareForHostSwitch()
         captureInsight = .empty
 
-        let selectedNodeID = export.previewContext.selectedNodeID.flatMap { export.capture.nodes[$0] != nil ? $0 : nil }
-        let focusedNodeID = export.previewContext.focusedNodeID.flatMap { export.capture.nodes[$0] != nil ? $0 : nil }
-        let expandedNodeIDs = Set(export.previewContext.expandedNodeIDs.filter {
-            export.capture.nodes[$0] != nil && export.capture.rootNodeIDs.contains($0) == false
-        })
+        let importedState = captureCoordinator.importedState(from: export)
+        let importedPreviewState = previewState.importedState(from: export.previewContext)
 
-        var importedCapture = export.capture
-        if let previewBitmap = export.previewBitmap,
-           importedCapture.previewBitmaps.contains(where: { $0.rootNodeID == previewBitmap.rootNodeID }) == false {
-            importedCapture.previewBitmaps.append(previewBitmap)
-        }
-
-        capture = importedCapture
-        selectedNodeDetail = export.selectedNodeDetail
-        self.selectedNodeID = selectedNodeID
-        self.focusedNodeID = focusedNodeID
-        previewScale = clampedPreviewScale(CGFloat(export.previewContext.previewScale))
-        previewDisplayMode = export.previewContext.previewDisplayMode
-        previewLayerSpacing = CGFloat(min(max(export.previewContext.previewLayerSpacing, 10), 150))
-        previewShowsLayerBorders = export.previewContext.previewShowsLayerBorders
-        self.expandedNodeIDs = expandedNodeIDs
+        capture = importedState.capture
+        selectedNodeDetail = importedState.selectedNodeDetail
+        selectedNodeID = importedState.selectedNodeID
+        focusedNodeID = importedState.focusedNodeID
+        previewScale = importedPreviewState.scale
+        previewDisplayMode = importedPreviewState.displayMode
+        previewLayerSpacing = importedPreviewState.layerSpacing
+        previewShowsLayerBorders = importedPreviewState.showsLayerBorders
+        expandedNodeIDs = importedState.expandedNodeIDs
         connectionState = .imported(sourceName ?? export.capture.host.displayName)
         errorMessage = nil
     }
@@ -866,19 +724,4 @@ final class WorkspaceStore: NSObject {
         )
     }
 
-    private func normalizeExpandedNodes() {
-        guard let capture else {
-            expandedNodeIDs = []
-            return
-        }
-        expandedNodeIDs = expandedNodeIDs.filter { capture.nodes[$0] != nil && capture.rootNodeIDs.contains($0) == false }
-    }
-
-    private func collapseExpandedDescendants(of nodeID: String) {
-        guard let capture, let node = capture.nodes[nodeID] else { return }
-        for childID in node.childIDs {
-            expandedNodeIDs.remove(childID)
-            collapseExpandedDescendants(of: childID)
-        }
-    }
 }

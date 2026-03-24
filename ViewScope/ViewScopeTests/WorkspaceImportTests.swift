@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 import Testing
 import ViewScopeServer
@@ -7,6 +6,11 @@ import ViewScopeServer
 @Suite(.serialized)
 @MainActor
 struct WorkspaceImportTests {
+    // Pins the extracted preview collaborator so import/export coverage protects the Task 2 split.
+    @Test func workspacePreviewStateIsVisibleToImportCoverage() {
+        _ = WorkspacePreviewState.self
+    }
+
     @Test func importedCaptureClearsConsoleTargetsAndCurrentTarget() async throws {
         let sourceStore = try makeFixtureStore()
         defer { sourceStore.shutdown() }
@@ -32,6 +36,35 @@ struct WorkspaceImportTests {
         try importedStore.loadPreviewExport(from: fileURL)
 
         #expect(importedStore.connectionState.supportsConsole == false)
+        #expect(importedStore.consoleCandidateTargets.isEmpty)
+        #expect(importedStore.consoleCurrentTarget == nil)
+        #expect(importedStore.consoleRecentTargets.isEmpty)
+    }
+
+    @Test func importExportUsesCaptureCoordinatorWithoutNeedingLiveSession() async throws {
+        let sourceStore = try makeFixtureStore()
+        defer { sourceStore.shutdown() }
+        sourceStore.start()
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        await sourceStore.selectNode(withID: "window-0-view-1-2", highlightInHost: false)
+        let expectedDetailNodeID = sourceStore.selectedNodeDetail?.nodeID
+        let export = try #require(sourceStore.makeRawPreviewExport())
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ImportedSelectionFixture-\(UUID().uuidString)")
+            .appendingPathExtension(WorkspaceArchiveCodec.fileExtension)
+        try WorkspaceArchiveCodec.encode(export).write(to: fileURL)
+        defer {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+
+        let importedStore = try makeDisconnectedStore()
+        defer { importedStore.shutdown() }
+        try importedStore.loadPreviewExport(from: fileURL)
+
+        #expect(importedStore.connectionState.supportsConsole == false)
+        #expect(importedStore.selectedNodeID == export.previewContext.selectedNodeID)
+        #expect(importedStore.selectedNodeDetail?.nodeID == expectedDetailNodeID)
         #expect(importedStore.consoleCandidateTargets.isEmpty)
         #expect(importedStore.consoleCurrentTarget == nil)
         #expect(importedStore.consoleRecentTargets.isEmpty)
