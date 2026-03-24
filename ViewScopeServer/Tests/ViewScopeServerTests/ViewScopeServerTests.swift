@@ -100,6 +100,14 @@ final class ViewScopeServerTests: XCTestCase {
             capturedAt: Date(timeIntervalSince1970: 1_731_110_400),
             scale: 2
         )
+        let nodePreviewScreenshot = ViewScopeNodePreviewScreenshotSet(
+            nodeID: "window-0-view-0",
+            groupPNGBase64: "group",
+            soloPNGBase64: "solo",
+            size: .init(width: 120, height: 40),
+            capturedAt: Date(timeIntervalSince1970: 1_731_110_400),
+            scale: 2
+        )
         let capture = ViewScopeCapturePayload(
             host: makeHostInfo(),
             capturedAt: Date(timeIntervalSince1970: 1_731_110_400),
@@ -107,7 +115,8 @@ final class ViewScopeServerTests: XCTestCase {
             rootNodeIDs: ["window-0"],
             nodes: [:],
             captureID: "capture-1",
-            previewBitmaps: [previewBitmap]
+            previewBitmaps: [previewBitmap],
+            nodePreviewScreenshots: [nodePreviewScreenshot]
         )
         let targetReference = ViewScopeRemoteObjectReference(
             captureID: "capture-1",
@@ -146,6 +155,8 @@ final class ViewScopeServerTests: XCTestCase {
         XCTAssertEqual(decoded.kind, .consoleInvokeResponse)
         XCTAssertEqual(decoded.capture?.captureID, "capture-1")
         XCTAssertEqual(decoded.capture?.previewBitmaps.first?.rootNodeID, "window-0")
+        XCTAssertEqual(decoded.capture?.nodePreviewScreenshots.first?.nodeID, "window-0-view-0")
+        XCTAssertEqual(decoded.capture?.nodePreviewScreenshots.first?.soloPNGBase64, "solo")
         XCTAssertEqual(decoded.consoleInvokeResponse?.target.kind, .viewController)
         XCTAssertEqual(decoded.consoleInvokeResponse?.returnedObject?.title, "<Demo.RootViewController: 0x123>")
     }
@@ -346,7 +357,7 @@ final class ViewScopeServerTests: XCTestCase {
     }
 
     @MainActor
-    func testSnapshotBuilderOmitsCapturePreviewBitmapsAndIncludesConsoleTargets() throws {
+    func testSnapshotBuilderUsesDetailScreenshotForRootPreviewAndKeepsConsoleTargets() throws {
         final class FixtureViewController: NSViewController {
             let rootView = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 300))
             let titleLabel = NSTextField(labelWithString: "Hello")
@@ -371,20 +382,259 @@ final class ViewScopeServerTests: XCTestCase {
 
         let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
         let (capture, context) = builder.makeCapture()
-
-        XCTAssertFalse(capture.captureID.isEmpty)
-        XCTAssertTrue(capture.previewBitmaps.isEmpty)
-
         let controllerRootID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
             guard case .view(let capturedView) = reference else { return false }
             return capturedView === controller.view
         })?.key)
+
+        XCTAssertFalse(capture.captureID.isEmpty)
+        XCTAssertTrue(capture.previewBitmaps.isEmpty)
         let detail = try XCTUnwrap(builder.makeDetail(for: controllerRootID, in: context))
         let kinds = detail.consoleTargets.map(\.reference.kind)
 
+        XCTAssertEqual(detail.screenshotRootNodeID, controllerRootID)
+        XCTAssertNotNil(detail.screenshotPNGBase64)
         XCTAssertTrue(kinds.contains(.view))
         XCTAssertTrue(kinds.contains(.viewController))
         XCTAssertTrue(detail.consoleTargets.allSatisfy { $0.reference.captureID == capture.captureID })
+    }
+
+    @MainActor
+    func testSnapshotBuilderCapturesSoloNodePreviewScreenshotForContainerShell() throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 220),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Node Preview Screenshot Fixture"
+        defer {
+            window.orderOut(nil)
+            window.close()
+        }
+
+        let root = FlippedFixtureView(frame: NSRect(x: 0, y: 0, width: 280, height: 180))
+        root.wantsLayer = true
+        root.layer?.backgroundColor = NSColor.white.cgColor
+
+        let container = NSView(frame: NSRect(x: 40, y: 30, width: 160, height: 96))
+        container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor.systemGreen.cgColor
+
+        let child = NSView(frame: NSRect(x: 24, y: 18, width: 44, height: 28))
+        child.wantsLayer = true
+        child.layer?.backgroundColor = NSColor.systemRed.cgColor
+        container.addSubview(child)
+        root.addSubview(container)
+
+        window.contentView = root
+        window.orderFrontRegardless()
+        window.contentView?.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+
+        let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
+        let (capture, context) = builder.makeCapture()
+        let containerNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
+            guard case .view(let capturedView) = reference else { return false }
+            return capturedView === container
+        })?.key)
+        let screenshots = try XCTUnwrap(
+            capture.nodePreviewScreenshots.first(where: { $0.nodeID == containerNodeID })
+        )
+        let soloImage = try XCTUnwrap(decodedImage(fromBase64PNG: screenshots.soloPNGBase64))
+        let soloPixel = try XCTUnwrap(
+            rgbaPixel(
+                in: soloImage,
+                x: 32,
+                y: Int(soloImage.size.height) - 28
+            )
+        )
+
+        XCTAssertNil(screenshots.groupPNGBase64)
+        XCTAssertLessThan(soloPixel.red, 0.5)
+        XCTAssertGreaterThan(soloPixel.green, 0.52)
+        XCTAssertLessThan(soloPixel.blue, 0.5)
+        XCTAssertEqual(screenshots.size.width, container.bounds.width)
+        XCTAssertEqual(screenshots.size.height, container.bounds.height)
+    }
+
+    @MainActor
+    func testSnapshotBuilderStoresOnlySoloPreviewScreenshotForContainerStackView() throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 240),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Stack Preview Orientation Fixture"
+        defer {
+            window.orderOut(nil)
+            window.close()
+        }
+
+        let root = FlippedFixtureView(frame: NSRect(x: 0, y: 0, width: 320, height: 240))
+        root.wantsLayer = true
+        root.layer?.backgroundColor = NSColor.white.cgColor
+
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .centerX
+        stack.spacing = 14
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        let topMarker = NSView(frame: NSRect(x: 0, y: 0, width: 120, height: 36))
+        topMarker.wantsLayer = true
+        topMarker.layer?.backgroundColor = NSColor.systemRed.cgColor
+        topMarker.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            topMarker.widthAnchor.constraint(equalToConstant: 120),
+            topMarker.heightAnchor.constraint(equalToConstant: 36)
+        ])
+
+        let bottomMarker = NSView(frame: NSRect(x: 0, y: 0, width: 120, height: 36))
+        bottomMarker.wantsLayer = true
+        bottomMarker.layer?.backgroundColor = NSColor.systemBlue.cgColor
+        bottomMarker.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            bottomMarker.widthAnchor.constraint(equalToConstant: 120),
+            bottomMarker.heightAnchor.constraint(equalToConstant: 36)
+        ])
+
+        stack.addArrangedSubview(topMarker)
+        stack.addArrangedSubview(bottomMarker)
+        root.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 40),
+            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 28)
+        ])
+
+        window.contentView = root
+        window.orderFrontRegardless()
+        window.layoutIfNeeded()
+        root.layoutSubtreeIfNeeded()
+        stack.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+
+        let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
+        let (capture, context) = builder.makeCapture()
+        let stackNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
+            guard case .view(let capturedView) = reference else { return false }
+            return capturedView === stack
+        })?.key)
+        let screenshots = try XCTUnwrap(
+            capture.nodePreviewScreenshots.first(where: { $0.nodeID == stackNodeID })
+        )
+        XCTAssertNil(screenshots.groupPNGBase64)
+        XCTAssertNotNil(screenshots.soloPNGBase64)
+    }
+
+    @MainActor
+    func testSnapshotBuilderStoresOnlySoloPreviewScreenshotForGenericContainerSubview() throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 240),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Subview Preview Orientation Fixture"
+        defer {
+            window.orderOut(nil)
+            window.close()
+        }
+
+        let root = FlippedFixtureView(frame: NSRect(x: 0, y: 0, width: 320, height: 240))
+        root.wantsLayer = true
+        root.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+
+        let container = NSView(frame: NSRect(x: 40, y: 28, width: 120, height: 84))
+        container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor.white.cgColor
+
+        let topMarker = NSView(frame: NSRect(x: 0, y: 48, width: 120, height: 36))
+        topMarker.wantsLayer = true
+        topMarker.layer?.backgroundColor = NSColor.systemRed.cgColor
+
+        let bottomMarker = NSView(frame: NSRect(x: 0, y: 0, width: 120, height: 36))
+        bottomMarker.wantsLayer = true
+        bottomMarker.layer?.backgroundColor = NSColor.systemBlue.cgColor
+
+        container.addSubview(topMarker)
+        container.addSubview(bottomMarker)
+        root.addSubview(container)
+
+        window.contentView = root
+        window.orderFrontRegardless()
+        window.layoutIfNeeded()
+        root.layoutSubtreeIfNeeded()
+        container.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+
+        let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
+        let (capture, context) = builder.makeCapture()
+        let containerNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
+            guard case .view(let capturedView) = reference else { return false }
+            return capturedView === container
+        })?.key)
+        let screenshots = try XCTUnwrap(
+            capture.nodePreviewScreenshots.first(where: { $0.nodeID == containerNodeID })
+        )
+        XCTAssertNil(screenshots.groupPNGBase64)
+        XCTAssertNotNil(screenshots.soloPNGBase64)
+    }
+
+    @MainActor
+    func testSnapshotBuilderStoresOnlySoloPreviewScreenshotForFlippedContainerSubview() throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 240),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Flipped Subview Preview Orientation Fixture"
+        defer {
+            window.orderOut(nil)
+            window.close()
+        }
+
+        let root = FlippedFixtureView(frame: NSRect(x: 0, y: 0, width: 320, height: 240))
+        root.wantsLayer = true
+        root.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+
+        let container = FlippedFixtureView(frame: NSRect(x: 40, y: 28, width: 120, height: 84))
+        container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor.white.cgColor
+
+        let topMarker = NSView(frame: NSRect(x: 0, y: 0, width: 120, height: 36))
+        topMarker.wantsLayer = true
+        topMarker.layer?.backgroundColor = NSColor.systemRed.cgColor
+
+        let bottomMarker = NSView(frame: NSRect(x: 0, y: 48, width: 120, height: 36))
+        bottomMarker.wantsLayer = true
+        bottomMarker.layer?.backgroundColor = NSColor.systemBlue.cgColor
+
+        container.addSubview(topMarker)
+        container.addSubview(bottomMarker)
+        root.addSubview(container)
+
+        window.contentView = root
+        window.orderFrontRegardless()
+        window.layoutIfNeeded()
+        root.layoutSubtreeIfNeeded()
+        container.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+
+        let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
+        let (capture, context) = builder.makeCapture()
+        let containerNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
+            guard case .view(let capturedView) = reference else { return false }
+            return capturedView === container
+        })?.key)
+        let screenshots = try XCTUnwrap(
+            capture.nodePreviewScreenshots.first(where: { $0.nodeID == containerNodeID })
+        )
+        XCTAssertNil(screenshots.groupPNGBase64)
+        XCTAssertNotNil(screenshots.soloPNGBase64)
     }
 
     @MainActor

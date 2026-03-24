@@ -15,6 +15,10 @@ struct IntegrationGuideContent {
             .split(separator: ".")
             .prefix(2)
             .joined(separator: ".")
+        
+        let podBase = "pod 'ViewScopeServer', :git => 'https://github.com/wangwanjie/ViewScope.git'"
+        let debugConfig = ", :configurations => ['Debug']"
+        
         return [
             Entry(
                 title: L10n.integrationSwiftPackageManager,
@@ -22,7 +26,11 @@ struct IntegrationGuideContent {
             ),
             Entry(
                 title: L10n.integrationCocoaPods,
-                snippet: "pod 'ViewScopeServer', :git => 'https://github.com/wangwanjie/ViewScope.git', :tag => 'v\(releaseVersion)', :configurations => ['Debug']"
+                snippet: """
+                \(podBase), :tag => 'v\(releaseVersion)'\(debugConfig)
+                或者
+                \(podBase), :branch => 'main'\(debugConfig)
+                """
             ),
             Entry(
                 title: L10n.integrationCarthage,

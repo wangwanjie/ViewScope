@@ -84,6 +84,10 @@ final class PreviewCanvasView: NSView {
         }
     }
 
+    var showsSystemWrapperViews = false {
+        didSet { invalidateDisplay() }
+    }
+
     var zoomScale: CGFloat = 1 {
         didSet {
             if abs(viewportState.scale - zoomScale) > 0.0001 {
@@ -153,7 +157,8 @@ final class PreviewCanvasView: NSView {
                 previewRootNodeID: previewRootNodeID,
                 expandedNodeIDs: expandedNodeIDs,
                 geometryMode: geometryMode,
-                layerTransform: layerTransform
+                layerTransform: layerTransform,
+                showsSystemWrapperViews: showsSystemWrapperViews
             )
         }
         if displayMode == .layered {
@@ -328,7 +333,8 @@ final class PreviewCanvasView: NSView {
         zoomScale: CGFloat,
         previewLayerSpacing: CGFloat,
         previewShowsLayerBorders: Bool,
-        previewExpandedNodeIDs: Set<String>
+        previewExpandedNodeIDs: Set<String>,
+        showsSystemWrapperViews: Bool
     ) {
         // 面板层批量下发状态，避免多个 didSet 触发多次无意义重绘。
         suppressDisplayInvalidation = true
@@ -345,6 +351,7 @@ final class PreviewCanvasView: NSView {
         self.previewLayerSpacing = previewLayerSpacing
         self.previewShowsLayerBorders = previewShowsLayerBorders
         self.previewExpandedNodeIDs = previewExpandedNodeIDs
+        self.showsSystemWrapperViews = showsSystemWrapperViews
         suppressDisplayInvalidation = false
         needsDisplay = true
     }
@@ -500,19 +507,6 @@ final class PreviewCanvasView: NSView {
             in: canvasRect,
             from: CGRect(origin: .zero, size: canvasSize)
         )
-    }
-
-    private func drawLayeredPreview(plan: PreviewLayeredRenderPlan) {
-        for overlay in plan.overlayQuads {
-            guard overlay.isSelected == false else { continue }
-            let outline = bezierPath(for: overlay.quad)
-            NSColor.white.withAlphaComponent(overlay.style.fillAlpha).setFill()
-            outline.fill()
-            guard previewShowsLayerBorders else { continue }
-            NSColor.systemBlue.withAlphaComponent(overlay.style.strokeAlpha).setStroke()
-            outline.lineWidth = overlay.style.strokeWidth / max(viewportState.scale, 0.001)
-            outline.stroke()
-        }
     }
 
     private func drawLayeredSelection(for quad: [CGPoint]) {

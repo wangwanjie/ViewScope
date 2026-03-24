@@ -14,6 +14,7 @@ struct PreviewImageResolver {
         let cacheKey: String
         let base64PNG: String
         let size: CGSize
+        let rootNodeID: String
     }
 
     static func resolve(
@@ -27,7 +28,8 @@ struct PreviewImageResolver {
             return Resolution(
                 cacheKey: "bitmap:\(capture.captureID):\(preferredRootNodeID)",
                 base64PNG: bitmap.pngBase64,
-                size: bitmap.size.cgSize
+                size: bitmap.size.cgSize,
+                rootNodeID: bitmap.rootNodeID
             )
         }
 
@@ -37,12 +39,13 @@ struct PreviewImageResolver {
             return nil
         }
 
-        let rootNodeID = preferredRootNodeID ?? detail.screenshotRootNodeID ?? detail.nodeID
+        let rootNodeID = detail.screenshotRootNodeID ?? preferredRootNodeID ?? detail.nodeID
         let captureKey = capture?.captureID ?? "detail-only"
         return Resolution(
             cacheKey: "detail:\(captureKey):\(rootNodeID)",
             base64PNG: base64PNG,
-            size: detail.screenshotSize.cgSize
+            size: detail.screenshotSize.cgSize,
+            rootNodeID: rootNodeID
         )
     }
 }
@@ -255,9 +258,14 @@ final class PreviewPanelController: NSViewController {
             }
             .store(in: &cancellables)
 
-        Publishers.CombineLatest3(store.$previewLayerSpacing, store.$previewShowsLayerBorders, store.$expandedNodeIDs)
+        Publishers.CombineLatest4(
+            store.$previewLayerSpacing,
+            store.$previewShowsLayerBorders,
+            store.$expandedNodeIDs,
+            store.$showsSystemWrapperViews
+        )
             .receive(on: RunLoop.main)
-            .sink { [weak self] _, _, _ in
+            .sink { [weak self] _, _, _, _ in
                 self?.scheduleRenderCurrentState()
             }
             .store(in: &cancellables)
@@ -291,15 +299,17 @@ final class PreviewPanelController: NSViewController {
         guideView.isHidden = capture != nil
         canvasView.isHidden = capture == nil || store.previewDisplayMode != .flat
         layeredSceneView.isHidden = capture == nil || store.previewDisplayMode != .layered
-        let previewRootNodeID = resolvedPreviewRootNodeID(capture: capture, detail: store.selectedNodeDetail)
+        let requestedPreviewRootNodeID = resolvedPreviewRootNodeID(capture: capture, detail: store.selectedNodeDetail)
         let previewResolution = PreviewImageResolver.resolve(
             capture: capture,
-            preferredRootNodeID: previewRootNodeID,
+            preferredRootNodeID: requestedPreviewRootNodeID,
             detail: store.selectedNodeDetail
         )
+        let previewRootNodeID = previewResolution?.rootNodeID ?? requestedPreviewRootNodeID
         let previewImage = resolvedPreviewImage(from: previewResolution)
         let previewCanvasSize = capture == nil ? .zero : resolvedCanvasSize(
             capture: capture,
+            previewRootNodeID: previewRootNodeID,
             imageResolution: previewResolution
         )
         let geometryMode = resolvedGeometryMode(capture: capture, detail: store.selectedNodeDetail)
@@ -325,7 +335,8 @@ final class PreviewPanelController: NSViewController {
             zoomScale: store.previewScale,
             previewLayerSpacing: store.previewLayerSpacing,
             previewShowsLayerBorders: store.previewShowsLayerBorders,
-            previewExpandedNodeIDs: store.expandedNodeIDs
+            previewExpandedNodeIDs: store.expandedNodeIDs,
+            showsSystemWrapperViews: store.showsSystemWrapperViews
         )
         if store.previewDisplayMode == .flat,
            previewCanvasSize.width > 0.5,
@@ -347,7 +358,8 @@ final class PreviewPanelController: NSViewController {
                 zoomScale: store.previewScale,
                 previewLayerSpacing: store.previewLayerSpacing,
                 previewShowsLayerBorders: store.previewShowsLayerBorders,
-                previewExpandedNodeIDs: store.expandedNodeIDs
+                previewExpandedNodeIDs: store.expandedNodeIDs,
+                showsSystemWrapperViews: store.showsSystemWrapperViews
             )
             if isEnteringLayeredFromFlat {
                 // 进入 3D 时沿用 2D 当前可见区域，避免用户视角突然跳回全局中心。
@@ -503,13 +515,17 @@ final class PreviewPanelController: NSViewController {
         return image
     }
 
-    private func resolvedCanvasSize(capture: ViewScopeCapturePayload?, imageResolution: PreviewImageResolver.Resolution?) -> CGSize {
+    private func resolvedCanvasSize(
+        capture: ViewScopeCapturePayload?,
+        previewRootNodeID: String?,
+        imageResolution: PreviewImageResolver.Resolution?
+    ) -> CGSize {
         if let imageResolution,
            imageResolution.size.width > 0,
            imageResolution.size.height > 0 {
             return imageResolution.size
         }
-        if let rootID = resolvedPreviewRootNodeID(capture: capture, detail: store.selectedNodeDetail) ?? capture?.rootNodeIDs.first,
+        if let rootID = previewRootNodeID ?? capture?.rootNodeIDs.first,
            let rootNode = capture?.nodes[rootID] {
             return CGSize(width: CGFloat(rootNode.frame.width), height: CGFloat(rootNode.frame.height))
         }

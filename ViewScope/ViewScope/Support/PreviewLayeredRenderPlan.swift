@@ -50,10 +50,16 @@ struct PreviewLayeredRenderPlan {
         expandedNodeIDs: Set<String> = [],
         geometryMode: PreviewCanvasGeometryMode = .directGlobalCanvasRect,
         geometry: ViewHierarchyGeometry = ViewHierarchyGeometry(),
-        layerTransform: PreviewLayerTransform
+        layerTransform: PreviewLayerTransform,
+        showsSystemWrapperViews: Bool = false
     ) -> PreviewLayeredRenderPlan {
         let canvasRect = CGRect(origin: .zero, size: canvasSize)
-        let rootNodeIDs = previewRootNodeID.map { [$0] } ?? focusedNodeID.map { [$0] } ?? capture.rootNodeIDs
+        let rawRootNodeIDs = previewRootNodeID.map { [$0] } ?? focusedNodeID.map { [$0] } ?? capture.rootNodeIDs
+        let rootNodeIDs = ViewHierarchyPresentation.presentedRootNodeIDs(
+            from: rawRootNodeIDs,
+            nodes: capture.nodes,
+            showsSystemWrappers: showsSystemWrapperViews
+        )
         let coordinateRootNodeID = previewRootNodeID
         let geometryVisibleNodeIDs = Set(
             geometry.visibleNodeIDs(in: capture, rootNodeID: previewRootNodeID ?? focusedNodeID)
@@ -61,7 +67,8 @@ struct PreviewLayeredRenderPlan {
         let visibleNodes = visibleNodes(
             rootNodeIDs: rootNodeIDs,
             capture: capture,
-            expandedNodeIDs: expandedNodeIDs
+            expandedNodeIDs: expandedNodeIDs,
+            showsSystemWrapperViews: showsSystemWrapperViews
         )
 
         var overlayQuads: [Overlay] = []
@@ -175,16 +182,23 @@ struct PreviewLayeredRenderPlan {
     private static func visibleNodes(
         rootNodeIDs: [String],
         capture: ViewScopeCapturePayload,
-        expandedNodeIDs: Set<String>
+        expandedNodeIDs: Set<String>,
+        showsSystemWrapperViews: Bool
     ) -> [VisibleNode] {
         // planeDepth 表示“当前节点属于第几代展开平面”，
         // 它不是 SceneKit 的 zIndex，只用于 2D layered preview 切层。
         var result: [VisibleNode] = []
 
         func visit(nodeID: String, planeDepth: Int, expandsAutomatically: Bool) {
-            guard let node = capture.nodes[nodeID] else { return }
+            guard capture.nodes[nodeID] != nil else { return }
             let shouldExpand = expandsAutomatically || expandedNodeIDs.contains(nodeID)
-            let expandedChildIDs = shouldExpand ? node.childIDs.filter { capture.nodes[$0] != nil } : []
+            let expandedChildIDs = shouldExpand
+                ? ViewHierarchyPresentation.presentedChildNodeIDs(
+                    of: nodeID,
+                    nodes: capture.nodes,
+                    showsSystemWrappers: showsSystemWrapperViews
+                ).filter { capture.nodes[$0] != nil }
+                : []
 
             result.append(
                 VisibleNode(

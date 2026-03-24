@@ -132,8 +132,18 @@ final class ViewTreePanelController: NSViewController {
     private func buildFilteredRoots() -> [ViewTreeNodeItem] {
         guard let capture = store.capture else { return [] }
         let rootNodeIDs = store.focusedNodeID.map { [$0] } ?? capture.rootNodeIDs
-        let roots = rootNodeIDs.compactMap { ViewTreeNodeItem.make(nodeID: $0, nodes: capture.nodes) }
-        let presentationRoots = store.showsSystemWrapperViews ? roots : filterSystemWrapperItems(in: roots)
+        let presentationRootNodeIDs = ViewHierarchyPresentation.presentedRootNodeIDs(
+            from: rootNodeIDs,
+            nodes: capture.nodes,
+            showsSystemWrappers: store.showsSystemWrapperViews
+        )
+        let presentationRoots = presentationRootNodeIDs.compactMap {
+            ViewTreeNodeItem.make(
+                nodeID: $0,
+                nodes: capture.nodes,
+                showsSystemWrappers: store.showsSystemWrapperViews
+            )
+        }
         let query = currentQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !query.isEmpty else { return presentationRoots }
         return presentationRoots.compactMap { $0.filtered(matching: query) }
@@ -264,17 +274,6 @@ final class ViewTreePanelController: NSViewController {
         guard let value, !value.isEmpty else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(value, forType: .string)
-    }
-
-    private func filterSystemWrapperItems(in items: [ViewTreeNodeItem]) -> [ViewTreeNodeItem] {
-        items.flatMap { item in
-            let filteredChildren = filterSystemWrapperItems(in: item.children)
-            let rebuilt = ViewTreeNodeItem(node: item.node, children: filteredChildren)
-            if ViewTreeNodePresentation.isSystemWrapper(node: item.node) {
-                return filteredChildren
-            }
-            return [rebuilt]
-        }
     }
 
     private func expandRecursively(_ item: ViewTreeNodeItem) {
@@ -461,7 +460,7 @@ enum ViewTreeNodePresentation {
             case .button:
                 return ["button.programmable", "capsule", "rectangle.and.hand.point.up.left"]
             case .label:
-                return ["textformat", "captions.bubble"]
+                return ["text.alignleft", "captions.bubble", "character"]
             case .image:
                 return ["photo", "photo.on.rectangle"]
             case .scrollView:
@@ -473,7 +472,7 @@ enum ViewTreeNodePresentation {
             case .stackView:
                 return ["square.stack.3d.down.right", "square.stack.3d.up"]
             case .textField:
-                return ["textbox", "character.textbox", "text.cursor"]
+                return ["text.cursor", "character.textbox", "textbox"]
             case .slider:
                 return ["slider.horizontal.3", "line.3.horizontal.decrease.circle"]
             case .segmentedControl:
@@ -554,11 +553,11 @@ enum ViewTreeNodePresentation {
         if className.contains("NSSegmentedControl") {
             return .segmentedControl
         }
-        if className.contains("NSSearchField") || className.contains("NSTextView") || className.contains("NSSecureTextField") {
+        if className.contains("NSTextField") {
             return .textField
         }
-        if className.contains("NSTextField") {
-            return .label
+        if className.contains("NSSearchField") || className.contains("NSTextView") || className.contains("NSSecureTextField") {
+            return .textField
         }
         if className.contains("NSImageView") {
             return .image
@@ -590,36 +589,7 @@ enum ViewTreeNodePresentation {
     }
 
     static func isSystemWrapper(node: ViewScopeHierarchyNode) -> Bool {
-        let className = ViewScopeClassNameFormatter.displayName(for: node.className)
-        let exactMatches = [
-            "_NSSplitViewItemViewWrapper",
-            "_NSSplitViewCollapsedInteractionsView",
-            "NSBlurryAlleywayView",
-            "NSThemeFrame",
-            "NSTitlebarContainerBlockingView",
-            "NSTitlebarView",
-            "_NSTitlebarDecorationView",
-            "_NSTitlebarContainerView",
-            "_NSToolbarFullScreenWindowContentView"
-        ]
-        if exactMatches.contains(where: { className.contains($0) }) {
-            return true
-        }
-
-        let wrapperKeywords = [
-            "Wrapper",
-            "Collapsed",
-            "Titlebar",
-            "Toolbar",
-            "ThemeFrame",
-            "Decoration",
-            "Auxiliary",
-            "Blocking",
-            "Overlay",
-            "FullScreen"
-        ]
-        let looksSystemOwned = className.hasPrefix("_NS") || className.hasPrefix("NS")
-        return looksSystemOwned && wrapperKeywords.contains(where: { className.contains($0) })
+        ViewHierarchyPresentation.isSystemWrapper(node)
     }
 
     private static func searchableText(for node: ViewScopeHierarchyNode) -> String {
@@ -1173,9 +1143,20 @@ final class ViewTreeNodeItem: NSObject {
         self.children.forEach { $0.parent = self }
     }
 
-    static func make(nodeID: String, nodes: [String: ViewScopeHierarchyNode]) -> ViewTreeNodeItem? {
+    static func make(
+        nodeID: String,
+        nodes: [String: ViewScopeHierarchyNode],
+        showsSystemWrappers: Bool = false
+    ) -> ViewTreeNodeItem? {
         guard let node = nodes[nodeID] else { return nil }
-        let children = node.childIDs.compactMap { make(nodeID: $0, nodes: nodes) }
+        let childNodeIDs = ViewHierarchyPresentation.presentedChildNodeIDs(
+            of: nodeID,
+            nodes: nodes,
+            showsSystemWrappers: showsSystemWrappers
+        )
+        let children = childNodeIDs.compactMap {
+            make(nodeID: $0, nodes: nodes, showsSystemWrappers: showsSystemWrappers)
+        }
         return ViewTreeNodeItem(node: node, children: children)
     }
 

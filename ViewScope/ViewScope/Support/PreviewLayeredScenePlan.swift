@@ -56,11 +56,22 @@ struct PreviewLayeredScenePlan: Equatable {
         expandedNodeIDs: Set<String>,
         previewRootNodeID: String? = nil,
         geometryMode: PreviewCanvasGeometryMode = .directGlobalCanvasRect,
-        geometry: ViewHierarchyGeometry = ViewHierarchyGeometry()
+        geometry: ViewHierarchyGeometry = ViewHierarchyGeometry(),
+        showsSystemWrapperViews: Bool = false
     ) -> PreviewLayeredScenePlan {
-        let rootNodeIDs = previewRootNodeID.map { [$0] } ?? capture.rootNodeIDs
+        let rawRootNodeIDs = previewRootNodeID.map { [$0] } ?? capture.rootNodeIDs
+        let rootNodeIDs = ViewHierarchyPresentation.presentedRootNodeIDs(
+            from: rawRootNodeIDs,
+            nodes: capture.nodes,
+            showsSystemWrappers: showsSystemWrapperViews
+        )
         let geometryVisibleNodeIDs = Set(geometry.visibleNodeIDs(in: capture, rootNodeID: previewRootNodeID))
-        let visibleNodes = visibleNodes(rootNodeIDs: rootNodeIDs, capture: capture, expandedNodeIDs: expandedNodeIDs)
+        let visibleNodes = visibleNodes(
+            rootNodeIDs: rootNodeIDs,
+            capture: capture,
+            expandedNodeIDs: expandedNodeIDs,
+            showsSystemWrapperViews: showsSystemWrapperViews
+        )
 
         var pendingItems: [PendingItem] = []
         var nodeIDsByPlane: [Int: [String]] = [:]
@@ -207,7 +218,8 @@ struct PreviewLayeredScenePlan: Equatable {
     private static func visibleNodes(
         rootNodeIDs: [String],
         capture: ViewScopeCapturePayload,
-        expandedNodeIDs: Set<String>
+        expandedNodeIDs: Set<String>,
+        showsSystemWrapperViews: Bool
     ) -> [VisibleNode] {
         // 这里把“是否独立分层”和“节点是否存在于 scene 中”拆开：
         // collapsed 节点依然保留 item，只是会继承父节点的 zIndex/平面语义。
@@ -225,7 +237,11 @@ struct PreviewLayeredScenePlan: Equatable {
             }
 
             let shouldExpand = expandsAutomatically || expandedNodeIDs.contains(nodeID)
-            let visibleChildIDs = node.childIDs.filter { childID in
+            let visibleChildIDs = ViewHierarchyPresentation.presentedChildNodeIDs(
+                of: nodeID,
+                nodes: capture.nodes,
+                showsSystemWrappers: showsSystemWrapperViews
+            ).filter { childID in
                 capture.nodes[childID]?.isHidden == false
             }
             let expandedChildIDs = shouldExpand ? visibleChildIDs : []

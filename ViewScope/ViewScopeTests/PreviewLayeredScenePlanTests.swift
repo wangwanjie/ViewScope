@@ -259,6 +259,62 @@ struct PreviewLayeredScenePlanTests {
         #expect(button.displayRect == CGRect(x: 207.5, y: 96, width: 76, height: 24))
     }
 
+    @Test func layeredScenePlanPunchesExpandedMixedFlippedStackChildrenOutOfParentAndAncestor() async throws {
+        let titleRect = CGRect(x: 535, y: 293, width: 338, height: 33)
+        let subtitleRect = CGRect(x: 456.5, y: 340, width: 495.5, height: 17)
+        let buttonRect = CGRect(x: 666, y: 371, width: 76, height: 24)
+        let stackRect = CGRect(x: 458.5, y: 293, width: 491.5, height: 102)
+        let workspaceRect = CGRect(x: 228, y: 0, width: 952, height: 688)
+        let capture = makeMixedFlippedExpandedStackCapture(
+            workspaceRect: workspaceRect,
+            stackRect: stackRect,
+            titleRect: titleRect,
+            subtitleRect: subtitleRect,
+            buttonRect: buttonRect
+        )
+
+        let plan = PreviewLayeredScenePlan.make(
+            capture: capture,
+            canvasSize: CGSize(width: 1180, height: 688),
+            expandedNodeIDs: ["split", "workspace", "stack", "root"]
+        )
+
+        let workspace = try #require(plan.item(for: "workspace"))
+        let stack = try #require(plan.item(for: "stack"))
+
+        #expect(workspace.punchedOutRects.contains(stackRect))
+        #expect(stack.punchedOutRects.contains(titleRect))
+        #expect(stack.punchedOutRects.contains(subtitleRect))
+        #expect(stack.punchedOutRects.contains(buttonRect))
+    }
+
+    @Test func layeredScenePlanPromotesPresentedChildrenAcrossHiddenSystemWrapperChains() async throws {
+        let wrapperRect = CGRect(x: 228, y: 0, width: 952, height: 688)
+        let workspaceRect = CGRect(x: 228, y: 0, width: 952, height: 688)
+        let stackRect = CGRect(x: 458.5, y: 293, width: 491.5, height: 102)
+        let capture = makeWrapperPromotedCapture(
+            wrapperRect: wrapperRect,
+            workspaceRect: workspaceRect,
+            stackRect: stackRect
+        )
+
+        let plan = PreviewLayeredScenePlan.make(
+            capture: capture,
+            canvasSize: CGSize(width: 1180, height: 688),
+            expandedNodeIDs: ["split", "workspace", "stack", "root"]
+        )
+
+        let split = try #require(plan.item(for: "split"))
+        let workspace = try #require(plan.item(for: "workspace"))
+        let stack = try #require(plan.item(for: "stack"))
+
+        #expect(plan.item(for: "wrapper") == nil)
+        #expect(workspace.displayingIndependently)
+        #expect(split.punchedOutRects.contains(workspaceRect))
+        #expect(workspace.punchedOutRects.contains(stackRect))
+        #expect(stack.displayingIndependently)
+    }
+
     private func makeNestedCapture() -> ViewScopeCapturePayload {
         let nodes: [String: ViewScopeHierarchyNode] = [
             "root": makeNode(id: "root", parentID: nil, childIDs: ["root-a", "root-b"], frame: CGRect(x: 0, y: 0, width: 600, height: 400), depth: 0),
@@ -294,7 +350,8 @@ struct PreviewLayeredScenePlanTests {
         parentID: String?,
         childIDs: [String],
         frame: CGRect,
-        depth: Int
+        depth: Int,
+        isFlipped: Bool = true
     ) -> ViewScopeHierarchyNode {
         ViewScopeHierarchyNode(
             id: id,
@@ -309,9 +366,213 @@ struct PreviewLayeredScenePlanTests {
             isHidden: false,
             alphaValue: 1,
             wantsLayer: true,
-            isFlipped: true,
+            isFlipped: isFlipped,
             clippingEnabled: false,
             depth: depth
+        )
+    }
+
+    private func makeMixedFlippedExpandedStackCapture(
+        workspaceRect: CGRect,
+        stackRect: CGRect,
+        titleRect: CGRect,
+        subtitleRect: CGRect,
+        buttonRect: CGRect
+    ) -> ViewScopeCapturePayload {
+        let nodes: [String: ViewScopeHierarchyNode] = [
+            "root": makeNode(
+                id: "root",
+                parentID: nil,
+                childIDs: ["split"],
+                frame: CGRect(x: 0, y: 0, width: 1180, height: 688),
+                depth: 0,
+                isFlipped: false
+            ),
+            "split": makeNode(
+                id: "split",
+                parentID: "root",
+                childIDs: ["sidebar", "workspace"],
+                frame: CGRect(x: 0, y: 0, width: 1180, height: 688),
+                depth: 1,
+                isFlipped: true
+            ),
+            "sidebar": makeNode(
+                id: "sidebar",
+                parentID: "split",
+                childIDs: [],
+                frame: CGRect(x: 0, y: 0, width: 228, height: 688),
+                depth: 2,
+                isFlipped: true
+            ),
+            "workspace": makeNode(
+                id: "workspace",
+                parentID: "split",
+                childIDs: ["stack"],
+                frame: workspaceRect,
+                depth: 2,
+                isFlipped: false
+            ),
+            "stack": makeNode(
+                id: "stack",
+                parentID: "workspace",
+                childIDs: ["title", "subtitle", "button"],
+                frame: stackRect,
+                depth: 3,
+                isFlipped: false
+            ),
+            "title": makeNode(
+                id: "title",
+                parentID: "stack",
+                childIDs: [],
+                frame: titleRect,
+                depth: 4,
+                isFlipped: true
+            ),
+            "subtitle": makeNode(
+                id: "subtitle",
+                parentID: "stack",
+                childIDs: [],
+                frame: subtitleRect,
+                depth: 4,
+                isFlipped: true
+            ),
+            "button": makeNode(
+                id: "button",
+                parentID: "stack",
+                childIDs: [],
+                frame: buttonRect,
+                depth: 4,
+                isFlipped: true
+            )
+        ]
+
+        return ViewScopeCapturePayload(
+            host: ViewScopeHostInfo(
+                displayName: "Fixture Host",
+                bundleIdentifier: "cn.vanjay.fixture",
+                version: "1.0",
+                build: "1",
+                processIdentifier: 1,
+                runtimeVersion: viewScopeServerRuntimeVersion,
+                supportsHighlighting: true
+            ),
+            capturedAt: Date(timeIntervalSinceReferenceDate: 0),
+            summary: ViewScopeCaptureSummary(nodeCount: nodes.count, windowCount: 1, visibleWindowCount: 1, captureDurationMilliseconds: 1),
+            rootNodeIDs: ["root"],
+            nodes: nodes,
+            captureID: "mixed-flipped-expanded-stack-fixture",
+            previewBitmaps: []
+        )
+    }
+
+    private func makeWrapperPromotedCapture(
+        wrapperRect: CGRect,
+        workspaceRect: CGRect,
+        stackRect: CGRect
+    ) -> ViewScopeCapturePayload {
+        let nodes: [String: ViewScopeHierarchyNode] = [
+            "root": makeNode(
+                id: "root",
+                parentID: nil,
+                childIDs: ["split"],
+                frame: CGRect(x: 0, y: 0, width: 1180, height: 688),
+                depth: 0,
+                isFlipped: false
+            ),
+            "split": ViewScopeHierarchyNode(
+                id: "split",
+                parentID: "root",
+                kind: .view,
+                className: "NSSplitView",
+                title: "split",
+                subtitle: nil,
+                frame: ViewScopeRect(x: 0, y: 0, width: 1180, height: 688),
+                bounds: ViewScopeRect(x: 0, y: 0, width: 1180, height: 688),
+                childIDs: ["sidebar", "wrapper"],
+                isHidden: false,
+                alphaValue: 1,
+                wantsLayer: true,
+                isFlipped: true,
+                clippingEnabled: false,
+                depth: 1
+            ),
+            "sidebar": makeNode(
+                id: "sidebar",
+                parentID: "split",
+                childIDs: [],
+                frame: CGRect(x: 0, y: 0, width: 228, height: 688),
+                depth: 2,
+                isFlipped: true
+            ),
+            "wrapper": ViewScopeHierarchyNode(
+                id: "wrapper",
+                parentID: "split",
+                kind: .view,
+                className: "_NSSplitViewItemViewWrapper",
+                title: "wrapper",
+                subtitle: nil,
+                frame: ViewScopeRect(x: wrapperRect.minX, y: wrapperRect.minY, width: wrapperRect.width, height: wrapperRect.height),
+                bounds: ViewScopeRect(x: 0, y: 0, width: wrapperRect.width, height: wrapperRect.height),
+                childIDs: ["workspace"],
+                isHidden: false,
+                alphaValue: 1,
+                wantsLayer: true,
+                isFlipped: true,
+                clippingEnabled: false,
+                depth: 2
+            ),
+            "workspace": ViewScopeHierarchyNode(
+                id: "workspace",
+                parentID: "wrapper",
+                kind: .view,
+                className: "WorkspaceDropView",
+                title: "workspace",
+                subtitle: nil,
+                frame: ViewScopeRect(x: workspaceRect.minX, y: workspaceRect.minY, width: workspaceRect.width, height: workspaceRect.height),
+                bounds: ViewScopeRect(x: 0, y: 0, width: workspaceRect.width, height: workspaceRect.height),
+                childIDs: ["stack"],
+                isHidden: false,
+                alphaValue: 1,
+                wantsLayer: true,
+                isFlipped: false,
+                clippingEnabled: false,
+                depth: 3
+            ),
+            "stack": ViewScopeHierarchyNode(
+                id: "stack",
+                parentID: "workspace",
+                kind: .view,
+                className: "NSStackView",
+                title: "stack",
+                subtitle: nil,
+                frame: ViewScopeRect(x: stackRect.minX, y: stackRect.minY, width: stackRect.width, height: stackRect.height),
+                bounds: ViewScopeRect(x: 0, y: 0, width: stackRect.width, height: stackRect.height),
+                childIDs: [],
+                isHidden: false,
+                alphaValue: 1,
+                wantsLayer: true,
+                isFlipped: false,
+                clippingEnabled: false,
+                depth: 4
+            )
+        ]
+
+        return ViewScopeCapturePayload(
+            host: ViewScopeHostInfo(
+                displayName: "Fixture Host",
+                bundleIdentifier: "cn.vanjay.fixture",
+                version: "1.0",
+                build: "1",
+                processIdentifier: 1,
+                runtimeVersion: viewScopeServerRuntimeVersion,
+                supportsHighlighting: true
+            ),
+            capturedAt: Date(timeIntervalSinceReferenceDate: 0),
+            summary: ViewScopeCaptureSummary(nodeCount: nodes.count, windowCount: 1, visibleWindowCount: 1, captureDurationMilliseconds: 1),
+            rootNodeIDs: ["root"],
+            nodes: nodes,
+            captureID: "wrapper-promoted-fixture",
+            previewBitmaps: []
         )
     }
 }

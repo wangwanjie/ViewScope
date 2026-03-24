@@ -226,7 +226,13 @@ final class WorkspaceStore: NSObject {
             return
         }
 
-        guard let session else { return }
+        guard let session else {
+            if selectedNodeDetail?.nodeID != nodeID {
+                selectedNodeDetail = nil
+            }
+            updateConsoleTargets(from: selectedNodeDetail)
+            return
+        }
         if consoleAutoSyncEnabled {
             consoleIsLoadingTarget = true
         }
@@ -409,6 +415,7 @@ final class WorkspaceStore: NSObject {
         } else {
             expandedNodeIDs.remove(nodeID)
             collapseExpandedDescendants(of: nodeID)
+            retargetSelectionToVisibleAncestorIfNeeded(in: capture)
         }
     }
 
@@ -521,17 +528,39 @@ final class WorkspaceStore: NSObject {
             return
         }
 
-        if let preferredFocusedNodeID, capture.nodes[preferredFocusedNodeID] != nil {
-            focusedNodeID = preferredFocusedNodeID
+        normalizeExpandedNodes()
+        let visibleNodeIDs = ViewHierarchyPresentation.visiblePresentedNodeIDs(
+            rootNodeIDs: capture.rootNodeIDs,
+            nodes: capture.nodes,
+            expandedNodeIDs: expandedNodeIDs,
+            showsSystemWrappers: showsSystemWrapperViews
+        )
+
+        if let preferredFocusedNodeID {
+            focusedNodeID = resolvedVisibleSelectionTarget(
+                from: preferredFocusedNodeID,
+                capture: capture,
+                visibleNodeIDs: visibleNodeIDs
+            )
         } else if let focusedNodeID, capture.nodes[focusedNodeID] == nil {
             self.focusedNodeID = nil
         }
 
-        normalizeExpandedNodes()
+        normalizeVisibleSelection(in: capture, visibleNodeIDs: visibleNodeIDs)
 
         let targetNodeID: String?
-        if let preferredNodeID, capture.nodes[preferredNodeID] != nil {
-            targetNodeID = preferredNodeID
+        if let preferredNodeID {
+            targetNodeID = resolvedVisibleSelectionTarget(
+                from: preferredNodeID,
+                capture: capture,
+                visibleNodeIDs: visibleNodeIDs
+            ) ?? capture.rootNodeIDs.first
+        } else if let selectedNodeID {
+            targetNodeID = resolvedVisibleSelectionTarget(
+                from: selectedNodeID,
+                capture: capture,
+                visibleNodeIDs: visibleNodeIDs
+            ) ?? capture.rootNodeIDs.first
         } else {
             targetNodeID = capture.rootNodeIDs.first
         }
@@ -540,9 +569,86 @@ final class WorkspaceStore: NSObject {
             expandAncestors(of: targetNodeID)
         }
 
-        if selectedNodeID != targetNodeID || selectedNodeDetail == nil || forceReloadDetail {
+        if selectedNodeID != targetNodeID ||
+            selectedNodeDetail?.nodeID != targetNodeID ||
+            selectedNodeDetail == nil ||
+            forceReloadDetail {
             await selectNode(withID: targetNodeID, highlightInHost: false)
         }
+    }
+
+    private func normalizeVisibleSelection(
+        in capture: ViewScopeCapturePayload,
+        visibleNodeIDs: Set<String>? = nil
+    ) {
+        let resolvedVisibleNodeIDs = visibleNodeIDs ?? ViewHierarchyPresentation.visiblePresentedNodeIDs(
+            rootNodeIDs: capture.rootNodeIDs,
+            nodes: capture.nodes,
+            expandedNodeIDs: expandedNodeIDs,
+            showsSystemWrappers: showsSystemWrapperViews
+        )
+
+        selectedNodeID = resolvedVisibleSelectionTarget(
+            from: selectedNodeID,
+            capture: capture,
+            visibleNodeIDs: resolvedVisibleNodeIDs
+        )
+        focusedNodeID = resolvedVisibleSelectionTarget(
+            from: focusedNodeID,
+            capture: capture,
+            visibleNodeIDs: resolvedVisibleNodeIDs
+        )
+    }
+
+    private func retargetSelectionToVisibleAncestorIfNeeded(in capture: ViewScopeCapturePayload) {
+        let visibleNodeIDs = ViewHierarchyPresentation.visiblePresentedNodeIDs(
+            rootNodeIDs: capture.rootNodeIDs,
+            nodes: capture.nodes,
+            expandedNodeIDs: expandedNodeIDs,
+            showsSystemWrappers: showsSystemWrapperViews
+        )
+        let nextSelectedNodeID = resolvedVisibleSelectionTarget(
+            from: selectedNodeID,
+            capture: capture,
+            visibleNodeIDs: visibleNodeIDs
+        )
+        let nextFocusedNodeID = resolvedVisibleSelectionTarget(
+            from: focusedNodeID,
+            capture: capture,
+            visibleNodeIDs: visibleNodeIDs
+        )
+
+        focusedNodeID = nextFocusedNodeID
+
+        guard nextSelectedNodeID != selectedNodeID else {
+            return
+        }
+
+        selectedNodeID = nextSelectedNodeID
+        Task { [weak self] in
+            await self?.selectNode(withID: nextSelectedNodeID, highlightInHost: false)
+        }
+    }
+
+    private func resolvedVisibleSelectionTarget(
+        from nodeID: String?,
+        capture: ViewScopeCapturePayload,
+        visibleNodeIDs: Set<String>
+    ) -> String? {
+        var currentNodeID = nodeID
+
+        while let candidateNodeID = currentNodeID {
+            if visibleNodeIDs.contains(candidateNodeID) {
+                return candidateNodeID
+            }
+            currentNodeID = ViewHierarchyPresentation.presentedParentNodeID(
+                of: candidateNodeID,
+                nodes: capture.nodes,
+                showsSystemWrappers: showsSystemWrapperViews
+            )
+        }
+
+        return nil
     }
 
     private func reconcileConsoleStateForLatestCapture() {
@@ -696,7 +802,13 @@ final class WorkspaceStore: NSObject {
             export.capture.nodes[$0] != nil && export.capture.rootNodeIDs.contains($0) == false
         })
 
-        capture = export.capture
+        var importedCapture = export.capture
+        if let previewBitmap = export.previewBitmap,
+           importedCapture.previewBitmaps.contains(where: { $0.rootNodeID == previewBitmap.rootNodeID }) == false {
+            importedCapture.previewBitmaps.append(previewBitmap)
+        }
+
+        capture = importedCapture
         selectedNodeDetail = export.selectedNodeDetail
         self.selectedNodeID = selectedNodeID
         self.focusedNodeID = focusedNodeID

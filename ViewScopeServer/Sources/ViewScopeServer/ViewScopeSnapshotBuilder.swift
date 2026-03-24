@@ -106,7 +106,6 @@ final class ViewScopeSnapshotBuilder {
         var nodes: [String: ViewScopeHierarchyNode] = [:]
         var references: [String: ViewScopeInspectableReference] = [:]
         var rootNodeIDs: [String] = []
-
         for (index, window) in windows.enumerated() {
             let windowID = "window-\(index)"
             let contentBounds = window.contentView?.bounds ?? .zero
@@ -183,18 +182,26 @@ final class ViewScopeSnapshotBuilder {
             visibleWindowCount: windows.filter(\.isVisible).count,
             captureDurationMilliseconds: Int(Date().timeIntervalSince(start) * 1000)
         )
+        let capturedAt = Date()
+        let context = ReferenceContext(nodeReferences: references, rootNodeIDs: rootNodeIDs, captureID: captureID)
+        let nodePreviewScreenshots = makeNodePreviewScreenshots(
+            nodes: nodes,
+            context: context,
+            capturedAt: capturedAt
+        )
 
         return (
             ViewScopeCapturePayload(
                 host: hostInfo,
-                capturedAt: Date(),
+                capturedAt: capturedAt,
                 summary: summary,
                 rootNodeIDs: rootNodeIDs,
                 nodes: nodes,
                 captureID: captureID,
-                previewBitmaps: []
+                previewBitmaps: [],
+                nodePreviewScreenshots: nodePreviewScreenshots
             ),
-            ReferenceContext(nodeReferences: references, rootNodeIDs: rootNodeIDs, captureID: captureID)
+            context
         )
     }
 
@@ -452,6 +459,59 @@ final class ViewScopeSnapshotBuilder {
         }?.key
     }
 
+    private func makeNodePreviewScreenshots(
+        nodes: [String: ViewScopeHierarchyNode],
+        context: ReferenceContext,
+        capturedAt: Date
+    ) -> [ViewScopeNodePreviewScreenshotSet] {
+        let encoder = ViewScopeImageEncoder()
+        let debugNodePreview = ProcessInfo.processInfo.environment["VIEWSCOPE_DEBUG_NODE_PREVIEW"] == "1"
+
+        return nodes.keys.sorted().compactMap { nodeID -> ViewScopeNodePreviewScreenshotSet? in
+            guard let node = nodes[nodeID],
+                  node.isHidden == false,
+                  node.bounds.width > 0,
+                  node.bounds.height > 0,
+                  let reference = context.nodeReferences[nodeID] else {
+                return nil
+            }
+
+            if debugNodePreview {
+                fputs("node-preview \(nodeID) \(node.className)\n", stderr)
+                fflush(stderr)
+            }
+
+            switch reference {
+            case .window(let window):
+                _ = window
+                return nil
+
+            case .view(let view):
+                if view.window?.contentView === view || node.childIDs.isEmpty {
+                    return nil
+                }
+
+                let soloImage = makeSoloViewScreenshot(view: view)
+                let soloPNGBase64 = soloImage.flatMap(encoder.base64PNG)
+                guard soloPNGBase64 != nil else {
+                    return nil
+                }
+
+                return ViewScopeNodePreviewScreenshotSet(
+                    nodeID: nodeID,
+                    groupPNGBase64: nil,
+                    soloPNGBase64: soloPNGBase64,
+                    size: view.bounds.size.viewScopeSize,
+                    capturedAt: capturedAt,
+                    scale: Double(view.window?.screen?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1)
+                )
+
+            case .viewController, .object:
+                return nil
+            }
+        }
+    }
+
     private func makeViewScreenshot(
         view: NSView,
         inheritsCompositeCapture: Bool = false
@@ -473,6 +533,21 @@ final class ViewScopeSnapshotBuilder {
             return nil
         }
         return normalizedScreenshot(image, for: view)
+    }
+
+    private func makeSoloViewScreenshot(view: NSView) -> NSImage? {
+        guard view.bounds.width > 0, view.bounds.height > 0 else {
+            return nil
+        }
+
+        if view.window?.contentView === view {
+            return makeTransparentImage(size: view.bounds.size)
+        }
+
+        if let layerImage = makeOwnLayerScreenshot(for: view) {
+            return normalizedScreenshot(layerImage, for: view)
+        }
+        return makeTransparentImage(size: view.bounds.size)
     }
 
     private func makeDirectViewScreenshot(view: NSView) -> NSImage? {
@@ -531,6 +606,41 @@ final class ViewScopeSnapshotBuilder {
         return image
     }
 
+    private func makeOwnLayerScreenshot(for view: NSView) -> NSImage? {
+        guard let sourceLayer = view.layer else {
+            return nil
+        }
+
+        let image = NSImage(size: view.bounds.size)
+        image.lockFocusFlipped(true)
+        let bounds = CGRect(origin: .zero, size: view.bounds.size)
+        NSColor.clear.setFill()
+        bounds.fill()
+
+        let cornerRadius = max(sourceLayer.cornerRadius, 0)
+        let borderWidth = max(sourceLayer.borderWidth, 0)
+        let path = NSBezierPath(
+            roundedRect: bounds.insetBy(dx: borderWidth * 0.5, dy: borderWidth * 0.5),
+            xRadius: cornerRadius,
+            yRadius: cornerRadius
+        )
+
+        if let backgroundColor = sourceLayer.backgroundColor.flatMap(NSColor.init(cgColor:)) {
+            backgroundColor.setFill()
+            path.fill()
+        }
+
+        if borderWidth > 0,
+           let borderColor = sourceLayer.borderColor.flatMap(NSColor.init(cgColor:)) {
+            borderColor.setStroke()
+            path.lineWidth = borderWidth
+            path.stroke()
+        }
+
+        image.unlockFocus()
+        return image
+    }
+
     private func shouldSkipDirectCompositeBase(
         for view: NSView,
         inheritsCompositeCapture: Bool
@@ -551,9 +661,16 @@ final class ViewScopeSnapshotBuilder {
         return makeViewScreenshot(view: contentView)
     }
 
+    private func makeTransparentImage(size: CGSize) -> NSImage {
+        let image = NSImage(size: size)
+        image.lockFocusFlipped(true)
+        NSColor.clear.setFill()
+        CGRect(origin: .zero, size: size).fill()
+        image.unlockFocus()
+        return image
+    }
+
     private func normalizedScreenshot(_ image: NSImage, for view: NSView) -> NSImage {
-        // 当前观察到 `cacheDisplay` 产出的截图已经与统一画布坐标保持一致，
-        // 因此这里不再额外做垂直翻转，避免客户端再出现重复翻转。
         _ = view
         return image
     }

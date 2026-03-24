@@ -23,6 +23,7 @@ final class PreviewLayeredSceneView: SCNView {
         let geometryMode: PreviewCanvasGeometryMode
         let layerSpacing: CGFloat
         let showsLayerBorders: Bool
+        let showsSystemWrapperViews: Bool
     }
 
     private let stageNode = SCNNode()
@@ -37,6 +38,8 @@ final class PreviewLayeredSceneView: SCNView {
     private var displayNodes: [String: PreviewLayeredDisplayNode] = [:]
     private var plan: PreviewLayeredScenePlan?
     private var structuralState: StructuralState?
+    private var nodePreviewImageCache: [String: NSImage] = [:]
+    private var cachedNodePreviewCaptureID: String?
     private var stageRotation = CGPoint(
         x: PreviewLayeredSceneConstants.defaultPitch,
         y: PreviewLayeredSceneConstants.defaultYaw
@@ -133,6 +136,13 @@ final class PreviewLayeredSceneView: SCNView {
     }
 
     var previewExpandedNodeIDs = Set<String>() {
+        didSet {
+            guard suppressSceneRefresh == false else { return }
+            refreshScene()
+        }
+    }
+
+    var showsSystemWrapperViews = false {
         didSet {
             guard suppressSceneRefresh == false else { return }
             refreshScene()
@@ -256,8 +266,7 @@ final class PreviewLayeredSceneView: SCNView {
 
         let targetRotation = PreviewLayeredSceneInteraction.rotationWhenEnteringLayered(from: .zero)
         stageRotation = targetRotation
-        applyStageTransform(rotation: .zero, animated: false)
-        applyStageTransform(rotation: targetRotation, animated: true)
+        applyStageTransform(rotation: targetRotation, animated: false)
     }
 
     func applyRenderState(
@@ -273,7 +282,8 @@ final class PreviewLayeredSceneView: SCNView {
         zoomScale: CGFloat,
         previewLayerSpacing: CGFloat,
         previewShowsLayerBorders: Bool,
-        previewExpandedNodeIDs: Set<String>
+        previewExpandedNodeIDs: Set<String>,
+        showsSystemWrapperViews: Bool
     ) {
         // 先比较结构性变化，决定是整棵 scene 重建，还是只刷新选中态 / 相机。
         let needsSceneRefresh =
@@ -285,7 +295,8 @@ final class PreviewLayeredSceneView: SCNView {
             displayMode != self.displayMode ||
             previewLayerSpacing != self.previewLayerSpacing ||
             previewShowsLayerBorders != self.previewShowsLayerBorders ||
-            previewExpandedNodeIDs != self.previewExpandedNodeIDs
+            previewExpandedNodeIDs != self.previewExpandedNodeIDs ||
+            showsSystemWrapperViews != self.showsSystemWrapperViews
 
         suppressSceneRefresh = true
         self.capture = capture
@@ -301,6 +312,7 @@ final class PreviewLayeredSceneView: SCNView {
         self.previewLayerSpacing = previewLayerSpacing
         self.previewShowsLayerBorders = previewShowsLayerBorders
         self.previewExpandedNodeIDs = previewExpandedNodeIDs
+        self.showsSystemWrapperViews = showsSystemWrapperViews
         suppressSceneRefresh = false
 
         updateStageForDisplayMode(animated: false)
@@ -375,6 +387,11 @@ final class PreviewLayeredSceneView: SCNView {
             return
         }
 
+        if cachedNodePreviewCaptureID != capture.captureID {
+            nodePreviewImageCache.removeAll(keepingCapacity: true)
+            cachedNodePreviewCaptureID = capture.captureID
+        }
+
         let nextStructuralState = StructuralState(
             captureID: capture.captureID,
             imageSize: image.size,
@@ -384,7 +401,8 @@ final class PreviewLayeredSceneView: SCNView {
             expandedNodeIDs: previewExpandedNodeIDs.sorted(),
             geometryMode: geometryMode,
             layerSpacing: previewLayerSpacing,
-            showsLayerBorders: previewShowsLayerBorders
+            showsLayerBorders: previewShowsLayerBorders,
+            showsSystemWrapperViews: showsSystemWrapperViews
         )
 
         let nextPlan = PreviewLayeredScenePlan.make(
@@ -392,11 +410,12 @@ final class PreviewLayeredSceneView: SCNView {
             canvasSize: canvasSize,
             expandedNodeIDs: previewExpandedNodeIDs,
             previewRootNodeID: previewRootNodeID,
-            geometryMode: geometryMode
+            geometryMode: geometryMode,
+            showsSystemWrapperViews: showsSystemWrapperViews
         )
 
         if structuralState != nextStructuralState || plan != nextPlan {
-            rebuildScene(plan: nextPlan, rootImage: image)
+            rebuildScene(plan: nextPlan, capture: capture, rootImage: image)
             structuralState = nextStructuralState
         } else {
             self.plan = nextPlan
@@ -407,10 +426,14 @@ final class PreviewLayeredSceneView: SCNView {
     }
 
     /// 当 capture / 几何 / 展开状态等结构变化时，直接整棵重建 scene。
-    private func rebuildScene(plan: PreviewLayeredScenePlan, rootImage: NSImage) {
+    private func rebuildScene(plan: PreviewLayeredScenePlan, capture: ViewScopeCapturePayload, rootImage: NSImage) {
         stageNode.childNodes.forEach { $0.removeFromParentNode() }
         displayNodes.removeAll(keepingCapacity: true)
         self.plan = plan
+        let normalizedRootImage = PreviewLayeredSceneSnapshotFactory.makeTopLeftWorkingImage(
+            from: rootImage,
+            size: plan.canvasSize
+        )
 
         let renderableItems = plan.items.filter {
             $0.displayRect.width > 0.5 &&
@@ -421,6 +444,7 @@ final class PreviewLayeredSceneView: SCNView {
         let zStep = displayMode == .flat
             ? PreviewLayeredSceneConstants.flatDepthStep
             : max(0.08, previewLayerSpacing * 0.005)
+        var itemCountByZIndex: [Int: Int] = [:]
 
         for plane in plan.planes {
             // plane marker 只表达“这一代内容位于哪个 z 平面”，
@@ -432,14 +456,23 @@ final class PreviewLayeredSceneView: SCNView {
         }
 
         for item in renderableItems {
+            let countAtCurrentZIndex = itemCountByZIndex[item.zIndex, default: 0]
+            itemCountByZIndex[item.zIndex] = countAtCurrentZIndex + 1
+
             let displayNode = PreviewLayeredDisplayNode()
             displayNode.configure(
                 item: item,
-                rootImage: rootImage,
+                textureImage: resolvedTextureImage(
+                    for: item,
+                    capture: capture,
+                    rootImage: normalizedRootImage,
+                    canvasSize: plan.canvasSize
+                ),
                 canvasSize: plan.canvasSize,
                 unitScale: PreviewLayeredSceneConstants.unitScale,
                 centeredZIndex: CGFloat(item.zIndex) - centeredMidZIndex,
                 zStep: zStep,
+                zBias: CGFloat(countAtCurrentZIndex) * PreviewLayeredSceneConstants.sameZIndexBiasStep,
                 showsBorder: previewShowsLayerBorders,
                 selectableCategoryMask: PreviewLayeredSceneConstants.selectableCategoryMask
             )
@@ -459,8 +492,86 @@ final class PreviewLayeredSceneView: SCNView {
         displayNodes.removeAll()
         plan = nil
         structuralState = nil
+        nodePreviewImageCache.removeAll(keepingCapacity: true)
+        cachedNodePreviewCaptureID = nil
         selectionOverlayNode.isHidden = true
         selectionBorderNode.geometry = nil
+    }
+
+    private func resolvedTextureImage(
+        for item: PreviewLayeredScenePlan.Item,
+        capture: ViewScopeCapturePayload,
+        rootImage: NSImage,
+        canvasSize: CGSize
+    ) -> NSImage {
+        if let image = resolvedNodePreviewImage(for: item, in: capture) {
+            return PreviewLayeredSceneSnapshotFactory.makeTextureImage(
+                fromSourceImage: image,
+                size: item.displayRect.size
+            )
+        }
+
+        if shouldUseTransparentShellTexture(for: item, in: capture) {
+            return PreviewLayeredSceneSnapshotFactory.makeTextureImage(
+                fromSourceImage: PreviewLayeredSceneSnapshotFactory.makeTransparentTopLeftImage(size: item.displayRect.size),
+                size: item.displayRect.size
+            )
+        }
+
+        return PreviewLayeredSceneSnapshotFactory.makeTextureImage(
+            for: item,
+            rootImage: rootImage,
+            canvasSize: canvasSize
+        )
+    }
+
+    private func shouldUseTransparentShellTexture(
+        for item: PreviewLayeredScenePlan.Item,
+        in capture: ViewScopeCapturePayload
+    ) -> Bool {
+        guard previewExpandedNodeIDs.contains(item.nodeID) else {
+            return false
+        }
+
+        return item.nodeID == previewRootNodeID || capture.rootNodeIDs.contains(item.nodeID)
+    }
+
+    private func resolvedNodePreviewImage(
+        for item: PreviewLayeredScenePlan.Item,
+        in capture: ViewScopeCapturePayload
+    ) -> NSImage? {
+        guard let screenshotSet = capture.nodePreviewScreenshots.first(where: { $0.nodeID == item.nodeID }) else {
+            return nil
+        }
+
+        let prefersSoloScreenshot: Bool = {
+            guard previewExpandedNodeIDs.contains(item.nodeID),
+                  let node = capture.nodes[item.nodeID] else {
+                return false
+            }
+            return node.childIDs.isEmpty == false
+        }()
+
+        let base64PNG = prefersSoloScreenshot
+            ? (screenshotSet.soloPNGBase64 ?? screenshotSet.groupPNGBase64)
+            : screenshotSet.groupPNGBase64
+        guard let base64PNG, base64PNG.isEmpty == false else {
+            return nil
+        }
+
+        let cacheKey = "\(capture.captureID):\(item.nodeID):\(prefersSoloScreenshot ? "solo" : "group")"
+        if let cached = nodePreviewImageCache[cacheKey] {
+            return cached
+        }
+
+        guard let data = Data(base64Encoded: base64PNG),
+              let image = NSImage(data: data) else {
+            return nil
+        }
+
+        image.size = screenshotSet.size.cgSize
+        nodePreviewImageCache[cacheKey] = image
+        return image
     }
 
     private func updateSelectionAppearance() {
@@ -604,6 +715,7 @@ private enum PreviewLayeredSceneConstants {
     static let minimumZoom: CGFloat = 0.35
     static let maximumZoom: CGFloat = 4
     static let flatDepthStep: CGFloat = 0.01
+    static let sameZIndexBiasStep: CGFloat = 0.0001
     static let maskNodeZOffset: CGFloat = 0.001
     static let borderNodeZOffset: CGFloat = 0.002
     static let selectionOverlayZOffset: CGFloat = 0.01
@@ -668,6 +780,8 @@ private final class PreviewLayeredDisplayNode {
         contentPlane.firstMaterial?.isDoubleSided = true
         contentPlane.firstMaterial?.lightingModel = .constant
         contentPlane.firstMaterial?.diffuse.contents = NSColor.clear
+        contentPlane.firstMaterial?.diffuse.wrapS = .clamp
+        contentPlane.firstMaterial?.diffuse.wrapT = .clamp
         contentNode.geometry = contentPlane
         node.addChildNode(contentNode)
 
@@ -687,11 +801,12 @@ private final class PreviewLayeredDisplayNode {
 
     func configure(
         item: PreviewLayeredScenePlan.Item,
-        rootImage: NSImage,
+        textureImage: NSImage,
         canvasSize: CGSize,
         unitScale: CGFloat,
         centeredZIndex: CGFloat,
         zStep: CGFloat,
+        zBias: CGFloat,
         showsBorder: Bool,
         selectableCategoryMask: Int
     ) {
@@ -712,16 +827,12 @@ private final class PreviewLayeredDisplayNode {
         maskPlane.width = width
         maskPlane.height = height
 
-        contentPlane.firstMaterial?.diffuse.contents = PreviewLayeredSceneSnapshotFactory.makeTextureImage(
-            for: item,
-            rootImage: rootImage,
-            canvasSize: canvasSize
-        )
+        contentPlane.firstMaterial?.diffuse.contents = textureImage
 
         node.position = SCNVector3(
             Float((item.displayRect.midX - (canvasSize.width / 2)) * unitScale),
             Float(((canvasSize.height / 2) - item.displayRect.midY) * unitScale),
-            Float(centeredZIndex * zStep)
+            Float(centeredZIndex * zStep + zBias)
         )
 
         updateAppearance(isSelected: false, isFocused: false, showsBorder: showsBorder)
@@ -729,6 +840,10 @@ private final class PreviewLayeredDisplayNode {
 
     func updateAppearance(isSelected: Bool, isFocused: Bool, showsBorder: Bool) {
         guard let item else { return }
+        contentNode.opacity = item.displayingIndependently ? 1 : 0
+        contentNode.categoryBitMask = item.displayingIndependently
+            ? PreviewLayeredSceneConstants.selectableCategoryMask
+            : 0
 
         if isSelected {
             maskNode.isHidden = false
@@ -743,7 +858,7 @@ private final class PreviewLayeredDisplayNode {
             maskNode.opacity = 0
         }
 
-        if showsBorder || isSelected || isFocused {
+        if item.displayingIndependently && (showsBorder || isSelected || isFocused) {
             borderNode.isHidden = false
             borderNode.geometry = PreviewLayeredSceneSnapshotFactory.makeBorderGeometry(
                 size: item.displayRect.size,
@@ -772,6 +887,22 @@ private enum PreviewLayeredSceneSnapshotFactory {
         )
     }
 
+    static func makeTextureImage(fromSourceImage image: NSImage, size: CGSize) -> NSImage {
+        makeSceneTextureImage(
+            fromTopLeftImage: makeTopLeftWorkingImage(from: image, size: size),
+            size: size
+        )
+    }
+
+    static func makeTransparentTopLeftImage(size: CGSize) -> NSImage {
+        let image = NSImage(size: size)
+        image.lockFocusFlipped(true)
+        NSColor.clear.setFill()
+        CGRect(origin: .zero, size: size).fill()
+        image.unlockFocus()
+        return image
+    }
+
     static func makeItemImage(
         for item: PreviewLayeredScenePlan.Item,
         rootImage: NSImage,
@@ -779,40 +910,22 @@ private enum PreviewLayeredSceneSnapshotFactory {
     ) -> NSImage {
         // 这里是 3D 纹理裁切的关键边界：
         // - `item.displayRect` 仍保持数据源 top-left 语义，供 scene 布局使用
-        // - `textureRect` 只在这里临时转成图像对应的 display 坐标，供像素裁切使用
+        // - 纹理裁切与 punch-out 都统一在 top-left 语义下完成，和 2D layered 画布保持一致
         let targetSize = item.displayRect.size
-        let textureRect = PreviewCanvasCoordinateSpace.displayRect(
-            fromNormalizedRect: item.displayRect,
-            canvasSize: canvasSize
-        )
         guard targetSize.width > 0,
               targetSize.height > 0,
               canvasSize.width > 0,
-              canvasSize.height > 0,
-              let cgImage = rootImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+              canvasSize.height > 0 else {
             return NSImage(size: NSSize(width: 1, height: 1))
         }
 
         let bounds = CGRect(origin: .zero, size: targetSize)
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        guard let context = CGContext(
-            data: nil,
-            width: max(Int(ceil(targetSize.width)), 1),
-            height: max(Int(ceil(targetSize.height)), 1),
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else {
-            return NSImage(size: NSSize(width: 1, height: 1))
-        }
+        let topLeftImage = NSImage(size: targetSize)
+        topLeftImage.lockFocusFlipped(true)
+        NSColor.clear.setFill()
+        bounds.fill()
 
-        context.clear(bounds)
-        context.translateBy(x: 0, y: targetSize.height)
-        context.scaleBy(x: 1, y: -1)
-
-        let clipPath = CGMutablePath()
-        clipPath.addRect(bounds)
+        let clipPath = NSBezierPath(rect: bounds)
         for punchedOutRect in item.punchedOutRects {
             // punch-out 使用 item 自己的局部纹理坐标；
             // 清掉后该区域的内容交给更前面的图层自己显示。
@@ -822,24 +935,70 @@ private enum PreviewLayeredSceneSnapshotFactory {
             guard localRect.isNull == false, localRect.isEmpty == false else {
                 continue
             }
-            clipPath.addRect(localRect)
+            clipPath.append(NSBezierPath(rect: localRect))
         }
-        context.addPath(clipPath)
-        context.clip(using: .evenOdd)
+        clipPath.windingRule = .evenOdd
+        clipPath.addClip()
 
         let drawRect = CGRect(
-            x: -textureRect.minX,
-            y: -textureRect.minY,
+            x: -item.displayRect.minX,
+            y: -item.displayRect.minY,
             width: canvasSize.width,
             height: canvasSize.height
         )
-        context.interpolationQuality = .high
-        context.draw(cgImage, in: drawRect)
+        rootImage.draw(
+            in: drawRect,
+            from: .zero,
+            operation: .sourceOver,
+            fraction: 1,
+            respectFlipped: false,
+            hints: [.interpolation: NSImageInterpolation.high]
+        )
+        topLeftImage.unlockFocus()
 
-        guard let itemCGImage = context.makeImage() else {
-            return NSImage(size: NSSize(width: 1, height: 1))
+        return makeSceneTextureImage(fromTopLeftImage: topLeftImage, size: targetSize)
+    }
+
+    static func makeTopLeftWorkingImage(from image: NSImage, size: CGSize) -> NSImage {
+        guard size.width > 0,
+              size.height > 0 else {
+            return image
         }
-        return NSImage(cgImage: itemCGImage, size: targetSize)
+
+        let normalizedImage = NSImage(size: size)
+        normalizedImage.lockFocusFlipped(true)
+        NSColor.clear.setFill()
+        CGRect(origin: .zero, size: size).fill()
+        image.draw(
+            in: CGRect(origin: .zero, size: size),
+            from: .zero,
+            operation: .sourceOver,
+            fraction: 1,
+            respectFlipped: true,
+            hints: [.interpolation: NSImageInterpolation.high]
+        )
+        normalizedImage.unlockFocus()
+        return normalizedImage
+    }
+
+    private static func makeSceneTextureImage(fromTopLeftImage image: NSImage, size: CGSize) -> NSImage {
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return image
+        }
+
+        let sceneImage = NSImage(size: size)
+        sceneImage.lockFocus()
+        guard let context = NSGraphicsContext.current?.cgContext else {
+            sceneImage.unlockFocus()
+            return image
+        }
+
+        context.clear(CGRect(origin: .zero, size: size))
+        context.translateBy(x: 0, y: size.height)
+        context.scaleBy(x: 1, y: -1)
+        context.draw(cgImage, in: CGRect(origin: .zero, size: size))
+        sceneImage.unlockFocus()
+        return sceneImage
     }
     static func makeBorderGeometry(size: CGSize, unitScale: CGFloat, color: NSColor) -> SCNGeometry {
         let halfWidth = Float(size.width * unitScale * 0.5)

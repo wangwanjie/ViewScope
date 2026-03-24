@@ -278,6 +278,31 @@ public struct ViewScopePreviewBitmap: Codable, Sendable, Hashable {
     }
 }
 
+public struct ViewScopeNodePreviewScreenshotSet: Codable, Sendable, Hashable {
+    public var nodeID: String
+    public var groupPNGBase64: String?
+    public var soloPNGBase64: String?
+    public var size: ViewScopeSize
+    public var capturedAt: Date
+    public var scale: Double?
+
+    public init(
+        nodeID: String,
+        groupPNGBase64: String? = nil,
+        soloPNGBase64: String? = nil,
+        size: ViewScopeSize,
+        capturedAt: Date,
+        scale: Double? = nil
+    ) {
+        self.nodeID = nodeID
+        self.groupPNGBase64 = groupPNGBase64
+        self.soloPNGBase64 = soloPNGBase64
+        self.size = size
+        self.capturedAt = capturedAt
+        self.scale = scale
+    }
+}
+
 /// Contains a full hierarchy snapshot for the current host capture.
 public struct ViewScopeCapturePayload: Codable, Sendable, Hashable {
     public var host: ViewScopeHostInfo
@@ -287,6 +312,7 @@ public struct ViewScopeCapturePayload: Codable, Sendable, Hashable {
     public var nodes: [String: ViewScopeHierarchyNode]
     public var captureID: String
     public var previewBitmaps: [ViewScopePreviewBitmap]
+    public var nodePreviewScreenshots: [ViewScopeNodePreviewScreenshotSet]
 
     public init(
         host: ViewScopeHostInfo,
@@ -295,7 +321,8 @@ public struct ViewScopeCapturePayload: Codable, Sendable, Hashable {
         rootNodeIDs: [String],
         nodes: [String: ViewScopeHierarchyNode],
         captureID: String = UUID().uuidString,
-        previewBitmaps: [ViewScopePreviewBitmap] = []
+        previewBitmaps: [ViewScopePreviewBitmap] = [],
+        nodePreviewScreenshots: [ViewScopeNodePreviewScreenshotSet] = []
     ) {
         self.host = host
         self.capturedAt = capturedAt
@@ -304,6 +331,42 @@ public struct ViewScopeCapturePayload: Codable, Sendable, Hashable {
         self.nodes = nodes
         self.captureID = captureID
         self.previewBitmaps = previewBitmaps
+        self.nodePreviewScreenshots = nodePreviewScreenshots
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case host
+        case capturedAt
+        case summary
+        case rootNodeIDs
+        case nodes
+        case captureID
+        case previewBitmaps
+        case nodePreviewScreenshots
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        host = try container.decode(ViewScopeHostInfo.self, forKey: .host)
+        capturedAt = try container.decode(Date.self, forKey: .capturedAt)
+        summary = try container.decode(ViewScopeCaptureSummary.self, forKey: .summary)
+        rootNodeIDs = try container.decode([String].self, forKey: .rootNodeIDs)
+        nodes = try container.decode([String: ViewScopeHierarchyNode].self, forKey: .nodes)
+        captureID = try container.decodeIfPresent(String.self, forKey: .captureID) ?? UUID().uuidString
+        previewBitmaps = try container.decodeIfPresent([ViewScopePreviewBitmap].self, forKey: .previewBitmaps) ?? []
+        nodePreviewScreenshots = try container.decodeIfPresent([ViewScopeNodePreviewScreenshotSet].self, forKey: .nodePreviewScreenshots) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(host, forKey: .host)
+        try container.encode(capturedAt, forKey: .capturedAt)
+        try container.encode(summary, forKey: .summary)
+        try container.encode(rootNodeIDs, forKey: .rootNodeIDs)
+        try container.encode(nodes, forKey: .nodes)
+        try container.encode(captureID, forKey: .captureID)
+        try container.encode(previewBitmaps, forKey: .previewBitmaps)
+        try container.encode(nodePreviewScreenshots, forKey: .nodePreviewScreenshots)
     }
 }
 
