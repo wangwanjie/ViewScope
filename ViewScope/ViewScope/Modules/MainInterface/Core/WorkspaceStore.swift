@@ -629,11 +629,6 @@ final class WorkspaceStore: NSObject {
                 guard !self.previewFixtureEnabled else { return }
 
                 self.discoveredHosts = announcements
-                if case .connected(let host) = self.connectionState,
-                   announcements.contains(where: { $0.identifier == host.identifier }) == false {
-                    self.connectionState = .failed(L10n.connectedHostDisappeared)
-                    self.connectionCoordinator.disconnectCurrentSession()
-                }
             }
             .store(in: &cancellables)
     }

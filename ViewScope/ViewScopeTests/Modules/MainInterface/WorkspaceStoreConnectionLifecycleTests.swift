@@ -339,6 +339,54 @@ struct WorkspaceStoreConnectionLifecycleTests {
         #expect(store.consoleCurrentTarget?.reference.captureID == "capture-after-refresh")
     }
 
+    @Test func discoveryDropDoesNotDisconnectHealthyConnectedSession() async throws {
+        let host = makeHost(id: "host-discovery-flap", bundleID: "cn.vanjay.MachOKnife", name: "MachOKnife", port: 7111)
+        let initialCapture = makeCapture(nodeID: "node-1", host: host, captureID: "capture-before-discovery-drop")
+        let refreshedCapture = makeCapture(nodeID: "node-1", host: host, captureID: "capture-after-discovery-drop")
+        let session = FakeWorkspaceSession(
+            announcement: host,
+            openResponses: [.resolved(.success(makeHello(for: host)))],
+            captureResponses: [
+                .resolved(.success(initialCapture)),
+                .resolved(.success(refreshedCapture))
+            ],
+            nodeDetailResponses: [
+                "node-1": [
+                    .resolved(.success(makeDetail(nodeID: "node-1", host: host, captureID: initialCapture.captureID))),
+                    .resolved(.success(makeDetail(nodeID: "node-1", host: host, captureID: refreshedCapture.captureID)))
+                ]
+            ]
+        )
+
+        let store = try makeStore(sessions: [host.identifier: session])
+        defer { store.shutdown() }
+
+        store.start()
+        publishAnnouncement(host)
+        try await waitUntil {
+            store.discoveredHosts.contains(where: { $0.identifier == host.identifier })
+        }
+
+        await store.connect(to: host)
+        #expect(store.connectionState == .connected(host))
+        #expect(await session.captureRequestCount == 1)
+
+        publishTermination(identifier: host.identifier)
+        try await waitUntil {
+            store.discoveredHosts.contains(where: { $0.identifier == host.identifier }) == false
+        }
+
+        #expect(store.connectionState == .connected(host))
+        #expect(store.errorMessage == nil)
+
+        await store.refreshCapture(forceReloadSelectionDetail: true)
+
+        #expect(store.connectionState == .connected(host))
+        #expect(await session.captureRequestCount == 2)
+        #expect(store.capture?.captureID == refreshedCapture.captureID)
+        #expect(store.selectedNodeDetail?.host.bundleIdentifier == host.bundleIdentifier)
+    }
+
     private func makeStore(sessions: [String: FakeWorkspaceSession]) throws -> WorkspaceStore {
         let defaults = try #require(UserDefaults(suiteName: "WorkspaceStoreLifecycleTests.\(UUID().uuidString)"))
         let settings = AppSettings(defaults: defaults, environment: [:])
@@ -479,6 +527,30 @@ struct WorkspaceStoreConnectionLifecycleTests {
             }
             await Task.yield()
         }
+    }
+
+    private func publishAnnouncement(_ host: ViewScopeHostAnnouncement) {
+        guard let data = try? JSONEncoder.viewScope.encode(host),
+              let payload = String(data: data, encoding: .utf8) else {
+            Issue.record("Failed to encode host announcement for test setup.")
+            return
+        }
+
+        DistributedNotificationCenter.default().postNotificationName(
+            viewScopeDiscoveryAnnouncementNotification,
+            object: nil,
+            userInfo: ["payload": payload],
+            options: [.deliverImmediately]
+        )
+    }
+
+    private func publishTermination(identifier: String) {
+        DistributedNotificationCenter.default().postNotificationName(
+            viewScopeDiscoveryTerminationNotification,
+            object: nil,
+            userInfo: ["identifier": identifier],
+            options: [.deliverImmediately]
+        )
     }
 }
 
@@ -642,5 +714,13 @@ private final class ControlledResponse<Value: Sendable> {
             return
         }
         self.result = result
+    }
+}
+
+private extension JSONEncoder {
+    static var viewScope: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
     }
 }
