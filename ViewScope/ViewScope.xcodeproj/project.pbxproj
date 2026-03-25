@@ -36,9 +36,22 @@
 		9580FAC22F69BAE1000C0E71 /* ViewScopeUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ViewScopeUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		95C800DA2F73705A003B86FF /* Exceptions for "ViewScope" folder in "ViewScope" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Resources/Assets/ViewScope.png,
+			);
+			target = 9580FAA42F69BADF000C0E71 /* ViewScope */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		9580FAA72F69BADF000C0E71 /* ViewScope */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				95C800DA2F73705A003B86FF /* Exceptions for "ViewScope" folder in "ViewScope" target */,
+			);
 			path = ViewScope;
 			sourceTree = "<group>";
 		};
