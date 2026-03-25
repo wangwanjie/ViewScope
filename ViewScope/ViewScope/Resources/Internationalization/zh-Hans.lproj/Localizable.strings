@@ -5,6 +5,7 @@
 "main.button.highlight" = "高亮";
 "main.button.disconnect" = "断开";
 "main.status.waiting_debug_host" = "等待 Debug 宿主中";
+"main.host_picker.placeholder" = "选择宿主…";
 "main.toggle.sidebar.show" = "显示会话侧边栏";
 "main.toggle.sidebar.hide" = "隐藏会话侧边栏";
 "main.toggle.inspector.show" = "显示检查器";

@@ -5,6 +5,7 @@
 "main.button.highlight" = "高亮";
 "main.button.disconnect" = "中斷連線";
 "main.status.waiting_debug_host" = "正在等待 Debug 宿主";
+"main.host_picker.placeholder" = "選擇宿主…";
 "main.toggle.sidebar.show" = "顯示工作階段側邊欄";
 "main.toggle.sidebar.hide" = "隱藏工作階段側邊欄";
 "main.toggle.inspector.show" = "顯示檢查器";

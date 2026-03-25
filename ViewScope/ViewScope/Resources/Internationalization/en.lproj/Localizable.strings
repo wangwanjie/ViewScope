@@ -5,6 +5,7 @@
 "main.button.highlight" = "Highlight";
 "main.button.disconnect" = "Disconnect";
 "main.status.waiting_debug_host" = "Waiting for a debug host";
+"main.host_picker.placeholder" = "Choose a host…";
 "main.toggle.sidebar.show" = "Show Sessions Sidebar";
 "main.toggle.sidebar.hide" = "Hide Sessions Sidebar";
 "main.toggle.inspector.show" = "Show Inspector";

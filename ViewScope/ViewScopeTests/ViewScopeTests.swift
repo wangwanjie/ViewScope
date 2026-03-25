@@ -2528,6 +2528,24 @@ struct ViewScopeTests {
         #expect(emptyStateView.messageText == L10n.previewDisconnectedPlaceholder)
     }
 
+    @Test func toolbarShowsChooseHostPlaceholderInsteadOfSelectingFirstLiveHostWhileDisconnected() async throws {
+        let store = try makeFixtureStore()
+        defer { store.shutdown() }
+        store.start()
+        pumpRunLoop(for: 0.1)
+        store.disconnect()
+
+        let controller = WorkspaceToolbarViewController(store: store)
+        _ = controller.view
+        pumpRunLoop(for: 0.1)
+        controller.view.layoutSubtreeIfNeeded()
+
+        let hostPopUpButton = try #require(Mirror(reflecting: controller).descendant("hostPopUpButton") as? NSPopUpButton)
+        #expect(hostPopUpButton.titleOfSelectedItem == L10n.hostPickerPlaceholder)
+        #expect(hostPopUpButton.selectedItem?.representedObject == nil)
+        #expect(hostPopUpButton.numberOfItems == 2)
+    }
+
     @Test func integrationGuideShowsAllPackagesVerticallyWithBottomHelpButton() async throws {
         let guideView = IntegrationGuideView(frame: NSRect(x: 0, y: 0, width: 720, height: 480))
         guideView.layoutSubtreeIfNeeded()

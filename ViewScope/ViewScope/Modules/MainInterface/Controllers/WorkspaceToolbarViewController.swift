@@ -136,6 +136,11 @@ final class WorkspaceToolbarViewController: NSViewController {
         }
 
         hostPopUpButton.isEnabled = true
+        if activeHost == nil {
+            hostPopUpButton.addItem(withTitle: L10n.hostPickerPlaceholder)
+            hostPopUpButton.lastItem?.isEnabled = false
+        }
+
         for host in liveHosts {
             let title = "\(host.displayName)  ·  \(host.bundleIdentifier)"
             hostPopUpButton.addItem(withTitle: title)

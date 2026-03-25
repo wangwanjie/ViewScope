@@ -8,6 +8,7 @@ enum L10n {
     static var highlight: String { tr("main.button.highlight") }
     static var disconnect: String { tr("main.button.disconnect") }
     static var waitingForDebugHost: String { tr("main.status.waiting_debug_host") }
+    static var hostPickerPlaceholder: String { tr("main.host_picker.placeholder") }
     static var searchPlaceholder: String { tr("main.search.placeholder") }
     static var showSidebar: String { tr("main.toggle.sidebar.show") }
     static var hideSidebar: String { tr("main.toggle.sidebar.hide") }
