@@ -54,6 +54,8 @@ If your macOS debug host enables `App Sandbox`, turn `ENABLE_APP_SANDBOX` off fo
 
 ```ruby
 pod 'ViewScopeServer', :git => 'https://github.com/wangwanjie/ViewScope.git', :tag => 'v1.2.1', :configurations => ['Debug']
+或者
+pod 'ViewScopeServer', :git => 'https://github.com/wangwanjie/ViewScope.git', :branch => 'main', :configurations => ['Debug']
 ```
 
 ### Carthage

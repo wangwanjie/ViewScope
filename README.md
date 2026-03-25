@@ -1,15 +1,17 @@
 # ViewScope
 
-ViewScope 是一个面向原生 macOS 开发的 UI 调试工具，目标是在 AppKit 项目里提供类似 Lookin / Reveal 的实时层级查看、属性检查、截图预览与节点高亮体验，同时尽量保持集成成本低、数据只在本机流动。
+ViewScope 是一个面向原生 macOS 开发的 UI 调试工具，目标是在 AppKit 项目里提供类似 Lookin / Reveal 的实时层级查看、属性检查、截图预览、节点高亮与调试辅助体验，同时尽量保持集成成本低、数据只在本机流动。
 
 ## 特性
 
-- 原生 AppKit 客户端，支持主窗口、状态栏入口、偏好设置与 Sparkle 更新检查
-- 自动发现本机 Debug 宿主，使用 `DistributedNotificationCenter` 广播 + `127.0.0.1` TCP 握手通信
-- 层级树搜索、属性面板、约束列表、局部截图预览、节点高亮
-- 通过 GRDB 记录最近连接宿主与捕获耗时，用于会话历史和性能洞察
-- `ViewScopeServer` 同时支持 Swift Package Manager、CocoaPods、Carthage
-- 自带 DMG、GitHub Release、Sparkle appcast 脚本，方便继续发布后续版本
+- 原生 AppKit 客户端，包含主窗口、状态栏入口、偏好设置、文件导入导出与 Sparkle 更新检查
+- 自动发现并连接本机 Debug 宿主，使用 `DistributedNotificationCenter` 广播 + `127.0.0.1` TCP 握手通信
+- 支持实时捕获刷新，连接新宿主或刷新时会显示顶部进度条加载状态
+- 左侧提供宿主列表与层级树搜索，中间提供 2D 和 3D 两种预览模式，支持缩放、聚焦、显隐切换与节点高亮
+- 右侧 Inspector 支持查看并直接修改常见属性，包括文本、数值、开关、四边值和颜色
+- 内置调试控制台，可跟随当前选中节点同步目标并提交表达式
+- 支持导入和导出 `.viewscope` 捕获文件，便于离线查看与共享
+- 支持中英文界面、本地偏好持久化，以及通过 GRDB 记录最近连接宿主与捕获耗时
 
 ## 截图
 
@@ -26,8 +28,7 @@ ViewScope 是一个面向原生 macOS 开发的 UI 调试工具，目标是在 A
 - `ViewScopeServer/`: 宿主侧运行时，包含源码、CocoaPods podspec、Carthage framework 工程
 - `Package.swift`: 仓库根目录的 SwiftPM 入口，对外暴露 `ViewScopeServer`
 - `READMEAssets/`: README 截图资源，由测试自动生成
-- `scripts/`: DMG、GitHub Release、Sparkle appcast 脚本
-- `release-notes/`: 每个版本的发布说明
+- `ViewScope/ViewScopeTests/`: 主应用测试，覆盖界面状态、预览渲染和交互回归
 
 ## 本地开发
 
@@ -103,6 +104,8 @@ struct DemoApp: App {
 
 ```ruby
 pod 'ViewScopeServer', :git => 'https://github.com/wangwanjie/ViewScope.git', :tag => 'v1.2.1', :configurations => ['Debug']
+或者
+pod 'ViewScopeServer', :git => 'https://github.com/wangwanjie/ViewScope.git', :branch => 'main', :configurations => ['Debug']
 ```
 
 ### Carthage
@@ -123,18 +126,26 @@ carthage update --use-xcframeworks --platform macOS
 
 1. 启动 ViewScope。
 2. 运行已集成 `ViewScopeServer` 的 Debug 宿主应用。
-3. 在左侧 `Live Hosts` 里选择宿主，ViewScope 会通过 loopback 建立连接。
-4. 在层级树中搜索或选中节点，右侧会显示属性、约束和截图预览。
-5. 需要时可通过主窗口按钮或状态栏菜单触发刷新和高亮。
+3. 在工具栏或左侧 `Live Hosts` 里选择宿主，ViewScope 会通过 loopback 建立连接。
+4. 在层级树中搜索或选中节点，主预览区可切换 2D / 3D，并支持缩放、聚焦、显隐和高亮。
+5. 右侧 Inspector 会显示属性、约束与布局信息；支持的字段可以直接修改并回写宿主。
+6. 需要时可打开控制台执行表达式，或通过菜单导入 / 导出 `.viewscope` 捕获文件。
 
 ## 状态栏设计
 
 ViewScope 会常驻一个 `VS` 状态栏入口：
 
-- 实时显示当前是否已连接宿主
+- 实时显示当前是否已连接宿主，并可选展示连接计数
 - 直接打开主窗口、刷新当前捕获、开关自动刷新和自动高亮
 - 展示最近发现的本机宿主列表，便于快速连接
-- 提供偏好设置和手动检查更新入口
+- 提供偏好设置、检查更新和退出入口
+
+## 偏好设置
+
+当前偏好设置主要包含两组：
+
+- 通用：界面语言、自动刷新、自动高亮、状态栏连接计数
+- 更新：检查更新策略、自动下载更新、手动检查更新与 GitHub 主页入口
 
 ## 安全与性能
 
@@ -143,30 +154,3 @@ ViewScope 会常驻一个 `VS` 状态栏入口：
 - 默认只建议在 Debug 构建里启用 `ViewScopeServer`
 - 对于 sandboxed 的 macOS 宿主，建议专门准备一个关闭 `App Sandbox` 的 Debug 配置
 - 捕获历史限制为最近 250 条，避免数据库持续膨胀
-
-## 发布
-
-版本号来源：
-
-- 主应用：`ViewScope/ViewScope.xcodeproj/project.pbxproj`
-- 宿主 framework：`ViewScopeServer/ViewScopeServer.xcodeproj/project.pbxproj`
-- CocoaPods / runtime：`ViewScopeServer/ViewScopeServer.podspec`
-
-常用脚本：
-
-```bash
-./scripts/build_dmg.sh
-./scripts/publish_github_release.sh --notes-file release-notes/v1.2.1.md
-./scripts/generate_appcast.sh --archive build/dmg/ViewScope_V_1.2.1.dmg --notes-file release-notes/v1.2.1.md
-```
-
-其中：
-
-- `build_dmg.sh` 会构建通用二进制、重新签名、生成 DMG，并默认提交 notarization
-- `publish_github_release.sh` 会创建或更新 GitHub Release，并同步刷新 `appcast.xml`
-- `generate_appcast.sh` 会把发布说明内嵌到 Sparkle feed，避免额外跳网页
-
-## 备注
-
-- `ViewScopeServer/README.md` 提供宿主侧更聚焦的说明
-- `READMEAssets/` 中的截图由测试自动生成，可通过 `ViewScopeTests.renderReadmeScreenshots` 刷新
