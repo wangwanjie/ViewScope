@@ -575,4 +575,5 @@ struct PreviewLayeredScenePlanTests {
             previewBitmaps: []
         )
     }
+
 }

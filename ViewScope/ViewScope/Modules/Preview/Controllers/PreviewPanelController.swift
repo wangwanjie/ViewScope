@@ -4,52 +4,6 @@ import QuartzCore
 import SnapKit
 import ViewScopeServer
 
-/// 决定当前预览图应该来自 capture bitmap 还是 detail screenshot。
-///
-/// 原则：
-/// - 优先使用与当前 preview root 匹配的 capture 级截图。
-/// - 如果 capture 没有对应 bitmap，再回退到 detail 里的截图。
-struct PreviewImageResolver {
-    struct Resolution: Equatable {
-        let cacheKey: String
-        let base64PNG: String
-        let size: CGSize
-        let rootNodeID: String
-    }
-
-    static func resolve(
-        capture: ViewScopeCapturePayload?,
-        preferredRootNodeID: String?,
-        detail: ViewScopeNodeDetailPayload?
-    ) -> Resolution? {
-        if let capture,
-           let preferredRootNodeID,
-           let bitmap = capture.previewBitmaps.first(where: { $0.rootNodeID == preferredRootNodeID }) {
-            return Resolution(
-                cacheKey: "bitmap:\(capture.captureID):\(preferredRootNodeID)",
-                base64PNG: bitmap.pngBase64,
-                size: bitmap.size.cgSize,
-                rootNodeID: bitmap.rootNodeID
-            )
-        }
-
-        guard let detail,
-              let base64PNG = detail.screenshotPNGBase64,
-              base64PNG.isEmpty == false else {
-            return nil
-        }
-
-        let rootNodeID = detail.screenshotRootNodeID ?? preferredRootNodeID ?? detail.nodeID
-        let captureKey = capture?.captureID ?? "detail-only"
-        return Resolution(
-            cacheKey: "detail:\(captureKey):\(rootNodeID)",
-            base64PNG: base64PNG,
-            size: detail.screenshotSize.cgSize,
-            rootNodeID: rootNodeID
-        )
-    }
-}
-
 @MainActor
 /// 预览面板总控。
 ///
@@ -65,11 +19,13 @@ final class PreviewPanelController: NSViewController {
     private let store: WorkspaceStore
     private let panelView = WorkspacePanelContainerView()
     private let previewContainerView = NSView()
+    private let consoleHostView = NSView()
     private let canvasView = PreviewCanvasView()
     private let layeredSceneView = PreviewLayeredSceneView(frame: .zero)
     private let guideView = IntegrationGuideView()
     private let consoleController: ConsolePanelController
     private let geometry = ViewHierarchyGeometry()
+    private let renderStateBuilder = PreviewPanelRenderStateBuilder()
     private var cancellables = Set<AnyCancellable>()
 
     private let zoomOutButton = NSButton()
@@ -92,17 +48,13 @@ final class PreviewPanelController: NSViewController {
     private var autoCenterFocusKey: String?
     private var lastRenderedDisplayMode: WorkspacePreviewDisplayMode?
     private var lastRenderedFocusedNodeID: String?
-    private var lastResolvedSelectionNodeID: String?
-    private var lastResolvedSelectionRect: CGRect?
-    private var lastResolvedGeometryMode: PreviewCanvasGeometryMode?
-    private var lastResolvedSelectionGeometryMode: PreviewCanvasGeometryMode?
     private var isConsoleToggleEnabled = false
     private var lastConsoleVisibility: Bool?
-    private var cachedPreviewImageKey: String?
-    private var cachedPreviewImage: NSImage?
+    private var renderCache = PreviewPanelRenderCache.empty
     private var renderScheduled = false
     private var pendingLayeredEntryVisibleCanvasRect: CGRect?
     private var lastFlatVisibleCanvasRect: CGRect?
+    private var lastLaidOutPreviewSize = CGSize.zero
 
     init(store: WorkspaceStore) {
         self.store = store
@@ -116,6 +68,9 @@ final class PreviewPanelController: NSViewController {
     }
 
     override func loadView() {
+        // 测试里经常先读取 `controller.view`，随后才补 frame。
+        // 先给一个可布局的默认尺寸，避免 SceneKit / Auto Layout 在 0x0 首帧下产生日志和错误状态。
+        panelView.frame = NSRect(x: 0, y: 0, width: 320, height: 220)
         view = panelView
         panelView.setAccessibilityElement(true)
         panelView.setAccessibilityRole(.group)
@@ -140,7 +95,17 @@ final class PreviewPanelController: NSViewController {
 
     override func viewDidLayout() {
         super.viewDidLayout()
-        canvasView.minimumViewportSize = previewContainerView.bounds.size
+        let previewSize = previewContainerView.bounds.size
+        canvasView.minimumViewportSize = previewSize
+
+        guard previewSize.width > 0.5,
+              previewSize.height > 0.5,
+              previewSize != lastLaidOutPreviewSize else {
+            return
+        }
+
+        lastLaidOutPreviewSize = previewSize
+        scheduleRenderCurrentState()
     }
 
     override func magnify(with event: NSEvent) {
@@ -172,6 +137,8 @@ final class PreviewPanelController: NSViewController {
         panelView.contentView.layer?.masksToBounds = true
         previewContainerView.wantsLayer = true
         previewContainerView.layer?.masksToBounds = true
+        consoleHostView.wantsLayer = true
+        consoleHostView.layer?.masksToBounds = true
         addChild(consoleController)
         configureToolbarButton(zoomOutButton, symbolName: "minus.magnifyingglass", toolTip: L10n.previewZoomOut, action: #selector(zoomOut(_:)))
         configureToolbarButton(zoomInButton, symbolName: "plus.magnifyingglass", toolTip: L10n.previewZoomIn, action: #selector(zoomIn(_:)))
@@ -199,20 +166,23 @@ final class PreviewPanelController: NSViewController {
         }
 
         panelView.contentView.addSubview(previewContainerView)
-        panelView.contentView.addSubview(consoleController.view)
+        panelView.contentView.addSubview(consoleHostView)
         previewContainerView.addSubview(canvasView)
         previewContainerView.addSubview(layeredSceneView)
         previewContainerView.addSubview(guideView)
         previewContainerView.snp.makeConstraints { make in
             make.top.leading.trailing.equalToSuperview()
-            previewBottomToConsoleConstraint = make.bottom.equalTo(consoleController.view.snp.top).offset(0).constraint
+            previewBottomToConsoleConstraint = make.bottom.equalTo(consoleHostView.snp.top).offset(0).constraint
         }
-        consoleController.view.snp.makeConstraints { make in
+        consoleHostView.snp.makeConstraints { make in
             make.leading.trailing.bottom.equalToSuperview()
             consoleHeightConstraint = make.height.equalTo(0).constraint
         }
+        consoleHostView.isHidden = true
+        consoleHostView.alphaValue = 0
         consoleController.view.isHidden = true
         consoleController.view.alphaValue = 0
+        layeredSceneView.isHidden = true
         canvasView.snp.makeConstraints { make in
             make.edges.equalToSuperview()
         }
@@ -279,87 +249,79 @@ final class PreviewPanelController: NSViewController {
     }
 
     private func renderCurrentState() {
-        // 这里是预览链路真正的汇合点：
-        // store -> 解析 preview root -> 选图 -> 推断 geometry mode -> 算 selection rect -> 下发到 2D / 3D。
-        let capture = store.capture
-        let consoleAvailable = store.connectionState.supportsConsole
-        let isEnteringLayeredFromFlat = store.previewDisplayMode == .layered && lastRenderedDisplayMode == .flat
+        let snapshot = PreviewPanelSnapshot(store: store)
+        let isEnteringLayeredFromFlat = snapshot.previewDisplayMode == .layered && lastRenderedDisplayMode == .flat
         let entryVisibleCanvasRect: CGRect? = isEnteringLayeredFromFlat
             ? ({ () -> CGRect? in
                 let liveVisibleCanvasRect = canvasView.visibleCanvasRect()
                 if let pendingLayeredEntryVisibleCanvasRect {
                     return pendingLayeredEntryVisibleCanvasRect
                 }
-                if liveVisibleCanvasRect.width > 0.5, liveVisibleCanvasRect.height > 0.5 {
+                if snapshot.previewScale > 1.001,
+                   liveVisibleCanvasRect.width > 0.5,
+                   liveVisibleCanvasRect.height > 0.5 {
                     return liveVisibleCanvasRect
                 }
                 return lastFlatVisibleCanvasRect
             })()
             : nil
-        guideView.isHidden = capture != nil
-        canvasView.isHidden = capture == nil || store.previewDisplayMode != .flat
-        layeredSceneView.isHidden = capture == nil || store.previewDisplayMode != .layered
-        let requestedPreviewRootNodeID = resolvedPreviewRootNodeID(capture: capture, detail: store.selectedNodeDetail)
-        let previewResolution = PreviewImageResolver.resolve(
-            capture: capture,
-            preferredRootNodeID: requestedPreviewRootNodeID,
-            detail: store.selectedNodeDetail
+        let (renderState, nextRenderCache) = renderStateBuilder.makeState(
+            snapshot: snapshot,
+            cache: renderCache,
+            isConsoleToggleEnabled: isConsoleToggleEnabled,
+            geometry: geometry
         )
-        let previewRootNodeID = previewResolution?.rootNodeID ?? requestedPreviewRootNodeID
-        let previewImage = resolvedPreviewImage(from: previewResolution)
-        let previewCanvasSize = capture == nil ? .zero : resolvedCanvasSize(
-            capture: capture,
-            previewRootNodeID: previewRootNodeID,
-            imageResolution: previewResolution
-        )
-        let geometryMode = resolvedGeometryMode(capture: capture, detail: store.selectedNodeDetail)
-        let selectionRect = capture == nil ? nil : resolvedSelectionRect(
-            capture: capture,
-            detail: store.selectedNodeDetail,
-            previewRootNodeID: previewRootNodeID,
-            geometryMode: geometryMode
-        )
+        renderCache = nextRenderCache
+        let context = renderState.context
+        let hasRenderablePreviewBounds =
+            previewContainerView.bounds.width > 0.5 &&
+            previewContainerView.bounds.height > 0.5
 
-        panelView.setTitle(L10n.canvasPreview, subtitle: store.focusedNode?.title)
+        guideView.isHidden = snapshot.capture != nil
+        canvasView.isHidden = snapshot.capture == nil || snapshot.previewDisplayMode != .flat
+        layeredSceneView.isHidden = snapshot.capture == nil || snapshot.previewDisplayMode != .layered
+
+        panelView.setTitle(L10n.canvasPreview, subtitle: snapshot.focusedNodeTitle)
 
         canvasView.applyRenderState(
-            capture: capture,
-            image: previewImage,
-            canvasSize: previewCanvasSize,
-            selectedNodeID: store.selectedNodeID,
-            focusedNodeID: store.focusedNodeID,
-            highlightedCanvasRect: selectionRect,
-            previewRootNodeID: previewRootNodeID,
-            geometryMode: geometryMode,
-            displayMode: store.previewDisplayMode,
-            zoomScale: store.previewScale,
-            previewLayerSpacing: store.previewLayerSpacing,
-            previewShowsLayerBorders: store.previewShowsLayerBorders,
-            previewExpandedNodeIDs: store.expandedNodeIDs,
-            showsSystemWrapperViews: store.showsSystemWrapperViews
+            capture: snapshot.capture,
+            image: renderState.previewImage,
+            canvasSize: context.previewCanvasSize,
+            selectedNodeID: snapshot.selectedNodeID,
+            focusedNodeID: snapshot.focusedNodeID,
+            highlightedCanvasRect: context.selectionRect,
+            previewRootNodeID: context.previewRootNodeID,
+            geometryMode: context.geometryMode,
+            displayMode: snapshot.previewDisplayMode,
+            zoomScale: snapshot.previewScale,
+            previewLayerSpacing: snapshot.previewLayerSpacing,
+            previewShowsLayerBorders: snapshot.previewShowsLayerBorders,
+            previewExpandedNodeIDs: snapshot.expandedNodeIDs,
+            showsSystemWrapperViews: snapshot.showsSystemWrapperViews
         )
-        if store.previewDisplayMode == .flat,
-           previewCanvasSize.width > 0.5,
-           previewCanvasSize.height > 0.5 {
+        if snapshot.previewDisplayMode == .flat,
+           context.previewCanvasSize.width > 0.5,
+           context.previewCanvasSize.height > 0.5 {
             lastFlatVisibleCanvasRect = canvasView.visibleCanvasRect()
         }
 
-        if store.previewDisplayMode == .layered {
+        if snapshot.previewDisplayMode == .layered,
+           hasRenderablePreviewBounds {
             layeredSceneView.applyRenderState(
-                capture: capture,
-                image: previewImage,
-                canvasSize: previewCanvasSize,
-                selectedNodeID: store.selectedNodeID,
-                focusedNodeID: store.focusedNodeID,
-                highlightedCanvasRect: selectionRect,
-                previewRootNodeID: previewRootNodeID,
-                geometryMode: geometryMode,
-                displayMode: store.previewDisplayMode,
-                zoomScale: store.previewScale,
-                previewLayerSpacing: store.previewLayerSpacing,
-                previewShowsLayerBorders: store.previewShowsLayerBorders,
-                previewExpandedNodeIDs: store.expandedNodeIDs,
-                showsSystemWrapperViews: store.showsSystemWrapperViews
+                capture: snapshot.capture,
+                image: renderState.previewImage,
+                canvasSize: context.previewCanvasSize,
+                selectedNodeID: snapshot.selectedNodeID,
+                focusedNodeID: snapshot.focusedNodeID,
+                highlightedCanvasRect: context.selectionRect,
+                previewRootNodeID: context.previewRootNodeID,
+                geometryMode: context.geometryMode,
+                displayMode: snapshot.previewDisplayMode,
+                zoomScale: snapshot.previewScale,
+                previewLayerSpacing: snapshot.previewLayerSpacing,
+                previewShowsLayerBorders: snapshot.previewShowsLayerBorders,
+                previewExpandedNodeIDs: snapshot.expandedNodeIDs,
+                showsSystemWrapperViews: snapshot.showsSystemWrapperViews
             )
             if isEnteringLayeredFromFlat {
                 // 进入 3D 时沿用 2D 当前可见区域，避免用户视角突然跳回全局中心。
@@ -368,27 +330,11 @@ final class PreviewPanelController: NSViewController {
             }
         }
 
-        zoomResetButton.title = "\(Int(round(store.previewScale * 100)))%"
-        displayModeControl.selectedSegment = store.previewDisplayMode == .flat ? 0 : 1
-        if consoleAvailable == false, isConsoleToggleEnabled {
-            isConsoleToggleEnabled = false
-        }
-        consoleToggleButton.isEnabled = capture != nil && consoleAvailable
-        updateConsoleToggleAppearance()
-        focusButton.isEnabled = store.selectedNodeID != nil
-        clearFocusButton.isEnabled = store.focusedNodeID != nil
-        highlightButton.isEnabled = store.selectedNodeID != nil
-        visibilityButton.isEnabled = store.selectedNode?.kind == .view
-        visibilityButton.toolTip = L10n.previewToggleVisibility
-        if let node = store.selectedNode {
-            let symbolName = node.isHidden ? "eye.slash" : "eye"
-            visibilityButton.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
-            visibilityButton.toolTip = node.isHidden ? L10n.hierarchyMenuShowView : L10n.hierarchyMenuHideView
-        }
+        applyToolbarState(renderState.toolbarState)
 
         let nextAutoCenterFocusKey = PreviewPanelRenderDecisions.autoCenterFocusKey(
-            focusedNodeID: store.focusedNodeID,
-            capture: capture
+            focusedNodeID: snapshot.focusedNodeID,
+            capture: snapshot.capture
         )
         if autoCenterFocusKey != nextAutoCenterFocusKey {
             autoCenterFocusKey = nextAutoCenterFocusKey
@@ -396,25 +342,29 @@ final class PreviewPanelController: NSViewController {
         }
 
         applyConsoleVisibility(
-            shouldShowConsole(capture: capture),
+            renderState.toolbarState.shouldShowConsolePanel,
             animated: lastConsoleVisibility != nil
         )
 
         if PreviewPanelRenderDecisions.shouldRecenterFullCanvas(
-            displayMode: store.previewDisplayMode,
+            displayMode: snapshot.previewDisplayMode,
             lastRenderedDisplayMode: lastRenderedDisplayMode,
-            focusedNodeID: store.focusedNodeID,
+            focusedNodeID: snapshot.focusedNodeID,
             lastRenderedFocusedNodeID: lastRenderedFocusedNodeID,
             canvasSize: canvasView.canvasSize
-        ), store.previewDisplayMode == .layered,
+        ), snapshot.previewDisplayMode == .layered,
            isEnteringLayeredFromFlat == false {
-            layeredSceneView.centerOnNode(store.focusedNodeID ?? store.selectedNodeID ?? previewRootNodeID, animated: false)
+            layeredSceneView.centerOnNode(snapshot.focusedNodeID ?? snapshot.selectedNodeID ?? context.previewRootNodeID, animated: false)
         }
-        lastRenderedDisplayMode = store.previewDisplayMode
-        lastRenderedFocusedNodeID = store.focusedNodeID
+        lastRenderedDisplayMode = snapshot.previewDisplayMode
+        lastRenderedFocusedNodeID = snapshot.focusedNodeID
     }
 
     private func scheduleRenderCurrentState() {
+        if Thread.isMainThread, view.window == nil {
+            renderCurrentState()
+            return
+        }
         guard renderScheduled == false else { return }
         renderScheduled = true
         DispatchQueue.main.async { [weak self] in
@@ -443,105 +393,112 @@ final class PreviewPanelController: NSViewController {
         updateConsoleToggleAppearance()
     }
 
-    private func updateConsoleToggleAppearance() {
-        let symbolName = isConsoleToggleEnabled ? "terminal.fill" : "terminal"
+    private func updateConsoleToggleAppearance(isEnabled: Bool = false) {
+        let symbolName = isEnabled ? "terminal.fill" : "terminal"
         consoleToggleButton.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
-        consoleToggleButton.state = isConsoleToggleEnabled ? .on : .off
-        consoleToggleButton.toolTip = isConsoleToggleEnabled ? L10n.previewHideConsole : L10n.previewShowConsole
+        consoleToggleButton.state = isEnabled ? .on : .off
+        consoleToggleButton.toolTip = isEnabled ? L10n.previewHideConsole : L10n.previewShowConsole
     }
 
-    private func shouldShowConsole(capture: ViewScopeCapturePayload?) -> Bool {
-        capture != nil &&
-            store.selectedNodeID != nil &&
-            store.connectionState.supportsConsole &&
-            isConsoleToggleEnabled
+    private func applyToolbarState(_ state: PreviewToolbarState) {
+        if isConsoleToggleEnabled != state.consoleToggleEnabled {
+            isConsoleToggleEnabled = state.consoleToggleEnabled
+        }
+
+        zoomResetButton.title = state.zoomPercentageTitle
+        displayModeControl.selectedSegment = state.selectedDisplaySegment
+        consoleToggleButton.isEnabled = state.consoleToggleButtonEnabled
+        updateConsoleToggleAppearance(isEnabled: state.consoleToggleEnabled)
+        focusButton.isEnabled = state.focusButtonEnabled
+        clearFocusButton.isEnabled = state.clearFocusButtonEnabled
+        highlightButton.isEnabled = state.highlightButtonEnabled
+        visibilityButton.isEnabled = state.visibilityButtonEnabled
+        visibilityButton.image = state.visibilitySymbolName.flatMap {
+            NSImage(systemSymbolName: $0, accessibilityDescription: nil)
+        }
+        visibilityButton.toolTip = state.visibilityToolTip
     }
 
     private func applyConsoleVisibility(_ showsConsole: Bool, animated: Bool) {
         guard lastConsoleVisibility != showsConsole else { return }
 
         lastConsoleVisibility = showsConsole
+        let hostView = consoleHostView
         let consoleView = consoleController.view
         let targetHeight = showsConsole ? Layout.consoleHeight : 0
         let targetSpacing = showsConsole ? -Layout.verticalSpacing : 0
+        let shouldAnimate =
+            animated &&
+            view.window != nil &&
+            view.bounds.width > 0.5 &&
+            view.bounds.height > 0.5
 
         if showsConsole {
+            consoleHeightConstraint?.update(offset: targetHeight)
+            previewBottomToConsoleConstraint?.update(offset: targetSpacing)
+            hostView.isHidden = false
+            attachConsoleViewIfNeeded()
             consoleView.isHidden = false
+            consoleView.alphaValue = 1
+            hostView.alphaValue = shouldAnimate ? 0 : 1
+        } else if shouldAnimate == false {
+            consoleView.isHidden = true
+            consoleView.alphaValue = 0
+            detachConsoleView()
+            consoleHeightConstraint?.update(offset: targetHeight)
+            previewBottomToConsoleConstraint?.update(offset: targetSpacing)
+            hostView.alphaValue = 0
+            hostView.isHidden = true
+            panelView.contentView.layoutSubtreeIfNeeded()
+            return
         }
 
         let applyChanges = {
-            self.consoleHeightConstraint?.update(offset: targetHeight)
-            self.previewBottomToConsoleConstraint?.update(offset: targetSpacing)
-            consoleView.alphaValue = showsConsole ? 1 : 0
+            hostView.alphaValue = showsConsole ? 1 : 0
+            guard self.view.bounds.width > 0.5, self.view.bounds.height > 0.5 else {
+                return
+            }
             self.panelView.contentView.layoutSubtreeIfNeeded()
         }
 
-        if animated {
+        if shouldAnimate {
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.18
                 context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                 applyChanges()
             } completionHandler: {
-                Task { @MainActor in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    hostView.isHidden = !showsConsole
                     consoleView.isHidden = !showsConsole
+                    consoleView.alphaValue = showsConsole ? 1 : 0
+                    if showsConsole == false {
+                        self.detachConsoleView()
+                    }
                 }
             }
         } else {
             applyChanges()
+            hostView.isHidden = !showsConsole
             consoleView.isHidden = !showsConsole
+            consoleView.alphaValue = showsConsole ? 1 : 0
+            if showsConsole == false {
+                detachConsoleView()
+            }
         }
     }
 
-    private func resolvedPreviewImage(from resolution: PreviewImageResolver.Resolution?) -> NSImage? {
-        guard let resolution else {
-            cachedPreviewImageKey = nil
-            cachedPreviewImage = nil
-            return nil
+    private func attachConsoleViewIfNeeded() {
+        guard consoleController.view.superview !== consoleHostView else { return }
+        consoleHostView.addSubview(consoleController.view)
+        consoleController.view.snp.makeConstraints { make in
+            make.edges.equalToSuperview()
         }
-
-        if cachedPreviewImageKey == resolution.cacheKey {
-            return cachedPreviewImage
-        }
-
-        guard let data = Data(base64Encoded: resolution.base64PNG),
-              let image = NSImage(data: data) else {
-            cachedPreviewImageKey = nil
-            cachedPreviewImage = nil
-            return nil
-        }
-
-        cachedPreviewImageKey = resolution.cacheKey
-        cachedPreviewImage = image
-        return image
     }
 
-    private func resolvedCanvasSize(
-        capture: ViewScopeCapturePayload?,
-        previewRootNodeID: String?,
-        imageResolution: PreviewImageResolver.Resolution?
-    ) -> CGSize {
-        if let imageResolution,
-           imageResolution.size.width > 0,
-           imageResolution.size.height > 0 {
-            return imageResolution.size
-        }
-        if let rootID = previewRootNodeID ?? capture?.rootNodeIDs.first,
-           let rootNode = capture?.nodes[rootID] {
-            return CGSize(width: CGFloat(rootNode.frame.width), height: CGFloat(rootNode.frame.height))
-        }
-        return .zero
-    }
-
-    private func resolvedPreviewRootNodeID(
-        capture: ViewScopeCapturePayload?,
-        detail: ViewScopeNodeDetailPayload?
-    ) -> String? {
-        guard let capture else { return nil }
-        let anchorNodeID = store.focusedNodeID ?? store.selectedNodeID ?? capture.rootNodeIDs.first
-        return PreviewPanelRenderDecisions.previewRootNodeID(
-            capture: capture,
-            anchorNodeID: anchorNodeID
-        )
+    private func detachConsoleView() {
+        guard consoleController.view.superview === consoleHostView else { return }
+        consoleController.view.removeFromSuperview()
     }
 
     private func selectNode(withID nodeID: String, focusAfterSelection: Bool) {
@@ -558,65 +515,6 @@ final class PreviewPanelController: NSViewController {
             return
         }
         layeredSceneView.centerOnNode(store.focusedNodeID, animated: true)
-    }
-
-    private func resolvedGeometryMode(
-        capture: ViewScopeCapturePayload?,
-        detail: ViewScopeNodeDetailPayload?
-    ) -> PreviewCanvasGeometryMode {
-        guard let capture else {
-            lastResolvedGeometryMode = nil
-            return .directGlobalCanvasRect
-        }
-        if let inferredMode = PreviewPanelRenderDecisions.geometryMode(
-            capture: capture,
-            selectedNodeID: store.selectedNodeID,
-            detail: detail,
-            previewRootNodeID: resolvedPreviewRootNodeID(capture: capture, detail: detail),
-            geometry: geometry
-        ) {
-            lastResolvedGeometryMode = inferredMode
-            return inferredMode
-        }
-        return lastResolvedGeometryMode ?? .directGlobalCanvasRect
-    }
-
-    private func resolvedSelectionRect(
-        capture: ViewScopeCapturePayload?,
-        detail: ViewScopeNodeDetailPayload?,
-        previewRootNodeID: String?,
-        geometryMode: PreviewCanvasGeometryMode
-    ) -> CGRect? {
-        let selectionRect = PreviewPanelRenderDecisions.selectionRect(
-            capture: capture,
-            selectedNodeID: store.selectedNodeID,
-            detail: detail,
-            previewRootNodeID: previewRootNodeID,
-            geometryMode: geometryMode,
-            geometry: geometry
-        )
-
-        if let selectedNodeID = store.selectedNodeID {
-            if let detail,
-               detail.nodeID == selectedNodeID,
-               let selectionRect {
-                lastResolvedSelectionNodeID = selectedNodeID
-                lastResolvedSelectionRect = selectionRect
-                lastResolvedSelectionGeometryMode = geometryMode
-                return selectionRect
-            }
-
-            if lastResolvedSelectionNodeID == selectedNodeID,
-               lastResolvedSelectionGeometryMode == geometryMode,
-               let lastResolvedSelectionRect {
-                return lastResolvedSelectionRect
-            }
-        }
-
-        lastResolvedSelectionNodeID = store.selectedNodeID
-        lastResolvedSelectionRect = selectionRect
-        lastResolvedSelectionGeometryMode = geometryMode
-        return selectionRect
     }
 
     @objc private func zoomOut(_ sender: Any?) {
