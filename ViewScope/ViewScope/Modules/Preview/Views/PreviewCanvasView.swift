@@ -142,6 +142,9 @@ final class PreviewCanvasView: NSView {
             return
         }
 
+        NSGraphicsContext.saveGraphicsState()
+        contentClipPath().addClip()
+
         context.saveGState()
         // 之后所有绘制都在统一 canvas 空间里进行，实际显示由 viewport transform 负责。
         applyViewportTransform(to: context)
@@ -235,6 +238,7 @@ final class PreviewCanvasView: NSView {
             path.fill()
         }
 
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -360,13 +364,20 @@ final class PreviewCanvasView: NSView {
         NSColor.controlBackgroundColor.setFill()
         bounds.fill()
 
-        let borderRect = bounds.insetBy(dx: 8, dy: 8)
-        let roundedRect = NSBezierPath(roundedRect: borderRect, xRadius: 14, yRadius: 14)
+        let roundedRect = contentBorderPath()
         NSColor.underPageBackgroundColor.setFill()
         roundedRect.fill()
         NSColor.separatorColor.withAlphaComponent(0.45).setStroke()
         roundedRect.lineWidth = 1
         roundedRect.stroke()
+    }
+
+    private func contentBorderPath() -> NSBezierPath {
+        NSBezierPath(roundedRect: bounds.insetBy(dx: 8, dy: 8), xRadius: 14, yRadius: 14)
+    }
+
+    private func contentClipPath() -> NSBezierPath {
+        NSBezierPath(roundedRect: bounds.insetBy(dx: 9, dy: 9), xRadius: 13, yRadius: 13)
     }
 
     private func drawWireframeFallback() {

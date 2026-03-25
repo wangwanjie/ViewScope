@@ -14,6 +14,7 @@ final class PreviewPanelController: NSViewController {
     private enum Layout {
         static let consoleHeight: CGFloat = 240
         static let verticalSpacing: CGFloat = 12
+        static let layeredSceneInset: CGFloat = 10
     }
 
     private let store: WorkspaceStore
@@ -189,7 +190,7 @@ final class PreviewPanelController: NSViewController {
             make.edges.equalToSuperview()
         }
         layeredSceneView.snp.makeConstraints { make in
-            make.edges.equalToSuperview()
+            make.edges.equalToSuperview().inset(Layout.layeredSceneInset)
         }
         guideView.snp.makeConstraints { make in
             make.edges.equalToSuperview()

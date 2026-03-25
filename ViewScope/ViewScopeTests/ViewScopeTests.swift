@@ -683,6 +683,26 @@ struct ViewScopeTests {
         #expect(previewContainerView.layer?.masksToBounds == true)
     }
 
+    @Test func previewPanelInsertsLayeredSceneViewFromPanelEdges() async throws {
+        let store = try makeFixtureStore()
+        defer { store.shutdown() }
+        store.start()
+        pumpRunLoop(for: 0.1)
+
+        let controller = PreviewPanelController(store: store)
+        let view = controller.view
+        view.frame = NSRect(x: 0, y: 0, width: 1320, height: 900)
+        view.layoutSubtreeIfNeeded()
+
+        let previewContainerView = try #require(Mirror(reflecting: controller).descendant("previewContainerView") as? NSView)
+        let layeredSceneView = try #require(Mirror(reflecting: controller).descendant("layeredSceneView") as? PreviewLayeredSceneView)
+
+        #expect(abs(layeredSceneView.frame.minX - 10) < 0.5)
+        #expect(abs(layeredSceneView.frame.minY - 10) < 0.5)
+        #expect(abs(previewContainerView.bounds.maxX - layeredSceneView.frame.maxX - 10) < 0.5)
+        #expect(abs(previewContainerView.bounds.maxY - layeredSceneView.frame.maxY - 10) < 0.5)
+    }
+
     @Test func previewPanelApplies3DRotationWithoutUsingResponderChain() async throws {
         let store = try makeFixtureStore()
         defer { store.shutdown() }
@@ -2680,6 +2700,24 @@ struct ViewScopeTests {
         let pixel = color(in: rendered, atViewPoint: borderPoint)
 
         #expect((pixel?.blueComponent ?? 0) > 0.25)
+    }
+
+    @Test func flatPreviewClipsZoomedContentInsideRoundedBorder() async throws {
+        let canvasSize = CGSize(width: 200, height: 120)
+        let previewView = PreviewCanvasView(frame: NSRect(x: 0, y: 0, width: 256, height: 176))
+        previewView.canvasSize = canvasSize
+        previewView.image = makeSolidTopLeftImage(size: canvasSize, color: .systemRed)
+        previewView.displayMode = .flat
+        previewView.zoomScale = 2
+        previewView.layoutSubtreeIfNeeded()
+        previewView.centerOnCanvasRect(CGRect(x: 196, y: 60, width: 2, height: 2))
+
+        let rendered = render(view: previewView)
+        let outsidePixel = color(in: rendered, atViewPoint: CGPoint(x: 4, y: previewView.bounds.midY))
+        let insidePixel = color(in: rendered, atViewPoint: CGPoint(x: 12, y: previewView.bounds.midY))
+
+        #expect((outsidePixel?.redComponent ?? 0) < 0.7)
+        #expect((insidePixel?.redComponent ?? 0) > 0.8)
     }
 
     @Test func layeredPreviewKeepsBaseImageTopEdgeAtProjectedTopEdge() async throws {
