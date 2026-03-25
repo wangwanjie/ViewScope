@@ -23,12 +23,12 @@ final class ViewScopeUITests: XCTestCase {
         let mainWindow = app.windows.element(boundBy: 0)
         XCTAssertTrue(mainWindow.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Sample Notes"].waitForExistence(timeout: 5))
-        writeScreenshot(mainWindow.screenshot(), named: "main-window")
+        // writeScreenshot(mainWindow.screenshot(), named: "main-window")
 
         app.typeKey(",", modifierFlags: .command)
         let preferencesWindow = app.windows["Preferences"]
         XCTAssertTrue(preferencesWindow.waitForExistence(timeout: 5))
-        writeScreenshot(preferencesWindow.screenshot(), named: "preferences")
+        // writeScreenshot(preferencesWindow.screenshot(), named: "preferences")
 
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "ViewScope Preview Workspace"
@@ -36,6 +36,7 @@ final class ViewScopeUITests: XCTestCase {
         add(attachment)
     }
 
+    @MainActor
     private func writeScreenshot(_ screenshot: XCUIScreenshot, named name: String) {
         let screenshotsDirectory = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
