@@ -22,6 +22,7 @@ final class WorkspaceStore: NSObject {
     @Published private(set) var expandedNodeIDs = Set<String>()
     @Published private(set) var captureInsight: CaptureHistoryInsight = .empty
     @Published private(set) var errorMessage: String?
+    @Published private(set) var isLoadingWorkspace = false
     @Published private(set) var showsSystemWrapperViews: Bool
     @Published private(set) var consoleCurrentTarget: ViewScopeConsoleTargetDescriptor?
     @Published private(set) var consoleCandidateTargets: [ViewScopeConsoleTargetDescriptor] = []
@@ -43,6 +44,7 @@ final class WorkspaceStore: NSObject {
     private let connectionCoordinator = WorkspaceConnectionCoordinator()
     private var cancellables = Set<AnyCancellable>()
     private let previewFixtureEnabled: Bool
+    private var loadingGeneration: UInt64?
 
     init(
         settings: AppSettings = .shared,
@@ -101,6 +103,7 @@ final class WorkspaceStore: NSObject {
 
     func connect(to host: ViewScopeHostAnnouncement) async {
         if previewFixtureEnabled {
+            clearWorkspaceLoadingState()
             connectionState = .connected(host)
             capture = SampleFixture.capture()
             applyPreviewFixtureSelection(nodeID: "window-0-view-1-2")
@@ -109,6 +112,7 @@ final class WorkspaceStore: NSObject {
 
         let generation = connectionCoordinator.beginNewGeneration()
         prepareForHostSwitch()
+        beginWorkspaceLoading(for: generation)
         connectionState = .connecting(host.displayName)
         let session = sessionFactory(host)
         connectionCoordinator.activate(session: session)
@@ -124,6 +128,7 @@ final class WorkspaceStore: NSObject {
             reloadRecentHosts()
             startAutoRefreshTimerIfNeeded()
             await refreshCapture()
+            endWorkspaceLoading(for: generation)
         } catch {
             guard connectionCoordinator.isActiveConnection(generation: generation, session: session) else {
                 return
@@ -131,6 +136,7 @@ final class WorkspaceStore: NSObject {
             connectionCoordinator.disconnectCurrentSession()
             connectionState = .failed(error.localizedDescription)
             errorMessage = error.localizedDescription
+            endWorkspaceLoading(for: generation)
         }
     }
 
@@ -162,6 +168,9 @@ final class WorkspaceStore: NSObject {
     ) async {
         let generation = connectionCoordinator.generation
         guard case .connected(let host) = connectionState else { return }
+        if clearingVisibleState {
+            beginWorkspaceLoading(for: generation)
+        }
         let selectionSnapshot = captureCoordinator.snapshotSelection(
             selectedNodeID: selectedNodeID,
             focusedNodeID: focusedNodeID
@@ -179,6 +188,9 @@ final class WorkspaceStore: NSObject {
                 preferredFocusedNodeID: selectionSnapshot.focusedNodeID,
                 forceReloadDetail: forceReloadSelectionDetail
             )
+            if clearingVisibleState {
+                endWorkspaceLoading(for: generation)
+            }
             return
         }
 
@@ -199,6 +211,9 @@ final class WorkspaceStore: NSObject {
                 preferredFocusedNodeID: selectionSnapshot.focusedNodeID,
                 forceReloadDetail: forceReloadSelectionDetail
             )
+            if clearingVisibleState {
+                endWorkspaceLoading(for: generation)
+            }
         } catch {
             guard connectionCoordinator.isActiveConnection(generation: generation, session: session) else {
                 return
@@ -206,6 +221,9 @@ final class WorkspaceStore: NSObject {
             errorMessage = error.localizedDescription
             connectionState = .failed(error.localizedDescription)
             connectionCoordinator.disconnectCurrentSession()
+            if clearingVisibleState {
+                endWorkspaceLoading(for: generation)
+            }
         }
     }
 
@@ -668,6 +686,7 @@ final class WorkspaceStore: NSObject {
 
     private func prepareForHostSwitch() {
         connectionCoordinator.disconnectCurrentSession()
+        clearWorkspaceLoadingState()
         clearVisibleWorkspaceState()
         clearConsoleConnectionState()
         errorMessage = nil
@@ -701,6 +720,21 @@ final class WorkspaceStore: NSObject {
         selectedNodeDetail = nil
         focusedNodeID = nil
         expandedNodeIDs = []
+    }
+
+    private func beginWorkspaceLoading(for generation: UInt64) {
+        loadingGeneration = generation
+        isLoadingWorkspace = true
+    }
+
+    private func endWorkspaceLoading(for generation: UInt64) {
+        guard loadingGeneration == generation else { return }
+        clearWorkspaceLoadingState()
+    }
+
+    private func clearWorkspaceLoadingState() {
+        loadingGeneration = nil
+        isLoadingWorkspace = false
     }
 
     private func applyPreviewFixtureSelection(nodeID: String?) {

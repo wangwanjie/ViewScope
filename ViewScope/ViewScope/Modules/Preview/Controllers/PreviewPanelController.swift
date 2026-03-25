@@ -20,6 +20,7 @@ final class PreviewPanelController: NSViewController {
     private let panelView = WorkspacePanelContainerView()
     private let previewContainerView = NSView()
     private let consoleHostView = NSView()
+    private let loadingProgressView = WorkspaceLoadingProgressView()
     private let canvasView = PreviewCanvasView()
     private let layeredSceneView = PreviewLayeredSceneView(frame: .zero)
     private let guideView = IntegrationGuideView()
@@ -170,6 +171,7 @@ final class PreviewPanelController: NSViewController {
         previewContainerView.addSubview(canvasView)
         previewContainerView.addSubview(layeredSceneView)
         previewContainerView.addSubview(guideView)
+        previewContainerView.addSubview(loadingProgressView)
         previewContainerView.snp.makeConstraints { make in
             make.top.leading.trailing.equalToSuperview()
             previewBottomToConsoleConstraint = make.bottom.equalTo(consoleHostView.snp.top).offset(0).constraint
@@ -191,6 +193,10 @@ final class PreviewPanelController: NSViewController {
         }
         guideView.snp.makeConstraints { make in
             make.edges.equalToSuperview()
+        }
+        loadingProgressView.snp.makeConstraints { make in
+            make.top.leading.trailing.equalToSuperview()
+            make.height.equalTo(2)
         }
 
         canvasView.onNodeClick = { [weak self] nodeID in
@@ -246,6 +252,13 @@ final class PreviewPanelController: NSViewController {
                 self?.scheduleRenderCurrentState()
             }
             .store(in: &cancellables)
+
+        store.$isLoadingWorkspace
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.scheduleRenderCurrentState()
+            }
+            .store(in: &cancellables)
     }
 
     private func renderCurrentState() {
@@ -277,9 +290,17 @@ final class PreviewPanelController: NSViewController {
             previewContainerView.bounds.width > 0.5 &&
             previewContainerView.bounds.height > 0.5
 
-        guideView.isHidden = snapshot.capture != nil
+        guideView.isHidden = snapshot.capture != nil || snapshot.isLoadingWorkspace
         canvasView.isHidden = snapshot.capture == nil || snapshot.previewDisplayMode != .flat
         layeredSceneView.isHidden = snapshot.capture == nil || snapshot.previewDisplayMode != .layered
+
+        if snapshot.isLoadingWorkspace {
+            loadingProgressView.startAnimating()
+        } else if snapshot.capture != nil {
+            loadingProgressView.finishAnimatingIfNeeded()
+        } else {
+            loadingProgressView.stopImmediately()
+        }
 
         panelView.setTitle(L10n.canvasPreview, subtitle: snapshot.focusedNodeTitle)
 
@@ -593,211 +614,5 @@ final class PreviewPanelController: NSViewController {
     private func activePreviewResponder() -> NSResponder? {
         guard store.capture != nil else { return nil }
         return store.previewDisplayMode == .layered ? layeredSceneView : canvasView
-    }
-}
-
-@MainActor
-private final class PreviewLayerSettingsPopoverController: NSViewController {
-    private let spacingSlider = NSSlider(value: 22, minValue: 10, maxValue: 150, target: nil, action: nil)
-    private let spacingValueLabel = NSTextField(labelWithString: "")
-    private let borderToggle = NSButton(checkboxWithTitle: "", target: nil, action: nil)
-    private let onLayerSpacingChange: (CGFloat) -> Void
-    private let onShowsLayerBordersChange: (Bool) -> Void
-
-    init(
-        layerSpacing: CGFloat,
-        showsLayerBorders: Bool,
-        onLayerSpacingChange: @escaping (CGFloat) -> Void,
-        onShowsLayerBordersChange: @escaping (Bool) -> Void
-    ) {
-        self.onLayerSpacingChange = onLayerSpacingChange
-        self.onShowsLayerBordersChange = onShowsLayerBordersChange
-        super.init(nibName: nil, bundle: nil)
-        spacingSlider.doubleValue = layerSpacing
-        borderToggle.state = showsLayerBorders ? .on : .off
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func loadView() {
-        let container = NSView()
-        view = container
-
-        let spacingTitleLabel = NSTextField(labelWithString: L10n.previewLayerSpacing)
-        spacingTitleLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-        spacingValueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-        spacingValueLabel.alignment = .right
-
-        spacingSlider.target = self
-        spacingSlider.action = #selector(handleSpacingSlider(_:))
-
-        borderToggle.title = L10n.previewLayerBorders
-        borderToggle.target = self
-        borderToggle.action = #selector(handleBorderToggle(_:))
-
-        container.addSubview(spacingTitleLabel)
-        container.addSubview(spacingValueLabel)
-        container.addSubview(spacingSlider)
-        container.addSubview(borderToggle)
-
-        spacingTitleLabel.snp.makeConstraints { make in
-            make.top.leading.equalToSuperview().inset(12)
-        }
-        spacingValueLabel.snp.makeConstraints { make in
-            make.centerY.equalTo(spacingTitleLabel)
-            make.trailing.equalToSuperview().inset(12)
-            make.leading.greaterThanOrEqualTo(spacingTitleLabel.snp.trailing).offset(12)
-        }
-        spacingSlider.snp.makeConstraints { make in
-            make.top.equalTo(spacingTitleLabel.snp.bottom).offset(8)
-            make.leading.trailing.equalToSuperview().inset(12)
-        }
-        borderToggle.snp.makeConstraints { make in
-            make.top.equalTo(spacingSlider.snp.bottom).offset(10)
-            make.leading.trailing.bottom.equalToSuperview().inset(12)
-        }
-
-        updateSpacingValueLabel()
-        preferredContentSize = NSSize(width: 260, height: 104)
-    }
-
-    @objc private func handleSpacingSlider(_ sender: NSSlider) {
-        let spacing = CGFloat(sender.doubleValue)
-        updateSpacingValueLabel()
-        onLayerSpacingChange(spacing)
-    }
-
-    @objc private func handleBorderToggle(_ sender: NSButton) {
-        onShowsLayerBordersChange(sender.state == .on)
-    }
-
-    private func updateSpacingValueLabel() {
-        spacingValueLabel.stringValue = String(format: "%.0f", spacingSlider.doubleValue)
-    }
-}
-
-struct PreviewPanelRenderDecisions {
-    /// 在 direct / legacy 两套几何模式之间自动选择更贴近 detail.highlightedRect 的那一套。
-    static func geometryMode(
-        capture: ViewScopeCapturePayload?,
-        selectedNodeID: String?,
-        detail: ViewScopeNodeDetailPayload?,
-        previewRootNodeID: String? = nil,
-        geometry: ViewHierarchyGeometry = ViewHierarchyGeometry()
-    ) -> PreviewCanvasGeometryMode? {
-        guard let capture,
-              let selectedNodeID,
-              let detail,
-              detail.nodeID == selectedNodeID else {
-            return nil
-        }
-        let targetRect = detail.highlightedRect.cgRect
-        guard let directRect = geometry.canvasRect(
-                for: selectedNodeID,
-                in: capture,
-                coordinateRootNodeID: previewRootNodeID,
-                mode: .directGlobalCanvasRect
-              ),
-              let legacyRect = geometry.canvasRect(
-                for: selectedNodeID,
-                in: capture,
-                coordinateRootNodeID: previewRootNodeID,
-                mode: .legacyLocalFrames
-              ) else {
-            return nil
-        }
-
-        return rectDistance(from: directRect, to: targetRect) <= rectDistance(from: legacyRect, to: targetRect)
-            ? .directGlobalCanvasRect
-            : .legacyLocalFrames
-    }
-
-    static func selectionRect(
-        capture: ViewScopeCapturePayload?,
-        selectedNodeID: String?,
-        detail: ViewScopeNodeDetailPayload?,
-        previewRootNodeID: String? = nil,
-        geometryMode: PreviewCanvasGeometryMode,
-        geometry: ViewHierarchyGeometry = ViewHierarchyGeometry()
-    ) -> CGRect? {
-        guard let selectedNodeID else {
-            return nil
-        }
-        if let capture,
-           let rect = geometry.canvasRect(
-            for: selectedNodeID,
-            in: capture,
-            coordinateRootNodeID: previewRootNodeID,
-            mode: geometryMode
-           ) {
-            return rect
-        }
-        if let detail,
-           detail.nodeID == selectedNodeID {
-            return detail.highlightedRect.cgRect
-        }
-        return nil
-    }
-
-    private static func rectDistance(from lhs: CGRect, to rhs: CGRect) -> CGFloat {
-        abs(lhs.minX - rhs.minX) +
-            abs(lhs.minY - rhs.minY) +
-            abs(lhs.width - rhs.width) +
-            abs(lhs.height - rhs.height)
-    }
-
-    static func autoCenterFocusKey(
-        focusedNodeID: String?,
-        capture: ViewScopeCapturePayload?
-    ) -> String? {
-        guard let focusedNodeID else {
-            return nil
-        }
-        return [
-            capture?.capturedAt.timeIntervalSinceReferenceDate.description ?? "nil",
-            focusedNodeID
-        ].joined(separator: "|")
-    }
-
-    static func previewRootNodeID(
-        capture: ViewScopeCapturePayload,
-        anchorNodeID: String?
-    ) -> String? {
-        guard var currentNodeID = anchorNodeID ?? capture.rootNodeIDs.first else {
-            return capture.rootNodeIDs.first
-        }
-
-        if capture.nodes[currentNodeID]?.kind == .window {
-            return capture.nodes[currentNodeID]?.childIDs.first ?? currentNodeID
-        }
-
-        while let parentID = capture.nodes[currentNodeID]?.parentID,
-              let parentNode = capture.nodes[parentID] {
-            if parentNode.kind == .window {
-                return currentNodeID
-            }
-            currentNodeID = parentID
-        }
-        return currentNodeID
-    }
-
-    static func shouldRecenterFullCanvas(
-        displayMode: WorkspacePreviewDisplayMode,
-        lastRenderedDisplayMode: WorkspacePreviewDisplayMode?,
-        focusedNodeID: String?,
-        lastRenderedFocusedNodeID: String?,
-        canvasSize: CGSize
-    ) -> Bool {
-        guard canvasSize.width > 0,
-              canvasSize.height > 0 else {
-            return false
-        }
-        if lastRenderedDisplayMode != displayMode {
-            return true
-        }
-        return focusedNodeID != lastRenderedFocusedNodeID
     }
 }

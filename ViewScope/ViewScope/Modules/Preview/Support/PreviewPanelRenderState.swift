@@ -16,6 +16,7 @@ struct PreviewPanelSnapshot {
     let expandedNodeIDs: Set<String>
     let showsSystemWrapperViews: Bool
     let supportsConsole: Bool
+    let isLoadingWorkspace: Bool
 
     init(store: WorkspaceStore) {
         capture = store.capture
@@ -31,6 +32,7 @@ struct PreviewPanelSnapshot {
         expandedNodeIDs = store.expandedNodeIDs
         showsSystemWrapperViews = store.showsSystemWrapperViews
         supportsConsole = store.connectionState.supportsConsole
+        isLoadingWorkspace = store.isLoadingWorkspace
     }
 }
 

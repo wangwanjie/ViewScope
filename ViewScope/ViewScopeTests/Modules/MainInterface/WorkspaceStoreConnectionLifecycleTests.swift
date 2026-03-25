@@ -43,6 +43,7 @@ struct WorkspaceStoreConnectionLifecycleTests {
         let switchTask = Task { await store.connect(to: hostB) }
         try await waitUntil { await sessionB.captureRequestCount == 1 }
 
+        #expect(store.isLoadingWorkspace)
         #expect(store.capture == nil)
         #expect(store.selectedNodeID == nil)
         #expect(store.selectedNodeDetail == nil)
@@ -51,6 +52,7 @@ struct WorkspaceStoreConnectionLifecycleTests {
 
         await sessionB.resolveNextCapture(with: .success(makeCapture(nodeID: "new-node", host: hostB)))
         await switchTask.value
+        #expect(store.isLoadingWorkspace == false)
     }
 
     @Test func staleCaptureResponseFromPreviousHostIsIgnored() async throws {
@@ -210,20 +212,33 @@ struct WorkspaceStoreConnectionLifecycleTests {
         #expect(store.selectedNodeDetail?.nodeID == "node-1")
         #expect(store.focusedNodeID == "node-1")
 
-        async let refreshCaptureTask: Void = store.refreshCapture(
+        var observedRefreshRequest = false
+        var observedLoadingState = false
+        var observedClearedCapture = false
+        var observedClearedSelection = false
+        var observedClearedDetail = false
+        var observedClearedFocus = false
+        session.onCaptureRequest = {
+            observedRefreshRequest = true
+            observedLoadingState = store.isLoadingWorkspace
+            observedClearedCapture = store.capture == nil
+            observedClearedSelection = store.selectedNodeID == nil
+            observedClearedDetail = store.selectedNodeDetail == nil
+            observedClearedFocus = store.focusedNodeID == nil
+        }
+
+        await session.resolveNextCapture(with: .success(makeCapture(nodeID: "node-1", host: host)))
+        await store.refreshCapture(
             forceReloadSelectionDetail: true,
             clearingVisibleState: true
         )
-        try await Task.sleep(nanoseconds: 50_000_000)
-        try await waitUntil { await session.captureRequestCount >= 2 }
-
-        #expect(store.capture == nil)
-        #expect(store.selectedNodeID == nil)
-        #expect(store.selectedNodeDetail == nil)
-        #expect(store.focusedNodeID == nil)
-
-        await session.resolveNextCapture(with: .success(makeCapture(nodeID: "node-1", host: host)))
-        await refreshCaptureTask
+        #expect(observedRefreshRequest)
+        #expect(observedLoadingState)
+        #expect(observedClearedCapture)
+        #expect(observedClearedSelection)
+        #expect(observedClearedDetail)
+        #expect(observedClearedFocus)
+        #expect(store.isLoadingWorkspace == false)
 
         #expect(store.capture?.rootNodeIDs == ["node-1"])
         #expect(store.selectedNodeID == "node-1")
@@ -491,6 +506,7 @@ private final class FakeWorkspaceSession: WorkspaceSessionProtocol {
     private(set) var captureRequestCount = 0
     private var detailRequestCounts: [String: Int] = [:]
     private var isDisconnected = false
+    var onCaptureRequest: (() -> Void)?
 
     init(
         announcement: ViewScopeHostAnnouncement,
@@ -518,6 +534,7 @@ private final class FakeWorkspaceSession: WorkspaceSessionProtocol {
         if response.hasResolved == false {
             inFlightCaptures.append(response)
         }
+        onCaptureRequest?()
         return try await response.wait()
     }
 
