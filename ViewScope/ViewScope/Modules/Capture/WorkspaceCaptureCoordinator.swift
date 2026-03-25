@@ -58,9 +58,10 @@ final class WorkspaceCaptureCoordinator {
         })
 
         var importedCapture = export.capture
-        if let previewBitmap = export.previewBitmap,
-           importedCapture.previewBitmaps.contains(where: { $0.rootNodeID == previewBitmap.rootNodeID }) == false {
-            importedCapture.previewBitmaps.append(previewBitmap)
+        if let previewBitmap = export.previewBitmap {
+            // 预览归档里的 outer preview bitmap 代表“导出时用户真正看到的根图”。
+            // 导入时应优先恢复它，避免 capture 自带 bitmap 把 preview root 带回窗口根节点。
+            importedCapture.previewBitmaps = [previewBitmap]
         }
 
         return WorkspaceImportedCaptureState(

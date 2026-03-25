@@ -88,7 +88,7 @@ final class WorkspaceStore: NSObject {
             connectionState = .connected(previewAnnouncement)
             capture = SampleFixture.capture()
             captureInsight = CaptureHistoryInsight(totalCaptures: 12, averageDurationMilliseconds: 203, mostRecentDurationMilliseconds: 184)
-            Task { await selectNode(withID: "window-0-view-1-2", highlightInHost: false) }
+            applyPreviewFixtureSelection(nodeID: "window-0-view-1-2")
             return
         }
         discoveryCenter.start()
@@ -103,7 +103,7 @@ final class WorkspaceStore: NSObject {
         if previewFixtureEnabled {
             connectionState = .connected(host)
             capture = SampleFixture.capture()
-            await selectNode(withID: "window-0-view-1-2", highlightInHost: false)
+            applyPreviewFixtureSelection(nodeID: "window-0-view-1-2")
             return
         }
 
@@ -414,10 +414,26 @@ final class WorkspaceStore: NSObject {
             showsSystemWrapperViews: showsSystemWrapperViews
         )
         expandedNodeIDs = update.expandedNodeIDs
-        focusedNodeID = update.focusedNodeID
+        if focusedNodeID != update.focusedNodeID {
+            // 展开/折叠节点时，焦点经常保持不变。
+            // 这里如果把相同值再次写回 @Published，会让层级面板误以为状态变了，
+            // 从而在恢复展开状态期间整棵树重复重建，最终形成 UI 死循环。
+            focusedNodeID = update.focusedNodeID
+        }
 
         guard update.selectedNodeID != selectedNodeID else { return }
         selectedNodeID = update.selectedNodeID
+        if previewFixtureEnabled {
+            applyPreviewFixtureSelection(nodeID: update.selectedNodeID)
+            return
+        }
+        if connectionCoordinator.session == nil {
+            selectedNodeDetail = selectedNodeDetail?.nodeID == update.selectedNodeID
+                ? selectedNodeDetail
+                : nil
+            updateConsoleTargets(from: selectedNodeDetail)
+            return
+        }
         Task { [weak self] in
             await self?.selectNode(withID: update.selectedNodeID, highlightInHost: false)
         }
@@ -685,6 +701,12 @@ final class WorkspaceStore: NSObject {
         selectedNodeDetail = nil
         focusedNodeID = nil
         expandedNodeIDs = []
+    }
+
+    private func applyPreviewFixtureSelection(nodeID: String?) {
+        selectedNodeID = nodeID
+        selectedNodeDetail = nodeID.flatMap(SampleFixture.detail(for:))
+        updateConsoleTargets(from: selectedNodeDetail)
     }
 
     private func resolvedPreviewRootNodeID(

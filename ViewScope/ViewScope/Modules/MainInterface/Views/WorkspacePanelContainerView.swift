@@ -2,6 +2,8 @@ import AppKit
 import SnapKit
 
 final class WorkspacePanelContainerView: NSView {
+    private static let defaultInitialFrame = NSRect(x: 0, y: 0, width: 320, height: 220)
+
     let headerView = NSVisualEffectView()
     let titleLabel = NSTextField(labelWithString: "")
     let subtitleLabel = NSTextField(labelWithString: "")
@@ -12,7 +14,10 @@ final class WorkspacePanelContainerView: NSView {
     private let spacerView = NSView()
 
     override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
+        let initialFrame = (frameRect.width > 0 && frameRect.height > 0)
+            ? frameRect
+            : Self.defaultInitialFrame
+        super.init(frame: initialFrame)
         buildViewHierarchy()
         applyAppearance()
     }

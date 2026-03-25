@@ -643,6 +643,23 @@ enum ViewTreeLayoutMetrics {
     static let trailingSpacing: CGFloat = 8
 }
 
+private struct ViewTreeHandlersButtonMetrics {
+    let width: CGFloat
+    let height: CGFloat
+    let isHidden: Bool
+
+    static func resolve(hasHandlers: Bool, isHovering: Bool) -> Self {
+        guard hasHandlers else {
+            return .init(width: 0, height: 0, isHidden: true)
+        }
+        return .init(
+            width: isHovering ? 14 : 10,
+            height: isHovering ? 20 : 16,
+            isHidden: false
+        )
+    }
+}
+
 private final class ViewTreeHandlersButton: NSButton {
     var hoverStateDidChange: ((Bool) -> Void)?
     private var trackingAreaRef: NSTrackingArea?
@@ -814,15 +831,20 @@ private final class ViewTreeNodeCellView: NSTableCellView {
     }
 
     private func updateHandlersButtonMetrics(animated: Bool) {
-        let hasHandlers = eventHandlers.isEmpty == false
-        let targetWidth: CGFloat = hasHandlers ? (handlersButton.isHovering ? 14 : 10) : 0
-        let targetHeight: CGFloat = hasHandlers ? (handlersButton.isHovering ? 20 : 16) : 0
-
-        handlersButton.isHidden = hasHandlers == false
+        let metrics = ViewTreeHandlersButtonMetrics.resolve(
+            hasHandlers: eventHandlers.isEmpty == false,
+            isHovering: handlersButton.isHovering
+        )
+        handlersButton.isHidden = metrics.isHidden
         let updates = {
-            self.handlersButtonWidthConstraint?.update(offset: targetWidth)
-            self.handlersButtonHeightConstraint?.update(offset: targetHeight)
-            self.layoutSubtreeIfNeeded()
+            self.handlersButtonWidthConstraint?.update(offset: metrics.width)
+            self.handlersButtonHeightConstraint?.update(offset: metrics.height)
+
+            // 这里不能在 cell 配置阶段同步触发 layoutSubtreeIfNeeded()。
+            // 展开树节点时 NSOutlineView 正在批量创建行视图，同步布局会反向触发行构建，
+            // 进而把 configure -> 布局 -> 行创建 串成递归链路，导致主线程持续高 CPU。
+            self.needsUpdateConstraints = true
+            self.needsLayout = true
         }
 
         guard animated else {
