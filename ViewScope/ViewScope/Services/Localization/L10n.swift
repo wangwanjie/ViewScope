@@ -120,6 +120,14 @@ enum L10n {
     static var menuCloseWindow: String { tr("menu.close_window") }
     static var menuMinimize: String { tr("menu.minimize") }
     static var menuZoom: String { tr("menu.zoom") }
+    static var menuEdit: String { tr("menu.edit") }
+    static var menuUndo: String { tr("menu.undo") }
+    static var menuRedo: String { tr("menu.redo") }
+    static var menuCut: String { tr("menu.cut") }
+    static var menuCopy: String { tr("menu.copy") }
+    static var menuPaste: String { tr("menu.paste") }
+    static var menuDelete: String { tr("menu.delete") }
+    static var menuSelectAll: String { tr("menu.select_all") }
     static var menuHelp: String { tr("menu.help") }
     static var menuGitHub: String { tr("menu.github") }
     static var fatalLaunchTitle: String { tr("alert.launch_failed.title") }

@@ -104,6 +104,14 @@
 "menu.close_window" = "Close Window";
 "menu.minimize" = "Minimize";
 "menu.zoom" = "Zoom";
+"menu.edit" = "Edit";
+"menu.undo" = "Undo";
+"menu.redo" = "Redo";
+"menu.cut" = "Cut";
+"menu.copy" = "Copy";
+"menu.paste" = "Paste";
+"menu.delete" = "Delete";
+"menu.select_all" = "Select All";
 "menu.help" = "Help";
 "menu.github" = "ViewScope on GitHub";
 "alert.launch_failed.title" = "ViewScope could not launch";

@@ -104,6 +104,14 @@
 "menu.close_window" = "关闭窗口";
 "menu.minimize" = "最小化";
 "menu.zoom" = "缩放";
+"menu.edit" = "编辑";
+"menu.undo" = "撤销";
+"menu.redo" = "重做";
+"menu.cut" = "剪切";
+"menu.copy" = "拷贝";
+"menu.paste" = "粘贴";
+"menu.delete" = "删除";
+"menu.select_all" = "全选";
 "menu.help" = "帮助";
 "menu.github" = "在 GitHub 上查看 ViewScope";
 "alert.launch_failed.title" = "ViewScope 无法启动";

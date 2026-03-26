@@ -104,6 +104,14 @@
 "menu.close_window" = "關閉視窗";
 "menu.minimize" = "最小化";
 "menu.zoom" = "縮放";
+"menu.edit" = "編輯";
+"menu.undo" = "還原";
+"menu.redo" = "重做";
+"menu.cut" = "剪下";
+"menu.copy" = "拷貝";
+"menu.paste" = "貼上";
+"menu.delete" = "刪除";
+"menu.select_all" = "全選";
 "menu.help" = "輔助說明";
 "menu.github" = "在 GitHub 上查看 ViewScope";
 "alert.launch_failed.title" = "ViewScope 無法啟動";

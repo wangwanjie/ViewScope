@@ -42,6 +42,7 @@ final class MainMenuController: NSObject {
 
         mainMenu.addItem(makeAppMenuItem())
         mainMenu.addItem(makeFileMenuItem())
+        mainMenu.addItem(makeEditMenuItem())
         mainMenu.addItem(makeViewMenuItem())
         mainMenu.addItem(makeWindowMenuItem())
         mainMenu.addItem(makeHelpMenuItem())
@@ -90,6 +91,21 @@ final class MainMenuController: NSObject {
         fileItem.title = L10n.menuFile
         fileItem.submenu = fileMenu
         return fileItem
+    }
+
+    private func makeEditMenuItem() -> NSMenuItem {
+        let editItem = NSMenuItem()
+        let editMenu = NSMenu(title: L10n.menuEdit)
+        editMenu.addItem(NSMenuItem(title: L10n.menuUndo, action: Selector(("undo:")), keyEquivalent: "z"))
+        editMenu.addItem(NSMenuItem(title: L10n.menuRedo, action: Selector(("redo:")), keyEquivalent: "Z"))
+        editMenu.addItem(NSMenuItem.separator())
+        editMenu.addItem(NSMenuItem(title: L10n.menuCut, action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
+        editMenu.addItem(NSMenuItem(title: L10n.menuCopy, action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
+        editMenu.addItem(NSMenuItem(title: L10n.menuPaste, action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
+        editMenu.addItem(NSMenuItem(title: L10n.menuDelete, action: #selector(NSText.delete(_:)), keyEquivalent: ""))
+        editMenu.addItem(NSMenuItem(title: L10n.menuSelectAll, action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
+        editItem.submenu = editMenu
+        return editItem
     }
 
     private func makeViewMenuItem() -> NSMenuItem {
