@@ -118,6 +118,8 @@ private final class Inspector {
     private var announcement: ViewScopeHostAnnouncement?
     private var lastReferenceContext = ViewScopeSnapshotBuilder.ReferenceContext(nodeReferences: [:], rootNodeIDs: [], captureID: "")
     private var clientInterfaceLanguage = ViewScopeInterfaceLanguage.english
+    /// 缓存控制台返回的对象，以便用作后续命令的 target。
+    private var consoleObjectCache: [String: AnyObject] = [:]
     private var discoveryRequestObserver: NSObjectProtocol?
 
     private init() {}
@@ -311,6 +313,8 @@ private final class Inspector {
             handleHighlightRequest(message)
         case .mutationRequest:
             handleMutationRequest(message)
+        case .consoleInvokeRequest:
+            handleConsoleInvokeRequest(message)
         default:
             break
         }
@@ -443,6 +447,140 @@ private final class Inspector {
                     error: ViewScopeErrorPayload(message: error.localizedDescription)
                 )
             )
+        }
+    }
+
+    private func handleConsoleInvokeRequest(_ message: ViewScopeMessage) {
+        guard let request = message.consoleInvokeRequest else {
+            activeConnection?.send(
+                ViewScopeMessage(
+                    kind: .error,
+                    requestID: message.requestID,
+                    error: ViewScopeErrorPayload(message: "Invalid console invoke request")
+                )
+            )
+            return
+        }
+
+        let targetObject = resolveConsoleTarget(request.target)
+        guard let targetObject else {
+            activeConnection?.send(
+                ViewScopeMessage(
+                    kind: .consoleInvokeResponse,
+                    requestID: message.requestID,
+                    consoleInvokeResponse: .init(
+                        submittedExpression: request.expression,
+                        target: request.target,
+                        errorMessage: "Target object not found"
+                    )
+                )
+            )
+            return
+        }
+
+        let expression = request.expression.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nsObject = targetObject as AnyObject
+
+        guard nsObject.responds(to: Selector(expression)) else {
+            activeConnection?.send(
+                ViewScopeMessage(
+                    kind: .consoleInvokeResponse,
+                    requestID: message.requestID,
+                    consoleInvokeResponse: .init(
+                        submittedExpression: request.expression,
+                        target: request.target,
+                        errorMessage: "Object does not respond to '\(expression)'"
+                    )
+                )
+            )
+            return
+        }
+
+        // value(forKey:) 在 key 不存在时会抛出 NSException，
+        // 但 responds(to:) 已经做了前置检查，这里安全使用。
+        let value = nsObject.value(forKey: expression)
+
+        let resultDescription = describeConsoleValue(value)
+        var returnedObject: ViewScopeConsoleTargetDescriptor?
+        if let obj = value as AnyObject?, !(value is NSNumber), !(value is NSString), !(value is NSValue) {
+            let objectID = "\(ObjectIdentifier(obj).hashValue)"
+            consoleObjectCache[objectID] = obj
+            returnedObject = ViewScopeConsoleTargetDescriptor(
+                reference: ViewScopeRemoteObjectReference(
+                    captureID: lastReferenceContext.captureID,
+                    objectID: objectID,
+                    kind: .returnedObject,
+                    className: NSStringFromClass(type(of: obj)),
+                    address: String(format: "%p", unsafeBitCast(obj, to: Int.self))
+                ),
+                title: String(describing: obj)
+            )
+        }
+
+        activeConnection?.send(
+            ViewScopeMessage(
+                kind: .consoleInvokeResponse,
+                requestID: message.requestID,
+                consoleInvokeResponse: .init(
+                    submittedExpression: request.expression,
+                    target: request.target,
+                    resultDescription: resultDescription,
+                    returnedObject: returnedObject
+                )
+            )
+        )
+    }
+
+    private func resolveConsoleTarget(_ ref: ViewScopeRemoteObjectReference) -> AnyObject? {
+        switch ref.kind {
+        case .view, .viewController, .window:
+            // objectID 是内存地址，nodeReferences 以 node tree ID 为 key。
+            // 优先用 sourceNodeID 查找，再用 objectID 兜底。
+            let lookupID = ref.sourceNodeID ?? ref.objectID
+            guard let inspectable = lastReferenceContext.nodeReferences[lookupID] else {
+                return nil
+            }
+            switch inspectable {
+            case .window(let w): return w
+            case .view(let v):
+                // console target kind 可能是 .viewController，但 nodeReferences 存的是 .view。
+                // 此时需要找到 view 的 owning VC。
+                if ref.kind == .viewController,
+                   let vc = sequence(first: v.nextResponder, next: { $0?.nextResponder })
+                    .compactMap({ $0 as? NSViewController }).first {
+                    return vc
+                }
+                return v
+            case .viewController(let vc): return vc
+            case .object(let o): return o
+            }
+        case .returnedObject:
+            return consoleObjectCache[ref.objectID]
+        }
+    }
+
+    private func describeConsoleValue(_ value: Any?) -> String {
+        switch value {
+        case nil:
+            return "nil"
+        case let bool as Bool:
+            return bool ? "true" : "false"
+        case let num as NSNumber:
+            return num.stringValue
+        case let str as String:
+            return "\"\(str)\""
+        case let val as NSValue:
+            let objCType = String(cString: val.objCType)
+            if objCType == "{CGRect={CGPoint=dd}{CGSize=dd}}" {
+                return NSStringFromRect(val.rectValue)
+            } else if objCType == "{CGPoint=dd}" {
+                return NSStringFromPoint(val.pointValue)
+            } else if objCType == "{CGSize=dd}" {
+                return NSStringFromSize(val.sizeValue)
+            }
+            return val.description
+        default:
+            return String(describing: value!)
         }
     }
 
