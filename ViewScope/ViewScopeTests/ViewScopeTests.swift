@@ -2430,7 +2430,7 @@ struct ViewScopeTests {
             previewRootNodeID: nil
         )
 
-        #expect(mode == .legacyLocalFrames)
+        #expect(mode == .directGlobalCanvasRect)
     }
 
     @Test func inspectorPlaceholderChangesWhenNoCaptureIsAvailable() async throws {

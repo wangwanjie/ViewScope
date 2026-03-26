@@ -5,7 +5,7 @@ import ViewScopeServer
 ///
 /// 和 `PreviewLayeredRenderPlan` 的核心区别：
 /// - 这里保留数据源的 top-left 画布 rect，直接用于 SceneKit 布局。
-/// - 这里会计算 Lookin 风格的 `zIndex`，决定真实前后遮挡。
+/// - 这里会计算 `zIndex`，决定真实前后遮挡。
 /// - 这里会提前算好 punch-out rect，供节点纹理裁切使用。
 struct PreviewLayeredScenePlan: Equatable {
     struct Plane: Equatable {
@@ -118,7 +118,7 @@ struct PreviewLayeredScenePlan: Equatable {
             }
         }
 
-        // 先算 Lookin 风格 zIndex，再把前景层对后景层的遮挡转换成纹理 punch-out。
+        // 先算 zIndex，再把前景层对后景层的遮挡转换成纹理 punch-out。
         let items = assignZIndexes(to: pendingItems)
         let punchedOutItems = addOverlapPunchOuts(to: items)
 
@@ -150,7 +150,7 @@ struct PreviewLayeredScenePlan: Equatable {
             let zIndex: Int
             if pendingItem.displayingIndependently {
                 // 独立显示的节点会向前找所有已出现且有交叠的节点，
-                // zIndex 取这些节点的最大值 + 1，和 Lookin 的策略一致。
+                // zIndex 取这些节点的最大值 + 1
                 let overlappedZIndex = items
                     .filter { $0.displayRect.intersects(pendingItem.displayRect) }
                     .map(\.zIndex)

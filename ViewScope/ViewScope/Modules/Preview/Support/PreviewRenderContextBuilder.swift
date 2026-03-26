@@ -195,19 +195,9 @@ struct PreviewRenderContextBuilder {
         geometry: ViewHierarchyGeometry,
         cache: inout PreviewRenderContextCache
     ) -> PreviewCanvasGeometryMode {
-        // 几何模式优先跟随 detail.highlightedRect 的实测距离，
-        // 这样在协议端历史数据混合时，仍能自动选中更可信的一套坐标语义。
-        if let inferredMode = PreviewPanelRenderDecisions.geometryMode(
-            capture: capture,
-            selectedNodeID: selectedNodeID,
-            detail: detail,
-            previewRootNodeID: previewRootNodeID,
-            geometry: geometry
-        ) {
-            cache.lastResolvedGeometryMode = inferredMode
-            return inferredMode
-        }
-        return cache.lastResolvedGeometryMode ?? .directGlobalCanvasRect
+        // 服务端始终发送统一画布坐标（normalizedCanvasRect），无需自动检测。
+        cache.lastResolvedGeometryMode = .directGlobalCanvasRect
+        return .directGlobalCanvasRect
     }
 
     private func resolvedSelectionRect(

@@ -3,7 +3,7 @@ import CoreGraphics
 import ViewScopeServer
 
 struct PreviewPanelRenderDecisions {
-    /// 在 direct / legacy 两套几何模式之间自动选择更贴近 detail.highlightedRect 的那一套。
+    /// 服务端始终发送统一画布坐标，直接返回 directGlobalCanvasRect。
     static func geometryMode(
         capture: ViewScopeCapturePayload?,
         selectedNodeID: String?,
@@ -11,33 +11,7 @@ struct PreviewPanelRenderDecisions {
         previewRootNodeID: String? = nil,
         geometry: ViewHierarchyGeometry = ViewHierarchyGeometry()
     ) -> PreviewCanvasGeometryMode? {
-        guard let capture,
-              let selectedNodeID,
-              let detail,
-              detail.nodeID == selectedNodeID
-        else {
-            return nil
-        }
-        let targetRect = detail.highlightedRect.cgRect
-        guard let directRect = geometry.canvasRect(
-            for: selectedNodeID,
-            in: capture,
-            coordinateRootNodeID: previewRootNodeID,
-            mode: .directGlobalCanvasRect
-        ),
-            let legacyRect = geometry.canvasRect(
-                for: selectedNodeID,
-                in: capture,
-                coordinateRootNodeID: previewRootNodeID,
-                mode: .legacyLocalFrames
-            )
-        else {
-            return nil
-        }
-
-        return rectDistance(from: directRect, to: targetRect) <= rectDistance(from: legacyRect, to: targetRect)
-            ? .directGlobalCanvasRect
-            : .legacyLocalFrames
+        return .directGlobalCanvasRect
     }
 
     static func selectionRect(
@@ -67,13 +41,6 @@ struct PreviewPanelRenderDecisions {
             return detail.highlightedRect.cgRect
         }
         return nil
-    }
-
-    private static func rectDistance(from lhs: CGRect, to rhs: CGRect) -> CGFloat {
-        abs(lhs.minX - rhs.minX) +
-            abs(lhs.minY - rhs.minY) +
-            abs(lhs.width - rhs.width) +
-            abs(lhs.height - rhs.height)
     }
 
     static func autoCenterFocusKey(

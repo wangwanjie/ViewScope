@@ -7,6 +7,7 @@ import ViewScopeServer
 /// - `legacyLocalFrames`：历史数据仍然是父子相对坐标，需要客户端递归换算并处理 flipped。
 enum PreviewCanvasGeometryMode {
     case directGlobalCanvasRect
+    @available(*, deprecated, message: "服务端始终发送统一画布坐标，不再需要 legacy 路径")
     case legacyLocalFrames
 }
 
@@ -198,7 +199,7 @@ struct ViewHierarchyGeometry {
         return rect.offsetBy(dx: -rootRect.minX, dy: -rootRect.minY)
     }
 
-    /// 根据几何模式决定是直接信任服务端 frame，还是走旧的递归换算。
+    /// 服务端始终发送统一画布坐标，直接信任 node.frame。
     private func resolvedRect(
         for nodeID: String,
         in nodes: [String: ViewScopeHierarchyNode],
@@ -208,46 +209,6 @@ struct ViewHierarchyGeometry {
         parentBoundsHeight: CGFloat
     ) -> CGRect {
         guard let node = nodes[nodeID] else { return .zero }
-        switch mode {
-        case .directGlobalCanvasRect:
-            return node.frame.cgRect
-        case .legacyLocalFrames:
-            return legacyGlobalRect(
-                for: node,
-                parentOrigin: parentOrigin,
-                parentIsFlipped: parentIsFlipped,
-                parentBoundsHeight: parentBoundsHeight
-            )
-        }
-    }
-
-    /// 历史数据兼容路径。
-    ///
-    /// 这里是客户端少数仍然需要认真处理 `isFlipped` 的地方：
-    /// 如果父视图不是 flipped，子视图的 y 必须绕父 bounds 高度翻转一次。
-    private func legacyGlobalRect(
-        for node: ViewScopeHierarchyNode,
-        parentOrigin: CGPoint,
-        parentIsFlipped: Bool,
-        parentBoundsHeight: CGFloat
-    ) -> CGRect {
-        if node.kind == .window {
-            return node.frame.cgRect
-        }
-
-        let x = parentOrigin.x + CGFloat(node.frame.x)
-        let y: CGFloat
-        if parentIsFlipped {
-            y = parentOrigin.y + CGFloat(node.frame.y)
-        } else {
-            y = parentOrigin.y + parentBoundsHeight - CGFloat(node.frame.y) - CGFloat(node.frame.height)
-        }
-
-        return CGRect(
-            x: x,
-            y: y,
-            width: CGFloat(node.frame.width),
-            height: CGFloat(node.frame.height)
-        )
+        return node.frame.cgRect
     }
 }
