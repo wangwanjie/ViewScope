@@ -7,14 +7,12 @@ import ViewScopeServer
 @MainActor
 /// 预览面板总控。
 ///
-/// 它不直接实现几何或渲染，而是把 `WorkspaceStore` 当前状态编排给两套渲染器：
-/// - `PreviewCanvasView`：2D / 伪 3D
-/// - `PreviewLayeredSceneView`：真实 3D
+/// 使用单一 `PreviewLayeredSceneView`（SCNView）同时处理 flat 和 layered 两种显示模式，
+/// flat 模式为 rotation=0 的 3D 场景，layered 模式有旋转和 z 间距。
 final class PreviewPanelController: NSViewController {
     private enum Layout {
         static let consoleHeight: CGFloat = 240
         static let verticalSpacing: CGFloat = 12
-        static let layeredSceneInset: CGFloat = 10
     }
 
     private let store: WorkspaceStore
@@ -22,7 +20,6 @@ final class PreviewPanelController: NSViewController {
     private let previewContainerView = NSView()
     private let consoleHostView = NSView()
     private let loadingProgressView = WorkspaceLoadingProgressView()
-    private let canvasView = PreviewCanvasView()
     private let layeredSceneView = PreviewLayeredSceneView(frame: .zero)
     private let guideView = IntegrationGuideView()
     private let consoleController: ConsolePanelController
@@ -54,9 +51,6 @@ final class PreviewPanelController: NSViewController {
     private var lastConsoleVisibility: Bool?
     private var renderCache = PreviewPanelRenderCache.empty
     private var renderScheduled = false
-    private var pendingLayeredEntryVisibleCanvasRect: CGRect?
-    private var lastFlatVisibleCanvasRect: CGRect?
-    private var isTransitioningDisplayMode = false
     private var lastLaidOutPreviewSize = CGSize.zero
 
     init(store: WorkspaceStore) {
@@ -99,7 +93,6 @@ final class PreviewPanelController: NSViewController {
     override func viewDidLayout() {
         super.viewDidLayout()
         let previewSize = previewContainerView.bounds.size
-        canvasView.minimumViewportSize = previewSize
 
         guard previewSize.width > 0.5,
               previewSize.height > 0.5,
@@ -112,19 +105,13 @@ final class PreviewPanelController: NSViewController {
     }
 
     override func magnify(with event: NSEvent) {
-        if let responder = activePreviewResponder() {
-            responder.magnify(with: event)
-            return
-        }
-        super.magnify(with: event)
+        guard store.capture != nil else { super.magnify(with: event); return }
+        layeredSceneView.magnify(with: event)
     }
 
     override func scrollWheel(with event: NSEvent) {
-        if let responder = activePreviewResponder() {
-            responder.scrollWheel(with: event)
-            return
-        }
-        super.scrollWheel(with: event)
+        guard store.capture != nil else { super.scrollWheel(with: event); return }
+        layeredSceneView.scrollWheel(with: event)
     }
 
     override func rotate(with event: NSEvent) {
@@ -170,7 +157,6 @@ final class PreviewPanelController: NSViewController {
 
         panelView.contentView.addSubview(previewContainerView)
         panelView.contentView.addSubview(consoleHostView)
-        previewContainerView.addSubview(canvasView)
         previewContainerView.addSubview(layeredSceneView)
         previewContainerView.addSubview(guideView)
         previewContainerView.addSubview(loadingProgressView)
@@ -187,11 +173,8 @@ final class PreviewPanelController: NSViewController {
         consoleController.view.isHidden = true
         consoleController.view.alphaValue = 0
         layeredSceneView.isHidden = true
-        canvasView.snp.makeConstraints { make in
-            make.edges.equalToSuperview()
-        }
         layeredSceneView.snp.makeConstraints { make in
-            make.edges.equalToSuperview().inset(Layout.layeredSceneInset)
+            make.edges.equalToSuperview()
         }
         guideView.snp.makeConstraints { make in
             make.edges.equalToSuperview()
@@ -201,15 +184,6 @@ final class PreviewPanelController: NSViewController {
             make.height.equalTo(2)
         }
 
-        canvasView.onNodeClick = { [weak self] nodeID in
-            self?.selectNode(withID: nodeID, focusAfterSelection: false)
-        }
-        canvasView.onNodeDoubleClick = { [weak self] nodeID in
-            self?.selectNode(withID: nodeID, focusAfterSelection: true)
-        }
-        canvasView.onScaleChanged = { [weak self] scale in
-            self?.store.setPreviewScale(scale)
-        }
         layeredSceneView.onNodeClick = { [weak self] nodeID in
             self?.selectNode(withID: nodeID, focusAfterSelection: false)
         }
@@ -265,21 +239,6 @@ final class PreviewPanelController: NSViewController {
 
     private func renderCurrentState() {
         let snapshot = PreviewPanelSnapshot(store: store)
-        let isEnteringLayeredFromFlat = snapshot.previewDisplayMode == .layered && lastRenderedDisplayMode == .flat
-        let entryVisibleCanvasRect: CGRect? = isEnteringLayeredFromFlat
-            ? ({ () -> CGRect? in
-                let liveVisibleCanvasRect = canvasView.visibleCanvasRect()
-                if let pendingLayeredEntryVisibleCanvasRect {
-                    return pendingLayeredEntryVisibleCanvasRect
-                }
-                if snapshot.previewScale > 1.001,
-                   liveVisibleCanvasRect.width > 0.5,
-                   liveVisibleCanvasRect.height > 0.5 {
-                    return liveVisibleCanvasRect
-                }
-                return lastFlatVisibleCanvasRect
-            })()
-            : nil
         let (renderState, nextRenderCache) = renderStateBuilder.makeState(
             snapshot: snapshot,
             cache: renderCache,
@@ -293,17 +252,7 @@ final class PreviewPanelController: NSViewController {
             previewContainerView.bounds.height > 0.5
 
         guideView.isHidden = snapshot.capture != nil || snapshot.isLoadingWorkspace
-        let isExitingLayeredToFlat = snapshot.previewDisplayMode == .flat && lastRenderedDisplayMode == .layered
-        if !isTransitioningDisplayMode {
-            if isEnteringLayeredFromFlat || isExitingLayeredToFlat {
-                // 过渡期间两个视图都可见，由 performDisplayModeTransition 管理
-                canvasView.isHidden = snapshot.capture == nil
-                layeredSceneView.isHidden = snapshot.capture == nil
-            } else {
-                canvasView.isHidden = snapshot.capture == nil || snapshot.previewDisplayMode != .flat
-                layeredSceneView.isHidden = snapshot.capture == nil || snapshot.previewDisplayMode != .layered
-            }
-        }
+        layeredSceneView.isHidden = snapshot.capture == nil
 
         if snapshot.isLoadingWorkspace {
             loadingProgressView.startAnimating()
@@ -315,30 +264,13 @@ final class PreviewPanelController: NSViewController {
 
         panelView.setTitle(L10n.canvasPreview, subtitle: snapshot.focusedNodeTitle)
 
-        canvasView.applyRenderState(
-            capture: snapshot.capture,
-            image: renderState.previewImage,
-            canvasSize: context.previewCanvasSize,
-            selectedNodeID: snapshot.selectedNodeID,
-            focusedNodeID: snapshot.focusedNodeID,
-            highlightedCanvasRect: context.selectionRect,
-            previewRootNodeID: context.previewRootNodeID,
-            geometryMode: context.geometryMode,
-            displayMode: snapshot.previewDisplayMode,
-            zoomScale: snapshot.previewScale,
-            previewLayerSpacing: snapshot.previewLayerSpacing,
-            previewShowsLayerBorders: snapshot.previewShowsLayerBorders,
-            previewExpandedNodeIDs: snapshot.expandedNodeIDs,
-            showsSystemWrapperViews: snapshot.showsSystemWrapperViews
-        )
-        if snapshot.previewDisplayMode == .flat,
-           context.previewCanvasSize.width > 0.5,
-           context.previewCanvasSize.height > 0.5 {
-            lastFlatVisibleCanvasRect = canvasView.visibleCanvasRect()
+        // 检测显示模式变化，先切换维度（含旋转/z间距动画），再更新渲染状态
+        let isChangingDisplayMode = lastRenderedDisplayMode != nil && snapshot.previewDisplayMode != lastRenderedDisplayMode
+        if isChangingDisplayMode {
+            layeredSceneView.setDimension(snapshot.previewDisplayMode, animated: true)
         }
 
-        if snapshot.previewDisplayMode == .layered,
-           hasRenderablePreviewBounds {
+        if hasRenderablePreviewBounds {
             layeredSceneView.applyRenderState(
                 capture: snapshot.capture,
                 image: renderState.previewImage,
@@ -355,15 +287,6 @@ final class PreviewPanelController: NSViewController {
                 previewExpandedNodeIDs: snapshot.expandedNodeIDs,
                 showsSystemWrapperViews: snapshot.showsSystemWrapperViews
             )
-            if isEnteringLayeredFromFlat {
-                layeredSceneView.enterLayeredModeFlat(fromVisibleCanvasRect: entryVisibleCanvasRect)
-                pendingLayeredEntryVisibleCanvasRect = nil
-                performDisplayModeTransition(entering3D: true)
-            }
-        }
-
-        if isExitingLayeredToFlat, !isTransitioningDisplayMode {
-            performDisplayModeTransition(entering3D: false)
         }
 
         applyToolbarState(renderState.toolbarState)
@@ -387,63 +310,12 @@ final class PreviewPanelController: NSViewController {
             lastRenderedDisplayMode: lastRenderedDisplayMode,
             focusedNodeID: snapshot.focusedNodeID,
             lastRenderedFocusedNodeID: lastRenderedFocusedNodeID,
-            canvasSize: canvasView.canvasSize
-        ), snapshot.previewDisplayMode == .layered,
-           isEnteringLayeredFromFlat == false {
+            canvasSize: layeredSceneView.canvasSize
+        ), isChangingDisplayMode == false {
             layeredSceneView.centerOnNode(snapshot.focusedNodeID ?? snapshot.selectedNodeID ?? context.previewRootNodeID, animated: false)
         }
         lastRenderedDisplayMode = snapshot.previewDisplayMode
         lastRenderedFocusedNodeID = snapshot.focusedNodeID
-    }
-
-    private func performDisplayModeTransition(entering3D: Bool) {
-        isTransitioningDisplayMode = true
-
-        if entering3D {
-            // 2D → 3D: 3D 视图从 flat 状态开始，先 crossfade 再旋转
-            layeredSceneView.alphaValue = 0
-            canvasView.isHidden = false
-            layeredSceneView.isHidden = false
-
-            NSAnimationContext.runAnimationGroup({ ctx in
-                ctx.duration = 0.2
-                ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                self.canvasView.animator().alphaValue = 0
-                self.layeredSceneView.animator().alphaValue = 1
-            }, completionHandler: { [weak self] in
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    self.canvasView.isHidden = true
-                    self.canvasView.alphaValue = 1
-                    self.layeredSceneView.animateToLayeredRotation()
-                    self.isTransitioningDisplayMode = false
-                }
-            })
-        } else {
-            // 3D → 2D: 先旋转回 flat，再 crossfade
-            canvasView.alphaValue = 0
-            canvasView.isHidden = false
-            layeredSceneView.isHidden = false
-
-            layeredSceneView.animateToFlatRotation { [weak self] in
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    NSAnimationContext.runAnimationGroup({ ctx in
-                        ctx.duration = 0.2
-                        ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                        self.canvasView.animator().alphaValue = 1
-                        self.layeredSceneView.animator().alphaValue = 0
-                    }, completionHandler: { [weak self] in
-                        MainActor.assumeIsolated {
-                            guard let self else { return }
-                            self.layeredSceneView.isHidden = true
-                            self.layeredSceneView.alphaValue = 1
-                            self.isTransitioningDisplayMode = false
-                        }
-                    })
-                }
-            }
-        }
     }
 
     private func scheduleRenderCurrentState() {
@@ -617,9 +489,6 @@ final class PreviewPanelController: NSViewController {
 
     @objc private func changeDisplayMode(_ sender: NSSegmentedControl) {
         let nextDisplayMode: WorkspacePreviewDisplayMode = sender.selectedSegment == 1 ? .layered : .flat
-        if nextDisplayMode == .layered, store.previewDisplayMode == .flat {
-            pendingLayeredEntryVisibleCanvasRect = lastFlatVisibleCanvasRect ?? canvasView.visibleCanvasRect()
-        }
         store.setPreviewDisplayMode(nextDisplayMode)
     }
 
@@ -674,10 +543,5 @@ final class PreviewPanelController: NSViewController {
         popover.contentSize = controller.preferredContentSize
         popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
         settingsPopover = popover
-    }
-
-    private func activePreviewResponder() -> NSResponder? {
-        guard store.capture != nil else { return nil }
-        return store.previewDisplayMode == .layered ? layeredSceneView : canvasView
     }
 }

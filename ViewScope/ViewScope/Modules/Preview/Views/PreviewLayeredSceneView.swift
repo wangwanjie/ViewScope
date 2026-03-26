@@ -2,11 +2,10 @@ import AppKit
 import SceneKit
 import ViewScopeServer
 
-/// 真实 3D 预览视图。
+/// 唯一预览画布（SCNView），同时处理 flat 和 layered 两种显示模式。
 ///
-/// 和 `PreviewCanvasView.layered` 的区别：
-/// - `PreviewCanvasView.layered` 是在 2D 里模拟 3D 效果
-/// - 这里是真的创建 SceneKit 节点，并支持旋转、平移、缩放
+/// flat 模式：rotation = 0、z 间距极小，看起来像一张截图。
+/// layered 模式：有旋转角度、z 间距拉开，真正的 3D 分层。
 ///
 /// 核心约定：
 /// - 节点位置直接使用统一的 top-left 画布坐标
@@ -40,10 +39,7 @@ final class PreviewLayeredSceneView: SCNView {
     private var structuralState: StructuralState?
     private var nodePreviewImageCache: [String: NSImage] = [:]
     private var cachedNodePreviewCaptureID: String?
-    private var stageRotation = CGPoint(
-        x: PreviewLayeredSceneConstants.defaultPitch,
-        y: PreviewLayeredSceneConstants.defaultYaw
-    )
+    private var stageRotation = CGPoint.zero
     private var stageTranslation = CGPoint.zero
     /// 用户是否手动旋转过，切回 3D 时恢复上次角度而非默认角度。
     private var hasUserRotated = false
@@ -112,13 +108,9 @@ final class PreviewLayeredSceneView: SCNView {
         }
     }
 
-    var displayMode: WorkspacePreviewDisplayMode = .layered {
+    var displayMode: WorkspacePreviewDisplayMode = .flat {
         didSet {
             guard suppressSceneRefresh == false else { return }
-            if displayMode == .layered, oldValue == .flat, !hasUserRotated {
-                stageRotation = PreviewLayeredSceneInteraction.rotationWhenEnteringLayered(from: .zero)
-            }
-            updateStageForDisplayMode(animated: true)
             refreshScene()
         }
     }
@@ -260,39 +252,27 @@ final class PreviewLayeredSceneView: SCNView {
         applyStageTransform(animated: animated)
     }
 
-    /// Phase 1: 以 flat 状态（rotation=0）准备 3D 视图，供 crossfade 使用。
-    func enterLayeredModeFlat(fromVisibleCanvasRect visibleCanvasRect: CGRect?) {
-        if let visibleCanvasRect,
-           visibleCanvasRect.width > 0.5,
-           visibleCanvasRect.height > 0.5 {
-            stageTranslation = translationForCentering(displayRect: visibleCanvasRect)
+    /// 切换显示模式（flat ↔ layered），带可选动画。
+    ///
+    /// - flat: 保存当前旋转角，动画旋转到 (0,0)，z 间距缩至 `flatDepthStep`
+    /// - layered: 恢复上次旋转角（或默认角度），z 间距恢复正常
+    func setDimension(_ dimension: WorkspacePreviewDisplayMode, animated: Bool) {
+        guard dimension != displayMode else { return }
+
+        if dimension == .flat {
+            // 进入 flat：旋转归零 + z 间距极小
+            displayMode = dimension
+            applyStageTransform(rotation: .zero, animated: animated)
+            rebuildZPositions(animated: animated)
+        } else {
+            // 进入 layered：恢复旋转 + z 间距拉开
+            if !hasUserRotated {
+                stageRotation = PreviewLayeredSceneInteraction.rotationWhenEnteringLayered(from: .zero)
+            }
+            displayMode = dimension
+            applyStageTransform(rotation: stageRotation, animated: animated)
+            rebuildZPositions(animated: animated)
         }
-        // 用户手动旋转过则保留其角度，否则用默认角度
-        if !hasUserRotated {
-            stageRotation = PreviewLayeredSceneInteraction.rotationWhenEnteringLayered(from: .zero)
-        }
-        applyStageTransform(rotation: .zero, animated: false)
-    }
-
-    /// Phase 2: crossfade 完成后，动画旋转到 3D 目标角度。
-    func animateToLayeredRotation() {
-        applyStageTransform(rotation: stageRotation, animated: true)
-    }
-
-    /// 3D → 2D: 动画旋转回 flat，完成后调用 completion。
-    func animateToFlatRotation(completion: @escaping () -> Void) {
-        SCNTransaction.begin()
-        SCNTransaction.animationDuration = 0.3
-        SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        SCNTransaction.completionBlock = completion
-        stageNode.eulerAngles = SCNVector3(0, 0, 0)
-        SCNTransaction.commit()
-    }
-
-    /// 兼容旧调用路径（非过渡场景直接进入 3D）。
-    func enterLayeredMode(fromVisibleCanvasRect visibleCanvasRect: CGRect?) {
-        enterLayeredModeFlat(fromVisibleCanvasRect: visibleCanvasRect)
-        animateToLayeredRotation()
     }
 
     func applyRenderState(
@@ -341,7 +321,6 @@ final class PreviewLayeredSceneView: SCNView {
         self.showsSystemWrapperViews = showsSystemWrapperViews
         suppressSceneRefresh = false
 
-        updateStageForDisplayMode(animated: false)
         if needsSceneRefresh {
             refreshScene()
         } else {
@@ -622,6 +601,53 @@ final class PreviewLayeredSceneView: SCNView {
         }
     }
 
+    /// 就地更新所有已渲染节点的 z 位置，用于 flat ↔ layered 切换时 z 间距的动画过渡。
+    private func rebuildZPositions(animated: Bool) {
+        guard let plan else { return }
+
+        let renderableItems = plan.items.filter {
+            $0.displayRect.width > 0.5 && $0.displayRect.height > 0.5
+        }
+        let centeredMidZIndex = CGFloat(renderableItems.map(\.zIndex).max() ?? 0) * 0.5
+        let centeredPlaneDepth = CGFloat(plan.planes.map(\.depth).max() ?? 0) * 0.5
+        let zStep = displayMode == .flat
+            ? PreviewLayeredSceneConstants.flatDepthStep
+            : max(0.08, previewLayerSpacing * 0.005)
+        var itemCountByZIndex: [Int: Int] = [:]
+
+        let applyPositions = {
+            for plane in plan.planes {
+                let nodeName = "content-plane-\(plane.depth)"
+                if let planeNode = self.stageNode.childNode(withName: nodeName, recursively: false) {
+                    planeNode.position.z = (CGFloat(plane.depth) - centeredPlaneDepth) * zStep
+                }
+            }
+            for item in renderableItems {
+                let countAtCurrentZIndex = itemCountByZIndex[item.zIndex, default: 0]
+                itemCountByZIndex[item.zIndex] = countAtCurrentZIndex + 1
+                if let displayNode = self.displayNodes[item.nodeID] {
+                    let centeredZ = CGFloat(item.zIndex) - centeredMidZIndex
+                    let zBias = CGFloat(countAtCurrentZIndex) * PreviewLayeredSceneConstants.sameZIndexBiasStep
+                    displayNode.updateZPosition(
+                        centeredZIndex: centeredZ,
+                        zStep: zStep,
+                        zBias: zBias
+                    )
+                }
+            }
+        }
+
+        if animated {
+            SCNTransaction.begin()
+            SCNTransaction.animationDuration = 0.3
+            SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            applyPositions()
+            SCNTransaction.commit()
+        } else {
+            applyPositions()
+        }
+    }
+
     private func applyStageTransform(rotation: CGPoint? = nil, animated: Bool = false) {
         let nextRotation = rotation ?? stageRotation
         let apply = {
@@ -656,15 +682,8 @@ final class PreviewLayeredSceneView: SCNView {
             return
         }
 
-        // 2D 画布使用 28pt padding 计算可视区域，3D 视图已有 10pt 外部 inset，
-        // 再加 18pt 内部 padding 使两者可视区域完全一致，切换时内容大小相同。
-        let cameraViewportPadding: CGFloat = 18
-        let effectiveW = bounds.width - 2 * cameraViewportPadding
-        let effectiveH = bounds.height - 2 * cameraViewportPadding
-        guard effectiveW > 1, effectiveH > 1 else { return }
-
         let fillRatio = PreviewLayeredSceneConstants.defaultFillRatio
-        let fitScale = min(effectiveW / canvasSize.width, effectiveH / canvasSize.height) * fillRatio
+        let fitScale = min(bounds.width / canvasSize.width, bounds.height / canvasSize.height) * fillRatio
 
         // SCNCamera 的投影矩阵以**垂直** sensor 尺寸（默认 24mm）为基准，
         // 水平可视范围 = cameraZ × viewAspect × sensorHeight / focalLength。

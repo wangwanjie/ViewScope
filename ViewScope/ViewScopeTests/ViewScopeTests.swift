@@ -602,18 +602,18 @@ struct ViewScopeTests {
         view.frame = NSRect(x: 0, y: 0, width: 1320, height: 900)
         view.layoutSubtreeIfNeeded()
 
-        let canvasView = try #require(Mirror(reflecting: controller).descendant("canvasView") as? PreviewCanvasView)
-        let initialImage = try #require(canvasView.image)
+        let sceneView = try #require(Mirror(reflecting: controller).descendant("layeredSceneView") as? PreviewLayeredSceneView)
+        let initialImage = try #require(sceneView.image)
 
         store.setPreviewScale(1.25)
         pumpRunLoop(for: 0.1)
         view.layoutSubtreeIfNeeded()
 
-        let updatedImage = try #require(canvasView.image)
+        let updatedImage = try #require(sceneView.image)
         #expect(initialImage === updatedImage)
     }
 
-    @Test func previewPanelRoutesFlatModeThroughCanvasView() async throws {
+    @Test func previewPanelUsesSingleSceneViewForBothModes() async throws {
         let store = try makeFixtureStore()
         defer { store.shutdown() }
         store.start()
@@ -624,19 +624,18 @@ struct ViewScopeTests {
         view.frame = NSRect(x: 0, y: 0, width: 1320, height: 900)
         view.layoutSubtreeIfNeeded()
 
-        let canvasView = try #require(Mirror(reflecting: controller).descendant("canvasView") as? PreviewCanvasView)
-        let layeredSceneView = try #require(Mirror(reflecting: controller).descendant("layeredSceneView") as? PreviewLayeredSceneView)
+        let sceneView = try #require(Mirror(reflecting: controller).descendant("layeredSceneView") as? PreviewLayeredSceneView)
 
         #expect(store.previewDisplayMode == .flat)
-        #expect(canvasView.isHidden == false)
-        #expect(layeredSceneView.isHidden)
+        #expect(sceneView.isHidden == false)
+        #expect(sceneView.displayMode == .flat)
 
         store.setPreviewDisplayMode(.layered)
         pumpRunLoop(for: 0.1)
         view.layoutSubtreeIfNeeded()
 
-        #expect(canvasView.isHidden)
-        #expect(layeredSceneView.isHidden == false)
+        #expect(sceneView.isHidden == false)
+        #expect(sceneView.displayMode == .layered)
     }
 
     @Test func previewPanelMakesControllerFirstResponderWhenShown() async throws {
@@ -772,61 +771,6 @@ struct ViewScopeTests {
         let stageTranslation = try #require(Mirror(reflecting: layeredSceneView).descendant("stageTranslation") as? CGPoint)
         #expect(abs(stageTranslation.x) < 0.001)
         #expect(abs(stageTranslation.y) < 0.001)
-    }
-
-    @Test func layeredPreviewKeepsCurrentFlatViewportWhenEntering3D() async throws {
-        let store = try makeFixtureStore()
-        defer { store.shutdown() }
-        store.start()
-        pumpRunLoop(for: 0.1)
-
-        let controller = PreviewPanelController(store: store)
-        let view = controller.view
-        view.frame = NSRect(x: 0, y: 0, width: 1320, height: 900)
-        view.layoutSubtreeIfNeeded()
-
-        let canvasView = try #require(Mirror(reflecting: controller).descendant("canvasView") as? PreviewCanvasView)
-        store.setPreviewScale(2)
-        pumpRunLoop(for: 0.1)
-        view.layoutSubtreeIfNeeded()
-
-        canvasView.centerOnCanvasRect(CGRect(x: 920, y: 420, width: 140, height: 100))
-        let visibleRect = canvasView.visibleCanvasRect()
-
-        store.setPreviewDisplayMode(.layered)
-        pumpRunLoop(for: 0.1)
-        view.layoutSubtreeIfNeeded()
-
-        let layeredSceneView = try #require(Mirror(reflecting: controller).descendant("layeredSceneView") as? PreviewLayeredSceneView)
-        let stageTranslation = try #require(Mirror(reflecting: layeredSceneView).descendant("stageTranslation") as? CGPoint)
-
-        let expectedTranslation = CGPoint(
-            x: -((visibleRect.midX - 600) * 0.01),
-            y: -((320 - visibleRect.midY) * 0.01)
-        )
-
-        #expect(abs(stageTranslation.x - expectedTranslation.x) < 0.001)
-        #expect(abs(stageTranslation.y - expectedTranslation.y) < 0.001)
-        #expect(abs(stageTranslation.x) > 0.1 || abs(stageTranslation.y) > 0.1)
-    }
-
-    @Test func projectedQuadAppliesPerspectiveForeshorteningAcrossOppositeEdges() async throws {
-        let transform = PreviewLayerTransform(yaw: -0.22, pitch: 0.16)
-        let rect = CGRect(x: 292, y: 152, width: 760, height: 408)
-
-        let quad = transform.projectedQuad(
-            for: rect,
-            depth: 2,
-            canvasSize: CGSize(width: 1200, height: 640)
-        )
-
-        let topWidth = hypot(quad[1].x - quad[0].x, quad[1].y - quad[0].y)
-        let bottomWidth = hypot(quad[2].x - quad[3].x, quad[2].y - quad[3].y)
-        let leftHeight = hypot(quad[3].x - quad[0].x, quad[3].y - quad[0].y)
-        let rightHeight = hypot(quad[2].x - quad[1].x, quad[2].y - quad[1].y)
-
-        #expect(abs(topWidth - bottomWidth) > 20)
-        #expect(abs(leftHeight - rightHeight) > 20)
     }
 
     @Test func layeredSceneBalancesPlaneDepthAroundStackMidpoint() async throws {
@@ -1135,7 +1079,7 @@ struct ViewScopeTests {
         #expect(abs(CGFloat(stageNode.eulerAngles.y) - ((15 * .pi) / 180)) < 0.001)
     }
 
-    @Test func layeredPreviewReentering3DResetsToLookinEntryPose() async throws {
+    @Test func layeredPreviewReentering3DPreservesUserRotation() async throws {
         let store = try makeFixtureStore()
         defer { store.shutdown() }
         store.start()
@@ -1154,18 +1098,26 @@ struct ViewScopeTests {
         layeredSceneView.applyRotationGesture(48)
         let scene = try #require(layeredSceneView.scene)
         let stageNode = try #require(scene.rootNode.childNode(withName: "stage", recursively: false))
-        #expect(abs(CGFloat(stageNode.eulerAngles.y) - ((15 * .pi) / 180)) > 0.05)
+        let rotatedYaw = CGFloat(stageNode.eulerAngles.y)
+
+        // 用户旋转后角度应不同于默认 yaw
+        #expect(abs(rotatedYaw - PreviewLayeredSceneConstants.defaultYaw) > 0.05)
 
         store.setPreviewDisplayMode(.flat)
         pumpRunLoop(for: 0.1)
         view.layoutSubtreeIfNeeded()
 
+        // flat 模式下 eulerAngles 应该为 0
+        #expect(abs(CGFloat(stageNode.eulerAngles.x)) < 0.01)
+        #expect(abs(CGFloat(stageNode.eulerAngles.y)) < 0.01)
+
         store.setPreviewDisplayMode(.layered)
         pumpRunLoop(for: 0.1)
         view.layoutSubtreeIfNeeded()
 
-        #expect(abs(CGFloat(stageNode.eulerAngles.x) - ((-10 * .pi) / 180)) < 0.001)
-        #expect(abs(CGFloat(stageNode.eulerAngles.y) - ((15 * .pi) / 180)) < 0.001)
+        // 重新进入 layered 应恢复用户之前旋转的角度
+        #expect(abs(CGFloat(stageNode.eulerAngles.x) - PreviewLayeredSceneConstants.defaultPitch) < 0.01)
+        #expect(abs(CGFloat(stageNode.eulerAngles.y) - rotatedYaw) < 0.01)
     }
 
     @Test func layeredSceneSelectionOverlayUsesExplicitHighlightedRect() async throws {
@@ -2587,217 +2539,6 @@ struct ViewScopeTests {
         guideView.layoutSubtreeIfNeeded()
 
         #expect(guideView.visibleCardWidth > 900)
-    }
-
-    @Test func flatPreviewKeepsNonFlippedHostScreenshotUpright() async throws {
-        let previewImage = try #require(pngRoundTripped(makeNonFlippedRootScreenshot()))
-        let canvasSize = CGSize(width: 200, height: 120)
-        let previewView = PreviewCanvasView(frame: NSRect(x: 0, y: 0, width: 256, height: 176))
-        previewView.canvasSize = canvasSize
-        previewView.image = previewImage
-        previewView.displayMode = .flat
-        previewView.layoutSubtreeIfNeeded()
-
-        let rendered = render(view: previewView)
-        let expectedRect = CGRect(x: 8, y: 82, width: 40, height: 30)
-        let samplePoint = center(of: previewView.viewRect(fromCanvasRect: expectedRect))
-        let pixel = color(in: rendered, atViewPoint: samplePoint)
-
-        #expect((pixel?.redComponent ?? 0) > 0.8)
-        #expect((pixel?.greenComponent ?? 0) < 0.5)
-        #expect((pixel?.blueComponent ?? 0) < 0.5)
-    }
-
-    @Test func flatPreviewKeepsFlippedHostScreenshotUpright() async throws {
-        let previewImage = try #require(await makeServerScreenshot(for: makeFlippedRootView()))
-        let canvasSize = CGSize(width: 200, height: 120)
-        let previewView = PreviewCanvasView(frame: NSRect(x: 0, y: 0, width: 256, height: 176))
-        previewView.canvasSize = canvasSize
-        previewView.image = previewImage
-        previewView.displayMode = .flat
-        previewView.layoutSubtreeIfNeeded()
-
-        let rendered = render(view: previewView)
-        let expectedRect = CGRect(x: 8, y: 8, width: 40, height: 30)
-        let samplePoint = center(of: previewView.viewRect(fromCanvasRect: expectedRect))
-        let pixel = color(in: rendered, atViewPoint: samplePoint)
-
-        #expect((pixel?.redComponent ?? 0) > 0.8)
-        #expect((pixel?.greenComponent ?? 0) < 0.5)
-        #expect((pixel?.blueComponent ?? 0) < 0.5)
-    }
-
-    @Test func flatPreviewKeepsSnapshotBuilderFlippedRootScreenshotUpright() async throws {
-        let previewImage = try #require(makeSnapshotBuilderScreenshot(for: makeFlippedRootView()))
-        let canvasSize = CGSize(width: 200, height: 120)
-        let previewView = PreviewCanvasView(frame: NSRect(x: 0, y: 0, width: 256, height: 176))
-        previewView.canvasSize = canvasSize
-        previewView.image = previewImage
-        previewView.displayMode = .flat
-        previewView.layoutSubtreeIfNeeded()
-
-        let rendered = render(view: previewView)
-        let viewport = PreviewViewportState(canvasSize: canvasSize, viewportSize: previewView.bounds.size)
-        let samplePoint = try #require(viewport.viewPoint(forCanvasPoint: CGPoint(x: 28, y: 97)))
-        let pixel = color(in: rendered, atViewPoint: samplePoint)
-
-        #expect((pixel?.redComponent ?? 0) > 0.8)
-        #expect((pixel?.greenComponent ?? 0) < 0.5)
-        #expect((pixel?.blueComponent ?? 0) < 0.5)
-    }
-
-    @Test func flatPreviewKeepsSnapshotBuilderScreenshotUpright() async throws {
-        let previewImage = try #require(makeSnapshotBuilderScreenshot(for: makeVerticallySplitRootView()))
-        let canvasSize = CGSize(width: 200, height: 120)
-        let previewView = PreviewCanvasView(frame: NSRect(x: 0, y: 0, width: 256, height: 176))
-        previewView.canvasSize = canvasSize
-        previewView.image = previewImage
-        previewView.displayMode = .flat
-        previewView.layoutSubtreeIfNeeded()
-
-        let rendered = render(view: previewView)
-        let topSample = center(of: previewView.viewRect(fromCanvasRect: CGRect(x: 90, y: 12, width: 20, height: 12)))
-        let bottomSample = center(of: previewView.viewRect(fromCanvasRect: CGRect(x: 90, y: 96, width: 20, height: 12)))
-
-        let topPixel = color(in: rendered, atViewPoint: topSample)
-        let bottomPixel = color(in: rendered, atViewPoint: bottomSample)
-
-        #expect((topPixel?.redComponent ?? 0) > 0.75)
-        #expect((topPixel?.blueComponent ?? 0) < 0.35)
-        #expect((bottomPixel?.blueComponent ?? 0) > 0.75)
-        #expect((bottomPixel?.redComponent ?? 0) < 0.35)
-    }
-
-    @Test func flatPreviewSelectionUsesNormalizedTopLeftCanvasCoordinates() async throws {
-        let previewImage = try #require(pngRoundTripped(makeNonFlippedRootScreenshot()))
-        let canvasSize = CGSize(width: 200, height: 120)
-        let previewView = PreviewCanvasView(frame: NSRect(x: 0, y: 0, width: 256, height: 176))
-        previewView.canvasSize = canvasSize
-        previewView.image = previewImage
-        previewView.highlightedCanvasRect = CGRect(x: 8, y: 82, width: 40, height: 30)
-        previewView.displayMode = .flat
-        previewView.layoutSubtreeIfNeeded()
-
-        let rendered = render(view: previewView)
-        let highlightRect = previewView.viewRect(fromCanvasRect: CGRect(x: 8, y: 82, width: 40, height: 30))
-        let borderSample = CGPoint(x: highlightRect.midX, y: highlightRect.minY + 1)
-        let pixel = color(in: rendered, atViewPoint: borderSample)
-
-        #expect((pixel?.blueComponent ?? 0) > 0.25)
-    }
-
-    @Test func flatPreviewSelectionForFlippedRootUsesSameDisplayCoordinatesAsScreenshot() async throws {
-        let canvasSize = CGSize(width: 200, height: 120)
-        let previewView = PreviewCanvasView(frame: NSRect(x: 0, y: 0, width: 256, height: 176))
-        previewView.canvasSize = canvasSize
-        previewView.highlightedCanvasRect = CGRect(x: 8, y: 8, width: 40, height: 30)
-        previewView.displayMode = .flat
-        previewView.layoutSubtreeIfNeeded()
-
-        let rendered = render(view: previewView)
-        let viewport = PreviewViewportState(canvasSize: canvasSize, viewportSize: previewView.bounds.size)
-        let borderPoint = try #require(viewport.viewPoint(forCanvasPoint: CGPoint(x: 28, y: 111)))
-        let pixel = color(in: rendered, atViewPoint: borderPoint)
-
-        #expect((pixel?.blueComponent ?? 0) > 0.25)
-    }
-
-    @Test func flatPreviewClipsZoomedContentInsideRoundedBorder() async throws {
-        let canvasSize = CGSize(width: 200, height: 120)
-        let previewView = PreviewCanvasView(frame: NSRect(x: 0, y: 0, width: 256, height: 176))
-        previewView.canvasSize = canvasSize
-        previewView.image = makeSolidTopLeftImage(size: canvasSize, color: .systemRed)
-        previewView.displayMode = .flat
-        previewView.zoomScale = 2
-        previewView.layoutSubtreeIfNeeded()
-        previewView.centerOnCanvasRect(CGRect(x: 196, y: 60, width: 2, height: 2))
-
-        let rendered = render(view: previewView)
-        let outsidePixel = color(in: rendered, atViewPoint: CGPoint(x: 4, y: previewView.bounds.midY))
-        let insidePixel = color(in: rendered, atViewPoint: CGPoint(x: 12, y: previewView.bounds.midY))
-
-        #expect((outsidePixel?.redComponent ?? 0) < 0.7)
-        #expect((insidePixel?.redComponent ?? 0) > 0.8)
-    }
-
-    @Test func layeredPreviewKeepsBaseImageTopEdgeAtProjectedTopEdge() async throws {
-        let previewImage = try #require(pngRoundTripped(makeVerticallySplitScreenshot()))
-        let canvasSize = CGSize(width: 200, height: 120)
-        let previewView = PreviewCanvasView(frame: NSRect(x: 0, y: 0, width: 256, height: 176))
-        previewView.canvasSize = canvasSize
-        previewView.image = previewImage
-        previewView.capture = makeImageOnlyCapture(canvasSize: canvasSize)
-        previewView.displayMode = .layered
-        previewView.layoutSubtreeIfNeeded()
-
-        let rendered = render(view: previewView)
-        let topSample = center(of: previewView.viewRect(fromCanvasRect: CGRect(x: 90, y: 12, width: 20, height: 12)))
-        let bottomSample = center(of: previewView.viewRect(fromCanvasRect: CGRect(x: 90, y: 96, width: 20, height: 12)))
-
-        let topPixel = color(in: rendered, atViewPoint: topSample)
-        let bottomPixel = color(in: rendered, atViewPoint: bottomSample)
-
-        #expect((topPixel?.redComponent ?? 0) > 0.75)
-        #expect((topPixel?.blueComponent ?? 0) < 0.35)
-        #expect((bottomPixel?.blueComponent ?? 0) > 0.75)
-        #expect((bottomPixel?.redComponent ?? 0) < 0.35)
-    }
-
-    @Test func layeredPreviewKeepsSnapshotBuilderImageTopEdgeAtProjectedTopEdge() async throws {
-        let previewImage = try #require(makeSnapshotBuilderScreenshot(for: makeVerticallySplitRootView()))
-        let canvasSize = CGSize(width: 200, height: 120)
-        let previewView = PreviewCanvasView(frame: NSRect(x: 0, y: 0, width: 256, height: 176))
-        previewView.canvasSize = canvasSize
-        previewView.image = previewImage
-        previewView.capture = makeImageOnlyCapture(canvasSize: canvasSize)
-        previewView.displayMode = .layered
-        previewView.layoutSubtreeIfNeeded()
-
-        let rendered = render(view: previewView)
-        let topSample = center(of: previewView.viewRect(fromCanvasRect: CGRect(x: 90, y: 12, width: 20, height: 12)))
-        let bottomSample = center(of: previewView.viewRect(fromCanvasRect: CGRect(x: 90, y: 96, width: 20, height: 12)))
-
-        let topPixel = color(in: rendered, atViewPoint: topSample)
-        let bottomPixel = color(in: rendered, atViewPoint: bottomSample)
-
-        #expect((topPixel?.redComponent ?? 0) > 0.75)
-        #expect((topPixel?.blueComponent ?? 0) < 0.35)
-        #expect((bottomPixel?.blueComponent ?? 0) > 0.75)
-        #expect((bottomPixel?.redComponent ?? 0) < 0.35)
-    }
-
-    @Test func layeredPreviewKeepsSelectedLowerLeftMarkerInsideSelectedQuad() async throws {
-        let previewImage = try #require(pngRoundTripped(makeNonFlippedRootScreenshot()))
-        let canvasSize = CGSize(width: 200, height: 120)
-        let previewView = PreviewCanvasView(frame: NSRect(x: 0, y: 0, width: 256, height: 176))
-        previewView.canvasSize = canvasSize
-        previewView.image = previewImage
-        previewView.capture = makeImageOnlyCapture(canvasSize: canvasSize)
-        previewView.highlightedCanvasRect = CGRect(x: 8, y: 82, width: 40, height: 30)
-        previewView.displayMode = .layered
-        previewView.layoutSubtreeIfNeeded()
-
-        let rendered = render(view: previewView)
-        let selectedQuad = PreviewLayerTransform().projectedQuad(
-            for: PreviewCanvasCoordinateSpace.displayRect(
-                fromNormalizedRect: CGRect(x: 8, y: 82, width: 40, height: 30),
-                canvasSize: canvasSize
-            ),
-            depth: 0,
-            canvasSize: canvasSize
-        )
-        let selectionCenterX = selectedQuad.map(\.x).reduce(0, +) / CGFloat(selectedQuad.count)
-        let selectionCenterY = selectedQuad.map(\.y).reduce(0, +) / CGFloat(selectedQuad.count)
-        let selectionCenter = CGPoint(x: selectionCenterX, y: selectionCenterY)
-        let normalizedSelectionCenter = CGPoint(
-            x: selectionCenter.x,
-            y: canvasSize.height - selectionCenter.y
-        )
-        let samplePoint = previewView.viewRect(fromCanvasRect: CGRect(origin: normalizedSelectionCenter, size: .zero)).origin
-        let pixel = color(in: rendered, atViewPoint: samplePoint)
-
-        #expect((pixel?.redComponent ?? 0) > 0.45)
-        #expect((pixel?.blueComponent ?? 0) > 0.2)
     }
 
     @Test func localizationSwitchesBetweenSupportedLanguages() async throws {

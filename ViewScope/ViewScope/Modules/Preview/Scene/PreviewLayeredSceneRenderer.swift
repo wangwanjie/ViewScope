@@ -100,6 +100,12 @@ final class PreviewLayeredDisplayNode {
         updateAppearance(isSelected: false, isFocused: false, showsBorder: showsBorder)
     }
 
+    func updateZPosition(centeredZIndex: CGFloat, zStep: CGFloat, zBias: CGFloat) {
+        var pos = node.position
+        pos.z = centeredZIndex * zStep + zBias
+        node.position = pos
+    }
+
     func updateAppearance(isSelected: Bool, isFocused: Bool, showsBorder: Bool) {
         guard let item else { return }
         contentNode.opacity = item.displayingIndependently ? 1 : 0
