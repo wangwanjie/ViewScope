@@ -47,9 +47,17 @@ final class ViewTreeSelectionSynchronizer {
         return .update(item.node.id)
     }
 
-    func withProgrammaticSelection<T>(_ operation: () -> T) -> T {
+    func beginProgrammaticSelection() {
         isApplyingProgrammaticSelection = true
-        defer { isApplyingProgrammaticSelection = false }
+    }
+
+    func endProgrammaticSelection() {
+        isApplyingProgrammaticSelection = false
+    }
+
+    func withProgrammaticSelection<T>(_ operation: () -> T) -> T {
+        beginProgrammaticSelection()
+        defer { endProgrammaticSelection() }
         return operation()
     }
 

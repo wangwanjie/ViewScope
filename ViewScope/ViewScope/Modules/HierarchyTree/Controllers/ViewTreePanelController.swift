@@ -18,6 +18,8 @@ final class ViewTreePanelController: NSViewController {
     private var cancellables = Set<AnyCancellable>()
     private var rootItems: [ViewTreeNodeItem] = []
     private var currentQuery = ""
+    /// rebuild 期间置 true，忽略 NSOutlineView 回调避免级联循环。
+    private var isBatchUpdating = false
 
     init(store: WorkspaceStore) {
         self.store = store
@@ -93,15 +95,28 @@ final class ViewTreePanelController: NSViewController {
     }
 
     private func bindStore() {
-        Publishers.CombineLatest4(store.$capture, store.$selectedNodeID, store.$focusedNodeID, AppLocalization.shared.$language)
+        // 树结构变化（capture / focusedNodeID / language）→ 完整重建
+        Publishers.CombineLatest3(store.$capture, store.$focusedNodeID, AppLocalization.shared.$language)
             .receive(on: RunLoop.main)
-            .sink { [weak self] _, _, _, _ in
+            .sink { [weak self] _, _, _ in
                 self?.rebuildTree()
+            }
+            .store(in: &cancellables)
+
+        // 选中变化 → 只同步选中行，不重建树
+        store.$selectedNodeID
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self, !self.isBatchUpdating else { return }
+                self.syncSelectionFromStore()
             }
             .store(in: &cancellables)
     }
 
     private func rebuildTree() {
+        isBatchUpdating = true
+        defer { isBatchUpdating = false }
+
         panelView.setTitle(L10n.hierarchy, subtitle: store.focusedNode?.title)
         wrapperToggle.state = store.showsSystemWrapperViews ? .on : .off
         rootItems = presentationBuilder.buildRoots(
@@ -111,8 +126,10 @@ final class ViewTreePanelController: NSViewController {
             query: currentQuery
         )
         updateEmptyState()
-        outlineView.reloadData()
-        restoreExpansionState(items: rootItems)
+        selectionSynchronizer.withProgrammaticSelection {
+            outlineView.reloadData()
+            restoreExpansionState(items: rootItems)
+        }
         syncSelectionFromStore()
     }
 
@@ -290,6 +307,7 @@ extension ViewTreePanelController: NSOutlineViewDataSource, NSOutlineViewDelegat
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
+        guard !isBatchUpdating else { return }
         switch selectionSynchronizer.userSelectionChange(
             selectedRow: outlineView.selectedRow,
             itemAtRow: { row in
@@ -304,11 +322,20 @@ extension ViewTreePanelController: NSOutlineViewDataSource, NSOutlineViewDelegat
     }
 
     func outlineViewItemDidExpand(_ notification: Notification) {
+        guard !isBatchUpdating else { return }
         guard let item = notification.userInfo?["NSObject"] as? ViewTreeNodeItem else { return }
         store.setNodeExpanded(item.node.id, isExpanded: true)
     }
 
+    func outlineViewItemWillCollapse(_ notification: Notification) {
+        // NSOutlineView 收起节点时，如果被选中的行是其后代，
+        // 会在 didCollapse 之前触发 outlineViewSelectionDidChange。
+        // 提前标记，防止该回调被当成用户操作写回 store。
+        selectionSynchronizer.beginProgrammaticSelection()
+    }
+
     func outlineViewItemDidCollapse(_ notification: Notification) {
+        selectionSynchronizer.endProgrammaticSelection()
         guard let item = notification.userInfo?["NSObject"] as? ViewTreeNodeItem else { return }
         store.setNodeExpanded(item.node.id, isExpanded: false)
     }

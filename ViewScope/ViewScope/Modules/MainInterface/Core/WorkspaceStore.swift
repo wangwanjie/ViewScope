@@ -229,7 +229,9 @@ final class WorkspaceStore: NSObject {
 
     func selectNode(withID nodeID: String?, highlightInHost: Bool = true) async {
         let generation = connectionCoordinator.generation
-        selectedNodeID = nodeID
+        if selectedNodeID != nodeID {
+            selectedNodeID = nodeID
+        }
         guard let nodeID else {
             selectedNodeDetail = nil
             consoleCandidateTargets = []

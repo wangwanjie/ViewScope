@@ -66,14 +66,17 @@ final class WorkspaceSelectionController {
             expandedNodeIDs: nextExpandedNodeIDs,
             showsSystemWrapperViews: showsSystemWrapperViews
         )
+        // 收起节点导致选中节点不可见时，直接清除选中
+        // focusedNodeID 则回退到最近可见祖节点，保持子树聚焦连续性。
+        let resolvedSelectedNodeID: String? = if let selectedNodeID,
+            visibleNodeIDs.contains(selectedNodeID) {
+            selectedNodeID
+        } else {
+            nil
+        }
         return WorkspaceExpansionUpdate(
             expandedNodeIDs: nextExpandedNodeIDs,
-            selectedNodeID: resolvedVisibleSelectionTarget(
-                from: selectedNodeID,
-                capture: capture,
-                visibleNodeIDs: visibleNodeIDs,
-                showsSystemWrapperViews: showsSystemWrapperViews
-            ),
+            selectedNodeID: resolvedSelectedNodeID,
             focusedNodeID: resolvedVisibleSelectionTarget(
                 from: focusedNodeID,
                 capture: capture,
