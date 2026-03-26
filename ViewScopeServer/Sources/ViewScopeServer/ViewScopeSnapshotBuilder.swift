@@ -190,6 +190,25 @@ final class ViewScopeSnapshotBuilder {
             capturedAt: capturedAt
         )
 
+        var previewBitmaps: [ViewScopePreviewBitmap] = []
+        let bitmapEncoder = ViewScopeImageEncoder()
+        for (index, window) in windows.enumerated() {
+            guard window.isVisible,
+                  let contentView = window.contentView,
+                  contentView.bounds.width > 0, contentView.bounds.height > 0 else { continue }
+            let contentViewNodeID = "window-\(index)-view-root"
+            if let image = makeViewScreenshot(view: contentView),
+               let base64 = bitmapEncoder.base64PNG(for: image) {
+                previewBitmaps.append(ViewScopePreviewBitmap(
+                    rootNodeID: contentViewNodeID,
+                    pngBase64: base64,
+                    size: contentView.bounds.size.viewScopeSize,
+                    capturedAt: capturedAt,
+                    scale: Double(window.screen?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1)
+                ))
+            }
+        }
+
         return (
             ViewScopeCapturePayload(
                 host: hostInfo,
@@ -198,7 +217,7 @@ final class ViewScopeSnapshotBuilder {
                 rootNodeIDs: rootNodeIDs,
                 nodes: nodes,
                 captureID: captureID,
-                previewBitmaps: [],
+                previewBitmaps: previewBitmaps,
                 nodePreviewScreenshots: nodePreviewScreenshots
             ),
             context
@@ -387,6 +406,28 @@ final class ViewScopeSnapshotBuilder {
             }
         }
 
+        if let outlineView = view as? NSOutlineView {
+            let visibleRows = outlineView.rows(in: outlineView.visibleRect)
+            if visibleRows.length > 0 {
+                for row in visibleRows.location ..< NSMaxRange(visibleRows) {
+                    append(outlineView.rowView(atRow: row, makeIfNecessary: false))
+                }
+            }
+        }
+
+        if let collectionView = view as? NSCollectionView {
+            for indexPath in collectionView.indexPathsForVisibleItems() {
+                if let item = collectionView.item(at: indexPath) {
+                    append(item.view)
+                }
+            }
+        }
+
+        if let tabView = view as? NSTabView,
+           let selectedItem = tabView.selectedTabViewItem {
+            append(selectedItem.view)
+        }
+
         return orderedChildren
     }
 
@@ -488,6 +529,14 @@ final class ViewScopeSnapshotBuilder {
 
             case .view(let view):
                 if view.window?.contentView === view || node.childIDs.isEmpty {
+                    return nil
+                }
+
+                // Skip solo screenshots for very small or deep nodes to improve performance.
+                guard node.bounds.width > 2, node.bounds.height > 2 else {
+                    return nil
+                }
+                if node.depth > 4, node.childIDs.count <= 3 {
                     return nil
                 }
 
