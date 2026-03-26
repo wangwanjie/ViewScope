@@ -45,6 +45,8 @@ final class PreviewLayeredSceneView: SCNView {
         y: PreviewLayeredSceneConstants.defaultYaw
     )
     private var stageTranslation = CGPoint.zero
+    /// 用户是否手动旋转过，切回 3D 时恢复上次角度而非默认角度。
+    private var hasUserRotated = false
     private var mouseDownPoint: CGPoint?
     private var lastDragPoint: CGPoint?
     private var didDrag = false
@@ -113,7 +115,7 @@ final class PreviewLayeredSceneView: SCNView {
     var displayMode: WorkspacePreviewDisplayMode = .layered {
         didSet {
             guard suppressSceneRefresh == false else { return }
-            if displayMode == .layered, oldValue == .flat {
+            if displayMode == .layered, oldValue == .flat, !hasUserRotated {
                 stageRotation = PreviewLayeredSceneInteraction.rotationWhenEnteringLayered(from: .zero)
             }
             updateStageForDisplayMode(animated: true)
@@ -196,6 +198,7 @@ final class PreviewLayeredSceneView: SCNView {
             current: stageRotation,
             delta: delta
         )
+        hasUserRotated = true
         applyStageTransform()
         self.lastDragPoint = point
     }
@@ -241,6 +244,7 @@ final class PreviewLayeredSceneView: SCNView {
             current: stageRotation,
             delta: CGPoint(x: rotation * 1.8, y: 0)
         )
+        hasUserRotated = true
         applyStageTransform()
     }
 
@@ -256,17 +260,39 @@ final class PreviewLayeredSceneView: SCNView {
         applyStageTransform(animated: animated)
     }
 
-    func enterLayeredMode(fromVisibleCanvasRect visibleCanvasRect: CGRect?) {
-        // 从 flat 进入 3D 时，尽量让用户当前看到的区域落在舞台中心。
+    /// Phase 1: 以 flat 状态（rotation=0）准备 3D 视图，供 crossfade 使用。
+    func enterLayeredModeFlat(fromVisibleCanvasRect visibleCanvasRect: CGRect?) {
         if let visibleCanvasRect,
            visibleCanvasRect.width > 0.5,
            visibleCanvasRect.height > 0.5 {
             stageTranslation = translationForCentering(displayRect: visibleCanvasRect)
         }
+        // 用户手动旋转过则保留其角度，否则用默认角度
+        if !hasUserRotated {
+            stageRotation = PreviewLayeredSceneInteraction.rotationWhenEnteringLayered(from: .zero)
+        }
+        applyStageTransform(rotation: .zero, animated: false)
+    }
 
-        let targetRotation = PreviewLayeredSceneInteraction.rotationWhenEnteringLayered(from: .zero)
-        stageRotation = targetRotation
-        applyStageTransform(rotation: targetRotation, animated: false)
+    /// Phase 2: crossfade 完成后，动画旋转到 3D 目标角度。
+    func animateToLayeredRotation() {
+        applyStageTransform(rotation: stageRotation, animated: true)
+    }
+
+    /// 3D → 2D: 动画旋转回 flat，完成后调用 completion。
+    func animateToFlatRotation(completion: @escaping () -> Void) {
+        SCNTransaction.begin()
+        SCNTransaction.animationDuration = 0.3
+        SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        SCNTransaction.completionBlock = completion
+        stageNode.eulerAngles = SCNVector3(0, 0, 0)
+        SCNTransaction.commit()
+    }
+
+    /// 兼容旧调用路径（非过渡场景直接进入 3D）。
+    func enterLayeredMode(fromVisibleCanvasRect visibleCanvasRect: CGRect?) {
+        enterLayeredModeFlat(fromVisibleCanvasRect: visibleCanvasRect)
+        animateToLayeredRotation()
     }
 
     func applyRenderState(
@@ -359,6 +385,7 @@ final class PreviewLayeredSceneView: SCNView {
         cameraNode.camera = camera
         cameraNode.position = SCNVector3(0, 0, 34)
         scene.rootNode.addChildNode(cameraNode)
+        pointOfView = cameraNode
 
         let rightLight = SCNLight()
         rightLight.type = .omni
@@ -612,7 +639,7 @@ final class PreviewLayeredSceneView: SCNView {
 
         if animated {
             SCNTransaction.begin()
-            SCNTransaction.animationDuration = 0.18
+            SCNTransaction.animationDuration = 0.3
             SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             apply()
             SCNTransaction.commit()
@@ -624,10 +651,33 @@ final class PreviewLayeredSceneView: SCNView {
     private func updateCamera() {
         guard let camera = cameraNode.camera else { return }
 
-        let clampedZoom = min(max(zoomScale, PreviewLayeredSceneConstants.minimumZoom), PreviewLayeredSceneConstants.maximumZoom)
-        let normalizedZoom = (clampedZoom - PreviewLayeredSceneConstants.minimumZoom) /
-            (PreviewLayeredSceneConstants.maximumZoom - PreviewLayeredSceneConstants.minimumZoom)
-        camera.focalLength = 20 + (normalizedZoom * normalizedZoom * 730)
+        guard canvasSize.width > 0.5, canvasSize.height > 0.5,
+              bounds.width > 0.5, bounds.height > 0.5 else {
+            return
+        }
+
+        // 2D 画布使用 28pt padding 计算可视区域，3D 视图已有 10pt 外部 inset，
+        // 再加 18pt 内部 padding 使两者可视区域完全一致，切换时内容大小相同。
+        let cameraViewportPadding: CGFloat = 18
+        let effectiveW = bounds.width - 2 * cameraViewportPadding
+        let effectiveH = bounds.height - 2 * cameraViewportPadding
+        guard effectiveW > 1, effectiveH > 1 else { return }
+
+        let fillRatio = PreviewLayeredSceneConstants.defaultFillRatio
+        let fitScale = min(effectiveW / canvasSize.width, effectiveH / canvasSize.height) * fillRatio
+
+        // SCNCamera 的投影矩阵以**垂直** sensor 尺寸（默认 24mm）为基准，
+        // 水平可视范围 = cameraZ × viewAspect × sensorHeight / focalLength。
+        // 因此从 fitScale 反推 focalLength 时必须用 sensorHeight 和 bounds.height。
+        let unitScale = PreviewLayeredSceneConstants.unitScale
+        let cameraZ = PreviewLayeredSceneConstants.cameraDistance
+        let sensorH: CGFloat = 24 // SceneKit 默认 sensorSize.height
+        let baseFocalLength = fitScale * cameraZ * sensorH / (bounds.height * unitScale)
+
+        let clampedZoom = min(max(zoomScale, PreviewLayeredSceneConstants.minimumZoom),
+                              PreviewLayeredSceneConstants.maximumZoom)
+        camera.focalLength = baseFocalLength * clampedZoom
+
         updateLightPositions()
     }
 

@@ -56,6 +56,7 @@ final class PreviewPanelController: NSViewController {
     private var renderScheduled = false
     private var pendingLayeredEntryVisibleCanvasRect: CGRect?
     private var lastFlatVisibleCanvasRect: CGRect?
+    private var isTransitioningDisplayMode = false
     private var lastLaidOutPreviewSize = CGSize.zero
 
     init(store: WorkspaceStore) {
@@ -292,8 +293,17 @@ final class PreviewPanelController: NSViewController {
             previewContainerView.bounds.height > 0.5
 
         guideView.isHidden = snapshot.capture != nil || snapshot.isLoadingWorkspace
-        canvasView.isHidden = snapshot.capture == nil || snapshot.previewDisplayMode != .flat
-        layeredSceneView.isHidden = snapshot.capture == nil || snapshot.previewDisplayMode != .layered
+        let isExitingLayeredToFlat = snapshot.previewDisplayMode == .flat && lastRenderedDisplayMode == .layered
+        if !isTransitioningDisplayMode {
+            if isEnteringLayeredFromFlat || isExitingLayeredToFlat {
+                // 过渡期间两个视图都可见，由 performDisplayModeTransition 管理
+                canvasView.isHidden = snapshot.capture == nil
+                layeredSceneView.isHidden = snapshot.capture == nil
+            } else {
+                canvasView.isHidden = snapshot.capture == nil || snapshot.previewDisplayMode != .flat
+                layeredSceneView.isHidden = snapshot.capture == nil || snapshot.previewDisplayMode != .layered
+            }
+        }
 
         if snapshot.isLoadingWorkspace {
             loadingProgressView.startAnimating()
@@ -346,10 +356,14 @@ final class PreviewPanelController: NSViewController {
                 showsSystemWrapperViews: snapshot.showsSystemWrapperViews
             )
             if isEnteringLayeredFromFlat {
-                // 进入 3D 时沿用 2D 当前可见区域，避免用户视角突然跳回全局中心。
-                layeredSceneView.enterLayeredMode(fromVisibleCanvasRect: entryVisibleCanvasRect)
+                layeredSceneView.enterLayeredModeFlat(fromVisibleCanvasRect: entryVisibleCanvasRect)
                 pendingLayeredEntryVisibleCanvasRect = nil
+                performDisplayModeTransition(entering3D: true)
             }
+        }
+
+        if isExitingLayeredToFlat, !isTransitioningDisplayMode {
+            performDisplayModeTransition(entering3D: false)
         }
 
         applyToolbarState(renderState.toolbarState)
@@ -380,6 +394,56 @@ final class PreviewPanelController: NSViewController {
         }
         lastRenderedDisplayMode = snapshot.previewDisplayMode
         lastRenderedFocusedNodeID = snapshot.focusedNodeID
+    }
+
+    private func performDisplayModeTransition(entering3D: Bool) {
+        isTransitioningDisplayMode = true
+
+        if entering3D {
+            // 2D → 3D: 3D 视图从 flat 状态开始，先 crossfade 再旋转
+            layeredSceneView.alphaValue = 0
+            canvasView.isHidden = false
+            layeredSceneView.isHidden = false
+
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.2
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                self.canvasView.animator().alphaValue = 0
+                self.layeredSceneView.animator().alphaValue = 1
+            }, completionHandler: { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.canvasView.isHidden = true
+                    self.canvasView.alphaValue = 1
+                    self.layeredSceneView.animateToLayeredRotation()
+                    self.isTransitioningDisplayMode = false
+                }
+            })
+        } else {
+            // 3D → 2D: 先旋转回 flat，再 crossfade
+            canvasView.alphaValue = 0
+            canvasView.isHidden = false
+            layeredSceneView.isHidden = false
+
+            layeredSceneView.animateToFlatRotation { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    NSAnimationContext.runAnimationGroup({ ctx in
+                        ctx.duration = 0.2
+                        ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                        self.canvasView.animator().alphaValue = 1
+                        self.layeredSceneView.animator().alphaValue = 0
+                    }, completionHandler: { [weak self] in
+                        MainActor.assumeIsolated {
+                            guard let self else { return }
+                            self.layeredSceneView.isHidden = true
+                            self.layeredSceneView.alphaValue = 1
+                            self.isTransitioningDisplayMode = false
+                        }
+                    })
+                }
+            }
+        }
     }
 
     private func scheduleRenderCurrentState() {

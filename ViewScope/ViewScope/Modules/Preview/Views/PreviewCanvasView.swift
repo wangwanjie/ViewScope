@@ -90,11 +90,22 @@ final class PreviewCanvasView: NSView {
 
     var zoomScale: CGFloat = 1 {
         didSet {
-            if abs(viewportState.scale - zoomScale) > 0.0001 {
-                viewportState.setScale(zoomScale)
+            let effective = zoomScale * baseFitScale
+            if abs(viewportState.scale - effective) > 0.0001 {
+                viewportState.setScale(effective)
             }
             invalidateDisplay()
         }
+    }
+
+    /// zoom=1 时内容占画布的比例，与 3D 保持一致。
+    private var baseFitScale: CGFloat {
+        let vw = viewportState.viewportSize.width - 2 * viewportState.padding
+        let vh = viewportState.viewportSize.height - 2 * viewportState.padding
+        let cw = viewportState.canvasSize.width
+        let ch = viewportState.canvasSize.height
+        guard cw > 0, ch > 0, vw > 0, vh > 0 else { return 1 }
+        return min(vw / cw, vh / ch) * PreviewLayeredSceneConstants.defaultFillRatio
     }
 
     var minimumViewportSize: CGSize = .zero {
@@ -259,14 +270,15 @@ final class PreviewCanvasView: NSView {
     }
 
     override func magnify(with event: NSEvent) {
-        let nextScale = min(max(viewportState.scale * (1 + event.magnification), 0.35), 4)
+        let nextZoom = min(max(zoomScale * (1 + event.magnification), 0.35), 4)
+        let effective = nextZoom * baseFitScale
         viewportState.setScale(
-            nextScale,
+            effective,
             keepingCanvasPoint: viewportState.canvasPoint(forViewPoint: convert(event.locationInWindow, from: nil)),
             anchoredAt: convert(event.locationInWindow, from: nil)
         )
-        zoomScale = viewportState.scale
-        onScaleChanged?(viewportState.scale)
+        zoomScale = nextZoom
+        onScaleChanged?(nextZoom)
         needsDisplay = true
     }
 
@@ -534,8 +546,12 @@ final class PreviewCanvasView: NSView {
         let height = max(bounds.height, minimumViewportSize.height, 1)
         viewportState.setCanvasSize(canvasSize)
         viewportState.setViewportSize(CGSize(width: width, height: height))
-        if abs(viewportState.scale - zoomScale) > 0.0001 {
-            viewportState.setScale(zoomScale)
+        let effective = zoomScale * baseFitScale
+        if abs(viewportState.scale - effective) > 0.0001 {
+            // 以画布中心为锚点，确保缩放变化后内容始终居中。
+            let canvasCenter = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
+            let vpCenter = CGPoint(x: width / 2, y: height / 2)
+            viewportState.setScale(effective, keepingCanvasPoint: canvasCenter, anchoredAt: vpCenter)
         }
     }
 

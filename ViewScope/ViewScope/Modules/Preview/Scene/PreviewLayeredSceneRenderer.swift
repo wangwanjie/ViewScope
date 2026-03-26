@@ -4,7 +4,7 @@ import SceneKit
 enum PreviewLayeredSceneConstants {
     static let unitScale: CGFloat = 0.01
     static let defaultPitch: CGFloat = (-10 * .pi) / 180
-    static let defaultYaw: CGFloat = (15 * .pi) / 180
+    static let defaultYaw: CGFloat = 0.6 // ≈34°
     static let selectableCategoryMask = 1 << 1
     static let minimumZoom: CGFloat = 0.35
     static let maximumZoom: CGFloat = 4
@@ -13,6 +13,10 @@ enum PreviewLayeredSceneConstants {
     static let maskNodeZOffset: CGFloat = 0.001
     static let borderNodeZOffset: CGFloat = 0.002
     static let selectionOverlayZOffset: CGFloat = 0.01
+    /// zoom=1 时画布内容占视图的比例（0-1），可调整。
+    static let defaultFillRatio: CGFloat = 0.7
+    static let cameraSensorWidth: CGFloat = 36 // SceneKit 默认
+    static let cameraDistance: CGFloat = 34
 
     static func translationFactor(for zoomScale: CGFloat) -> CGFloat {
         let normalizedZoom = (min(max(zoomScale, minimumZoom), maximumZoom) - minimumZoom) / (maximumZoom - minimumZoom)
@@ -209,7 +213,7 @@ enum PreviewLayeredSceneSnapshotFactory {
             from: .zero,
             operation: .sourceOver,
             fraction: 1,
-            respectFlipped: false,
+            respectFlipped: true,
             hints: [.interpolation: NSImageInterpolation.high]
         )
         topLeftImage.unlockFocus()
@@ -240,23 +244,9 @@ enum PreviewLayeredSceneSnapshotFactory {
     }
 
     private static func makeSceneTextureImage(fromTopLeftImage image: NSImage, size: CGSize) -> NSImage {
-        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-            return image
-        }
-
-        let sceneImage = NSImage(size: size)
-        sceneImage.lockFocus()
-        guard let context = NSGraphicsContext.current?.cgContext else {
-            sceneImage.unlockFocus()
-            return image
-        }
-
-        context.clear(CGRect(origin: .zero, size: size))
-        context.translateBy(x: 0, y: size.height)
-        context.scaleBy(x: 1, y: -1)
-        context.draw(cgImage, in: CGRect(origin: .zero, size: size))
-        sceneImage.unlockFocus()
-        return sceneImage
+        // 输入已经是正确的 top-left 方向图像（由 makeTopLeftWorkingImage 归一化），
+        // SceneKit 的 SCNMaterial 接受 NSImage 时会自行处理坐标映射，无需额外翻转。
+        return image
     }
 
     static func makeBorderGeometry(size: CGSize, unitScale: CGFloat, color: NSColor) -> SCNGeometry {
