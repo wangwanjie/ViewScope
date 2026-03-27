@@ -68,6 +68,40 @@ struct PreviewRenderContextBuilderTests {
         #expect(state.shouldShowConsolePanel == false)
     }
 
+    @Test func toolbarStateAllowsVisibilityTogglesForLayerNodes() {
+        let node = ViewScopeHierarchyNode(
+            id: "layer",
+            parentID: nil,
+            kind: .layer,
+            className: "CALayer",
+            title: "layer",
+            subtitle: nil,
+            frame: ViewScopeRect(x: 0, y: 0, width: 120, height: 80),
+            bounds: ViewScopeRect(x: 0, y: 0, width: 120, height: 80),
+            childIDs: [],
+            isHidden: false,
+            alphaValue: 1,
+            wantsLayer: true,
+            isFlipped: true,
+            clippingEnabled: false,
+            depth: 1
+        )
+        let state = PreviewToolbarStateBuilder().makeState(
+            capture: makeCapture(withBitmap: true),
+            selectedNodeID: "layer",
+            focusedNodeID: nil,
+            selectedNode: node,
+            previewScale: 1,
+            previewDisplayMode: .flat,
+            supportsConsole: true,
+            isConsoleToggleEnabled: false
+        )
+
+        #expect(state.visibilityButtonEnabled)
+        #expect(state.visibilitySymbolName == "eye")
+        #expect(state.visibilityToolTip == L10n.hierarchyMenuHideView)
+    }
+
     private func makeCapture(withBitmap: Bool) -> ViewScopeCapturePayload {
         let node = makeNode(id: "root")
         return ViewScopeCapturePayload(

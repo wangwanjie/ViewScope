@@ -13,9 +13,15 @@ public enum ViewScopeClassNameFormatter {
     public static func displayName(for rawClassName: String) -> String {
         let demangled = demangledClassName(from: rawClassName)
         if demangled != rawClassName {
-            return normalizedDemangledName(demangled)
+            let normalized = normalizedDemangledName(demangled)
+            return strippedModulePrefix(from: normalized)
         }
-        return rawClassName.components(separatedBy: ".").last ?? rawClassName
+        return strippedModulePrefix(from: rawClassName)
+    }
+
+    private static func strippedModulePrefix(from name: String) -> String {
+        guard let dotIndex = name.firstIndex(of: ".") else { return name }
+        return String(name[name.index(after: dotIndex)...])
     }
 
     public static func demangledClassName(from rawClassName: String) -> String {

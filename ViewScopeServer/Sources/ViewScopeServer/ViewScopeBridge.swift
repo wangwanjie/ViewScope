@@ -4,7 +4,7 @@ public let viewScopeDiscoveryAnnouncementNotification = Notification.Name("cn.va
 public let viewScopeDiscoveryTerminationNotification = Notification.Name("cn.vanjay.ViewScopeServer.termination")
 public let viewScopeDiscoveryRequestNotification = Notification.Name("cn.vanjay.ViewScopeServer.discovery-request")
 public let viewScopeCurrentProtocolVersion = 2
-public let viewScopeServerRuntimeVersion = "1.2.1"
+public let viewScopeServerRuntimeVersion = "1.2.2"
 
 /// Advertises a locally running debug host that can be inspected by the ViewScope app.
 public struct ViewScopeHostAnnouncement: Codable, Sendable, Hashable {
@@ -165,12 +165,14 @@ public struct ViewScopeHierarchyNode: Codable, Sendable, Hashable, Identifiable 
     public enum Kind: String, Codable, Sendable {
         case window
         case view
+        case layer
     }
 
     public var id: String
     public var parentID: String?
     public var kind: Kind
     public var className: String
+    public var hostViewClassName: String?
     public var title: String
     public var subtitle: String?
     public var ivarName: String?
@@ -196,6 +198,7 @@ public struct ViewScopeHierarchyNode: Codable, Sendable, Hashable, Identifiable 
         parentID: String?,
         kind: Kind,
         className: String,
+        hostViewClassName: String? = nil,
         title: String,
         subtitle: String?,
         identifier: String? = nil,
@@ -220,6 +223,7 @@ public struct ViewScopeHierarchyNode: Codable, Sendable, Hashable, Identifiable 
         self.parentID = parentID
         self.kind = kind
         self.className = className
+        self.hostViewClassName = hostViewClassName
         self.title = title
         self.subtitle = subtitle
         self.identifier = identifier
@@ -374,6 +378,7 @@ public struct ViewScopeRemoteObjectReference: Codable, Sendable, Hashable {
     public enum Kind: String, Codable, Sendable {
         case window
         case view
+        case layer
         case viewController
         case returnedObject
     }

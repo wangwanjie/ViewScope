@@ -401,6 +401,11 @@ private final class Inspector {
                 let rect = view.convert(view.bounds, to: nil)
                 overlayController?.show(highlight: rect, in: window, duration: request.duration)
             }
+        case .layer(let layer):
+            if let window = layer.viewScopeWindow,
+               let rect = layer.viewScopeFrameInWindow {
+                overlayController?.show(highlight: rect, in: window, duration: request.duration)
+            }
         case .viewController(let controller):
             if let window = controller.view.window {
                 let rect = controller.view.convert(controller.view.bounds, to: nil)
@@ -533,7 +538,7 @@ private final class Inspector {
 
     private func resolveConsoleTarget(_ ref: ViewScopeRemoteObjectReference) -> AnyObject? {
         switch ref.kind {
-        case .view, .viewController, .window:
+        case .view, .layer, .viewController, .window:
             // objectID 是内存地址，nodeReferences 以 node tree ID 为 key。
             // 优先用 sourceNodeID 查找，再用 objectID 兜底。
             let lookupID = ref.sourceNodeID ?? ref.objectID
@@ -551,6 +556,16 @@ private final class Inspector {
                     return vc
                 }
                 return v
+            case .layer(let layer):
+                if ref.kind == .viewController,
+                   let controller = layer.viewScopeHostView?.viewScopeExactRootOwningViewController {
+                    return controller
+                }
+                if ref.kind == .view,
+                   let hostView = layer.viewScopeHostView {
+                    return hostView
+                }
+                return layer
             case .viewController(let vc): return vc
             case .object(let o): return o
             }
@@ -609,6 +624,8 @@ enum ViewScopeMutationApplier {
             try apply(property, to: window)
         case .view(let view):
             try apply(property, to: view)
+        case .layer(let layer):
+            try apply(property, to: layer)
         case .viewController, .object:
             throw MutationError.unsupportedProperty
         }
@@ -652,6 +669,9 @@ enum ViewScopeMutationApplier {
     }
 
     static func apply(_ property: ViewScopeEditableProperty, to view: NSView) throws {
+        if try applyAppKitSpecificMutation(property, to: view) {
+            return
+        }
         switch property.key {
         case "hidden":
             guard let value = property.boolValue else {
@@ -772,6 +792,677 @@ enum ViewScopeMutationApplier {
         }
     }
 
+    static func apply(_ property: ViewScopeEditableProperty, to layer: CALayer) throws {
+        switch property.key {
+        case "hidden":
+            guard let value = property.boolValue else {
+                throw MutationError.invalidValue
+            }
+            layer.isHidden = value
+        case "alpha":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            layer.opacity = Float(max(0, min(1, value)))
+        case "frame.x":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateLayerFrame(layer, x: value)
+        case "frame.y":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateLayerFrame(layer, y: value)
+        case "frame.width":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateLayerFrame(layer, width: value)
+        case "frame.height":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateLayerFrame(layer, height: value)
+        case "bounds.x":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateLayerBounds(layer, x: value)
+        case "bounds.y":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateLayerBounds(layer, y: value)
+        case "bounds.width":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateLayerBounds(layer, width: value)
+        case "bounds.height":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateLayerBounds(layer, height: value)
+        case "backgroundColor":
+            guard let value = property.textValue else {
+                throw MutationError.invalidValue
+            }
+            try mutateBackgroundColor(layer, hexString: value)
+        case "layer.cornerRadius":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            mutateLayerValue(layer, cornerRadius: value)
+        case "layer.borderWidth":
+            guard let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            mutateLayerValue(layer, borderWidth: value)
+        default:
+            throw MutationError.unsupportedProperty
+        }
+    }
+
+    private static func applyAppKitSpecificMutation(_ property: ViewScopeEditableProperty, to view: NSView) throws -> Bool {
+        switch property.key {
+        case "imageView.imageScaling":
+            guard let imageView = view as? NSImageView,
+                  let value = property.numberValue,
+                  let scaling = NSImageScaling(rawValue: UInt(Int(value))) else {
+                throw MutationError.invalidValue
+            }
+            imageView.imageScaling = scaling
+            return true
+        case "imageView.imageAlignment":
+            guard let imageView = view as? NSImageView,
+                  let value = property.numberValue,
+                  let alignment = NSImageAlignment(rawValue: UInt(value)) else {
+                throw MutationError.invalidValue
+            }
+            imageView.imageAlignment = alignment
+            return true
+        case "imageView.animates":
+            guard let imageView = view as? NSImageView,
+                  let value = property.boolValue else {
+                throw MutationError.invalidValue
+            }
+            imageView.animates = value
+            return true
+        case "contentOffset.x":
+            guard let scrollView = view as? NSScrollView,
+                  let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            var origin = scrollView.contentView.bounds.origin
+            origin.x = CGFloat(value)
+            scrollView.contentView.scroll(to: origin)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+            return true
+        case "contentOffset.y":
+            guard let scrollView = view as? NSScrollView,
+                  let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            var origin = scrollView.contentView.bounds.origin
+            origin.y = CGFloat(value)
+            scrollView.contentView.scroll(to: origin)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+            return true
+        case "contentSize.width":
+            guard let scrollView = view as? NSScrollView,
+                  let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            guard let documentView = scrollView.documentView else {
+                throw MutationError.unsupportedProperty
+            }
+            var size = documentView.frame.size
+            size.width = CGFloat(max(0, value))
+            documentView.setFrameSize(size)
+            return true
+        case "contentSize.height":
+            guard let scrollView = view as? NSScrollView,
+                  let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            guard let documentView = scrollView.documentView else {
+                throw MutationError.unsupportedProperty
+            }
+            var size = documentView.frame.size
+            size.height = CGFloat(max(0, value))
+            documentView.setFrameSize(size)
+            return true
+        case "automaticallyAdjustsContentInsets":
+            guard let scrollView = view as? NSScrollView,
+                  let value = property.boolValue else {
+                throw MutationError.invalidValue
+            }
+            scrollView.automaticallyAdjustsContentInsets = value
+            return true
+        case "borderType":
+            guard let scrollView = view as? NSScrollView,
+                  let value = property.numberValue,
+                  let borderType = NSBorderType(rawValue: UInt(value)) else {
+                throw MutationError.invalidValue
+            }
+            scrollView.borderType = borderType
+            return true
+        case "hasHorizontalScroller":
+            guard let scrollView = view as? NSScrollView,
+                  let value = property.boolValue else {
+                throw MutationError.invalidValue
+            }
+            scrollView.hasHorizontalScroller = value
+            return true
+        case "hasVerticalScroller":
+            guard let scrollView = view as? NSScrollView,
+                  let value = property.boolValue else {
+                throw MutationError.invalidValue
+            }
+            scrollView.hasVerticalScroller = value
+            return true
+        case "autohidesScrollers":
+            guard let scrollView = view as? NSScrollView,
+                  let value = property.boolValue else {
+                throw MutationError.invalidValue
+            }
+            scrollView.autohidesScrollers = value
+            return true
+        case "scrollerStyle":
+            guard let scrollView = view as? NSScrollView,
+                  let value = property.numberValue,
+                  let style = NSScroller.Style(rawValue: Int(value)) else {
+                throw MutationError.invalidValue
+            }
+            scrollView.scrollerStyle = style
+            return true
+        case "scrollerKnobStyle":
+            guard let scrollView = view as? NSScrollView,
+                  let value = property.numberValue,
+                  let style = NSScroller.KnobStyle(rawValue: Int(value)) else {
+                throw MutationError.invalidValue
+            }
+            scrollView.scrollerKnobStyle = style
+            return true
+        case "scrollsDynamically":
+            guard let scrollView = view as? NSScrollView,
+                  let value = property.boolValue else {
+                throw MutationError.invalidValue
+            }
+            scrollView.scrollsDynamically = value
+            return true
+        case "usesPredominantAxisScrolling":
+            guard let scrollView = view as? NSScrollView,
+                  let value = property.boolValue else {
+                throw MutationError.invalidValue
+            }
+            scrollView.usesPredominantAxisScrolling = value
+            return true
+        case "allowsMagnification":
+            guard let scrollView = view as? NSScrollView,
+                  let value = property.boolValue else {
+                throw MutationError.invalidValue
+            }
+            scrollView.allowsMagnification = value
+            return true
+        case "magnification":
+            guard let scrollView = view as? NSScrollView,
+                  let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            scrollView.setMagnification(CGFloat(value), centeredAt: .zero)
+            return true
+        case "maxMagnification":
+            guard let scrollView = view as? NSScrollView,
+                  let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            scrollView.maxMagnification = CGFloat(value)
+            return true
+        case "minMagnification":
+            guard let scrollView = view as? NSScrollView,
+                  let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            scrollView.minMagnification = CGFloat(value)
+            return true
+        case "rowHeight":
+            guard let tableView = view as? NSTableView,
+                  let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            tableView.rowHeight = CGFloat(value)
+            return true
+        case "usesAutomaticRowHeights":
+            guard let tableView = view as? NSTableView,
+                  let value = property.boolValue else {
+                throw MutationError.invalidValue
+            }
+            tableView.usesAutomaticRowHeights = value
+            return true
+        case "intercellSpacing.width":
+            guard let tableView = view as? NSTableView,
+                  let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            var spacing = tableView.intercellSpacing
+            spacing.width = CGFloat(value)
+            tableView.intercellSpacing = spacing
+            return true
+        case "intercellSpacing.height":
+            guard let tableView = view as? NSTableView,
+                  let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            var spacing = tableView.intercellSpacing
+            spacing.height = CGFloat(value)
+            tableView.intercellSpacing = spacing
+            return true
+        case "style":
+            guard let tableView = view as? NSTableView,
+                  let value = property.numberValue,
+                  let style = NSTableView.Style(rawValue: Int(value)) else {
+                throw MutationError.invalidValue
+            }
+            tableView.style = style
+            return true
+        case "columnAutoresizingStyle":
+            guard let tableView = view as? NSTableView,
+                  let value = property.numberValue,
+                  let style = NSTableView.ColumnAutoresizingStyle(rawValue: UInt(value)) else {
+                throw MutationError.invalidValue
+            }
+            tableView.columnAutoresizingStyle = style
+            return true
+        case "gridStyleMask":
+            guard let tableView = view as? NSTableView,
+                  let value = property.numberValue else {
+                throw MutationError.invalidValue
+            }
+            tableView.gridStyleMask = NSTableView.GridLineStyle(rawValue: UInt(value))
+            return true
+        case "selectionHighlightStyle":
+            guard let tableView = view as? NSTableView,
+                  let value = property.numberValue,
+                  let style = NSTableView.SelectionHighlightStyle(rawValue: Int(value)) else {
+                throw MutationError.invalidValue
+            }
+            tableView.selectionHighlightStyle = style
+            return true
+        case "gridColor":
+            guard let tableView = view as? NSTableView,
+                  let value = property.textValue,
+                  let color = NSColor(viewScopeHexString: value) else {
+                throw MutationError.invalidValue
+            }
+            tableView.gridColor = color
+            return true
+        case "rowSizeStyle":
+            guard let tableView = view as? NSTableView,
+                  let value = property.numberValue,
+                  let style = NSTableView.RowSizeStyle(rawValue: Int(value)) else {
+                throw MutationError.invalidValue
+            }
+            tableView.rowSizeStyle = style
+            return true
+        case "usesAlternatingRowBackgroundColors":
+            guard let tableView = view as? NSTableView,
+                  let value = property.boolValue else {
+                throw MutationError.invalidValue
+            }
+            tableView.usesAlternatingRowBackgroundColors = value
+            return true
+        case "allowsColumnReordering":
+            guard let tableView = view as? NSTableView,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            tableView.allowsColumnReordering = value
+            return true
+        case "allowsColumnResizing":
+            guard let tableView = view as? NSTableView,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            tableView.allowsColumnResizing = value
+            return true
+        case "allowsMultipleSelection":
+            guard let tableView = view as? NSTableView,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            tableView.allowsMultipleSelection = value
+            return true
+        case "allowsEmptySelection":
+            guard let tableView = view as? NSTableView,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            tableView.allowsEmptySelection = value
+            return true
+        case "allowsColumnSelection":
+            guard let tableView = view as? NSTableView,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            tableView.allowsColumnSelection = value
+            return true
+        case "allowsTypeSelect":
+            guard let tableView = view as? NSTableView,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            tableView.allowsTypeSelect = value
+            return true
+        case "floatsGroupRows":
+            guard let tableView = view as? NSTableView,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            tableView.floatsGroupRows = value
+            return true
+        case "verticalMotionCanBeginDrag":
+            guard let tableView = view as? NSTableView,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            tableView.verticalMotionCanBeginDrag = value
+            return true
+        case "textView.string":
+            guard let textView = view as? NSTextView,
+                  let value = property.textValue else {
+                throw MutationError.invalidValue
+            }
+            textView.string = value
+            return true
+        case "textView.fontSize":
+            guard let textView = view as? NSTextView,
+                  let value = property.numberValue else { throw MutationError.invalidValue }
+            let font = textView.font ?? .systemFont(ofSize: NSFont.systemFontSize)
+            textView.font = font.withSize(CGFloat(value))
+            return true
+        case "textView.textColor":
+            guard let textView = view as? NSTextView,
+                  let value = property.textValue,
+                  let color = NSColor(viewScopeHexString: value) else { throw MutationError.invalidValue }
+            textView.textColor = color
+            return true
+        case "textView.alignment":
+            guard let textView = view as? NSTextView,
+                  let value = property.numberValue,
+                  let alignment = NSTextAlignment(rawValue: Int(value)) else { throw MutationError.invalidValue }
+            textView.alignment = alignment
+            return true
+        case "textView.textContainerInset.width":
+            guard let textView = view as? NSTextView,
+                  let value = property.numberValue else { throw MutationError.invalidValue }
+            var inset = textView.textContainerInset
+            inset.width = CGFloat(value)
+            textView.textContainerInset = inset
+            return true
+        case "textView.textContainerInset.height":
+            guard let textView = view as? NSTextView,
+                  let value = property.numberValue else { throw MutationError.invalidValue }
+            var inset = textView.textContainerInset
+            inset.height = CGFloat(value)
+            textView.textContainerInset = inset
+            return true
+        case "textView.maxSize.width":
+            guard let textView = view as? NSTextView,
+                  let value = property.numberValue else { throw MutationError.invalidValue }
+            var size = textView.maxSize
+            size.width = CGFloat(value)
+            textView.maxSize = size
+            return true
+        case "textView.maxSize.height":
+            guard let textView = view as? NSTextView,
+                  let value = property.numberValue else { throw MutationError.invalidValue }
+            var size = textView.maxSize
+            size.height = CGFloat(value)
+            textView.maxSize = size
+            return true
+        case "textView.minSize.width":
+            guard let textView = view as? NSTextView,
+                  let value = property.numberValue else { throw MutationError.invalidValue }
+            var size = textView.minSize
+            size.width = CGFloat(value)
+            textView.minSize = size
+            return true
+        case "textView.minSize.height":
+            guard let textView = view as? NSTextView,
+                  let value = property.numberValue else { throw MutationError.invalidValue }
+            var size = textView.minSize
+            size.height = CGFloat(value)
+            textView.minSize = size
+            return true
+        case "textView.isEditable":
+            guard let textView = view as? NSTextView,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            textView.isEditable = value
+            return true
+        case "textView.isSelectable":
+            guard let textView = view as? NSTextView,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            textView.isSelectable = value
+            return true
+        case "textView.isRichText":
+            guard let textView = view as? NSTextView,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            textView.isRichText = value
+            return true
+        case "textView.importsGraphics":
+            guard let textView = view as? NSTextView,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            textView.importsGraphics = value
+            return true
+        case "textView.isHorizontallyResizable":
+            guard let textView = view as? NSTextView,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            textView.isHorizontallyResizable = value
+            return true
+        case "textView.isVerticallyResizable":
+            guard let textView = view as? NSTextView,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            textView.isVerticallyResizable = value
+            return true
+        case "textField.isBordered":
+            guard let textField = view as? NSTextField,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            textField.isBordered = value
+            return true
+        case "textField.isBezeled":
+            guard let textField = view as? NSTextField,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            textField.isBezeled = value
+            return true
+        case "textField.bezelStyle":
+            guard let textField = view as? NSTextField,
+                  let value = property.numberValue,
+                  let style = NSTextField.BezelStyle(rawValue: UInt(value)) else { throw MutationError.invalidValue }
+            textField.bezelStyle = style
+            return true
+        case "textField.isEditable":
+            guard let textField = view as? NSTextField,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            textField.isEditable = value
+            return true
+        case "textField.isSelectable":
+            guard let textField = view as? NSTextField,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            textField.isSelectable = value
+            return true
+        case "textField.drawsBackground":
+            guard let textField = view as? NSTextField,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            textField.drawsBackground = value
+            return true
+        case "textField.preferredMaxLayoutWidth":
+            guard let textField = view as? NSTextField,
+                  let value = property.numberValue else { throw MutationError.invalidValue }
+            textField.preferredMaxLayoutWidth = CGFloat(value)
+            return true
+        case "textField.maximumNumberOfLines":
+            guard let textField = view as? NSTextField,
+                  let value = property.numberValue else { throw MutationError.invalidValue }
+            textField.maximumNumberOfLines = max(0, Int(value))
+            return true
+        case "textField.allowsDefaultTighteningForTruncation":
+            guard let textField = view as? NSTextField,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            textField.allowsDefaultTighteningForTruncation = value
+            return true
+        case "textField.lineBreakStrategy":
+            guard let textField = view as? NSTextField,
+                  let value = property.numberValue else { throw MutationError.invalidValue }
+            textField.lineBreakStrategy = NSParagraphStyle.LineBreakStrategy(rawValue: UInt(value))
+            return true
+        case "textField.textColor":
+            guard let textField = view as? NSTextField,
+                  let value = property.textValue,
+                  let color = NSColor(viewScopeHexString: value) else { throw MutationError.invalidValue }
+            textField.textColor = color
+            return true
+        case "button.title":
+            guard let button = view as? NSButton,
+                  let value = property.textValue else { throw MutationError.invalidValue }
+            button.title = value
+            return true
+        case "button.alternateTitle":
+            guard let button = view as? NSButton,
+                  let value = property.textValue else { throw MutationError.invalidValue }
+            button.alternateTitle = value
+            return true
+        case "button.buttonType":
+            guard let button = view as? NSButton,
+                  let value = property.numberValue,
+                  let buttonType = NSButton.ButtonType(rawValue: UInt(value)) else { throw MutationError.invalidValue }
+            button.setButtonType(buttonType)
+            return true
+        case "button.bezelStyle":
+            guard let button = view as? NSButton,
+                  let value = property.numberValue,
+                  let bezelStyle = NSButton.BezelStyle(rawValue: UInt(value)) else { throw MutationError.invalidValue }
+            button.bezelStyle = bezelStyle
+            return true
+        case "button.isBordered":
+            guard let button = view as? NSButton,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            button.isBordered = value
+            return true
+        case "button.isTransparent":
+            guard let button = view as? NSButton,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            button.isTransparent = value
+            return true
+        case "button.bezelColor":
+            guard let button = view as? NSButton,
+                  let value = property.textValue,
+                  let color = NSColor(viewScopeHexString: value) else { throw MutationError.invalidValue }
+            button.bezelColor = color
+            return true
+        case "button.contentTintColor":
+            guard let button = view as? NSButton,
+                  let value = property.textValue,
+                  let color = NSColor(viewScopeHexString: value) else { throw MutationError.invalidValue }
+            button.contentTintColor = color
+            return true
+        case "button.showsBorderOnlyWhileMouseInside":
+            guard let button = view as? NSButton,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            button.showsBorderOnlyWhileMouseInside = value
+            return true
+        case "button.isSpringLoaded":
+            guard let button = view as? NSButton,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            button.isSpringLoaded = value
+            return true
+        case "control.controlSize":
+            guard let control = view as? NSControl,
+                  let value = property.numberValue,
+                  let size = NSControl.ControlSize(rawValue: UInt(value)) else { throw MutationError.invalidValue }
+            control.controlSize = size
+            return true
+        case "control.alignment":
+            guard let control = view as? NSControl,
+                  let value = property.numberValue,
+                  let alignment = NSTextAlignment(rawValue: Int(value)) else { throw MutationError.invalidValue }
+            control.alignment = alignment
+            return true
+        case "control.fontSize":
+            guard let control = view as? NSControl,
+                  let value = property.numberValue else { throw MutationError.invalidValue }
+            let font = control.font ?? .systemFont(ofSize: NSFont.systemFontSize)
+            control.font = font.withSize(CGFloat(value))
+            return true
+        case "visualEffect.material":
+            guard let visualEffectView = view as? NSVisualEffectView,
+                  let value = property.numberValue,
+                  let material = NSVisualEffectView.Material(rawValue: Int(value)) else { throw MutationError.invalidValue }
+            visualEffectView.material = material
+            return true
+        case "visualEffect.blendingMode":
+            guard let visualEffectView = view as? NSVisualEffectView,
+                  let value = property.numberValue,
+                  let blendingMode = NSVisualEffectView.BlendingMode(rawValue: Int(value)) else { throw MutationError.invalidValue }
+            visualEffectView.blendingMode = blendingMode
+            return true
+        case "visualEffect.state":
+            guard let visualEffectView = view as? NSVisualEffectView,
+                  let value = property.numberValue,
+                  let state = NSVisualEffectView.State(rawValue: Int(value)) else { throw MutationError.invalidValue }
+            visualEffectView.state = state
+            return true
+        case "visualEffect.isEmphasized":
+            guard let visualEffectView = view as? NSVisualEffectView,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            visualEffectView.isEmphasized = value
+            return true
+        case "stack.orientation":
+            guard let stackView = view as? NSStackView,
+                  let value = property.numberValue,
+                  let orientation = NSUserInterfaceLayoutOrientation(rawValue: Int(value)) else { throw MutationError.invalidValue }
+            stackView.orientation = orientation
+            return true
+        case "stack.edgeInsets.top":
+            guard let stackView = view as? NSStackView,
+                  let value = property.numberValue else { throw MutationError.invalidValue }
+            var insets = stackView.edgeInsets
+            insets.top = CGFloat(value)
+            stackView.edgeInsets = insets
+            return true
+        case "stack.edgeInsets.left":
+            guard let stackView = view as? NSStackView,
+                  let value = property.numberValue else { throw MutationError.invalidValue }
+            var insets = stackView.edgeInsets
+            insets.left = CGFloat(value)
+            stackView.edgeInsets = insets
+            return true
+        case "stack.edgeInsets.bottom":
+            guard let stackView = view as? NSStackView,
+                  let value = property.numberValue else { throw MutationError.invalidValue }
+            var insets = stackView.edgeInsets
+            insets.bottom = CGFloat(value)
+            stackView.edgeInsets = insets
+            return true
+        case "stack.edgeInsets.right":
+            guard let stackView = view as? NSStackView,
+                  let value = property.numberValue else { throw MutationError.invalidValue }
+            var insets = stackView.edgeInsets
+            insets.right = CGFloat(value)
+            stackView.edgeInsets = insets
+            return true
+        case "stack.detachesHiddenViews":
+            guard let stackView = view as? NSStackView,
+                  let value = property.boolValue else { throw MutationError.invalidValue }
+            stackView.detachesHiddenViews = value
+            return true
+        case "stack.distribution":
+            guard let stackView = view as? NSStackView,
+                  let value = property.numberValue,
+                  let distribution = NSStackView.Distribution(rawValue: Int(value)) else { throw MutationError.invalidValue }
+            stackView.distribution = distribution
+            return true
+        case "stack.alignment":
+            guard let stackView = view as? NSStackView,
+                  let value = property.numberValue,
+                  let alignment = NSLayoutConstraint.Attribute(rawValue: Int(value)) else { throw MutationError.invalidValue }
+            stackView.alignment = alignment
+            return true
+        case "stack.spacing":
+            guard let stackView = view as? NSStackView,
+                  let value = property.numberValue else { throw MutationError.invalidValue }
+            stackView.spacing = CGFloat(value)
+            return true
+        default:
+            return false
+        }
+    }
+
     private static func mutateWindowFrame(
         _ window: NSWindow,
         x: Double? = nil,
@@ -856,6 +1547,62 @@ enum ViewScopeMutationApplier {
         view.layoutSubtreeIfNeeded()
     }
 
+    private static func mutateLayerFrame(
+        _ layer: CALayer,
+        x: Double? = nil,
+        y: Double? = nil,
+        width: Double? = nil,
+        height: Double? = nil
+    ) throws {
+        var frame = layer.frame
+        if let x {
+            frame.origin.x = CGFloat(x)
+        }
+        if let y {
+            frame.origin.y = CGFloat(y)
+        }
+        if let width {
+            frame.size.width = CGFloat(max(0, width))
+        }
+        if let height {
+            frame.size.height = CGFloat(max(0, height))
+        }
+        guard frame.width >= 0, frame.height >= 0 else {
+            throw MutationError.invalidValue
+        }
+        layer.frame = frame
+        layer.setNeedsDisplay()
+        layer.viewScopeHostView?.needsDisplay = true
+    }
+
+    private static func mutateLayerBounds(
+        _ layer: CALayer,
+        x: Double? = nil,
+        y: Double? = nil,
+        width: Double? = nil,
+        height: Double? = nil
+    ) throws {
+        var bounds = layer.bounds
+        if let x {
+            bounds.origin.x = CGFloat(x)
+        }
+        if let y {
+            bounds.origin.y = CGFloat(y)
+        }
+        if let width {
+            bounds.size.width = CGFloat(max(0, width))
+        }
+        if let height {
+            bounds.size.height = CGFloat(max(0, height))
+        }
+        guard bounds.width >= 0, bounds.height >= 0 else {
+            throw MutationError.invalidValue
+        }
+        layer.bounds = bounds
+        layer.setNeedsDisplay()
+        layer.viewScopeHostView?.needsDisplay = true
+    }
+
     private static func mutateScrollViewInsets(
         _ view: NSView,
         top: Double? = nil,
@@ -894,6 +1641,15 @@ enum ViewScopeMutationApplier {
         view.needsDisplay = true
     }
 
+    private static func mutateBackgroundColor(_ layer: CALayer, hexString: String) throws {
+        guard let color = NSColor(viewScopeHexString: hexString) else {
+            throw MutationError.invalidValue
+        }
+        layer.backgroundColor = color.cgColor
+        layer.setNeedsDisplay()
+        layer.viewScopeHostView?.needsDisplay = true
+    }
+
     private static func mutateLayerValue(
         _ view: NSView,
         cornerRadius: Double? = nil,
@@ -907,6 +1663,21 @@ enum ViewScopeMutationApplier {
             view.layer?.borderWidth = CGFloat(max(0, borderWidth))
         }
         view.needsDisplay = true
+    }
+
+    private static func mutateLayerValue(
+        _ layer: CALayer,
+        cornerRadius: Double? = nil,
+        borderWidth: Double? = nil
+    ) {
+        if let cornerRadius {
+            layer.cornerRadius = CGFloat(max(0, cornerRadius))
+        }
+        if let borderWidth {
+            layer.borderWidth = CGFloat(max(0, borderWidth))
+        }
+        layer.setNeedsDisplay()
+        layer.viewScopeHostView?.needsDisplay = true
     }
 
     private static func applyControlValue(_ value: String, to view: NSView) throws {

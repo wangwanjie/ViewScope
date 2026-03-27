@@ -2,7 +2,28 @@ import AppKit
 import XCTest
 @testable import ViewScopeServer
 
+// Server test windows ordered-out in defer blocks stay here until the next test's
+// setUp() drains the RunLoop. That drain fires _NSWindowTransformAnimation acks while
+// the window is still alive in the pool (macOS 26 beta bug: dealloc crashes on nil
+// window ref). Mutation fixture windows are also cleared here so their CA callbacks
+// stop flooding the RunLoop during server test bodies.
+nonisolated(unsafe) var serverWindowPool: [NSWindow] = []
+
 final class ViewScopeServerTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        // Drain the RunLoop so pending _NSWindowTransformAnimation acks (from the
+        // previous test's window and any remaining mutation fixture windows) fire
+        // while those windows are still alive in their respective pools.
+        // XCTest setUp runs on the main thread; assumeIsolated satisfies the compiler.
+        MainActor.assumeIsolated {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        }
+        // Release pooled windows now that their acks have fired.
+        mutationFixtureWindowPool.removeAll()
+        serverWindowPool.removeAll()
+    }
+
     func testPodspecInjectsBootstrapAnchorIntoHostLinkerFlags() throws {
         for podspecURL in podspecURLs() {
             let contents = try String(contentsOf: podspecURL, encoding: .utf8)
@@ -167,7 +188,8 @@ final class ViewScopeServerTests: XCTestCase {
         window.title = "Snapshot Builder Fixture"
         defer {
             window.orderOut(nil)
-            window.close()
+            CATransaction.flush()
+            serverWindowPool.append(window)
         }
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
         let title = NSTextField(labelWithString: "Hello")
@@ -202,6 +224,52 @@ final class ViewScopeServerTests: XCTestCase {
     }
 
     @MainActor
+    func testSnapshotBuilderUsesWindowRootViewAboveContentView() throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 260),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Window Root Fixture"
+        defer {
+            window.orderOut(nil)
+            CATransaction.flush()
+            serverWindowPool.append(window)
+        }
+
+        let contentView = FlippedFixtureView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        let marker = NSView(frame: NSRect(x: 20, y: 20, width: 80, height: 40))
+        marker.wantsLayer = true
+        marker.layer?.backgroundColor = NSColor.systemRed.cgColor
+        contentView.addSubview(marker)
+        window.contentView = contentView
+        window.orderFrontRegardless()
+
+        let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
+        let (capture, context) = builder.makeCapture()
+        let windowNodeID = try XCTUnwrap(capture.rootNodeIDs.first)
+        let windowNode = try XCTUnwrap(capture.nodes[windowNodeID])
+        let rootView = try XCTUnwrap(window.contentView?.superview)
+        let rootNodeID = try XCTUnwrap(windowNode.childIDs.first)
+        let rootNode = try XCTUnwrap(capture.nodes[rootNodeID])
+        let capturedRootViewID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
+            guard case .view(let capturedView) = reference else { return false }
+            return capturedView === rootView
+        })?.key)
+        let capturedContentViewID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
+            guard case .view(let capturedView) = reference else { return false }
+            return capturedView === contentView
+        })?.key)
+
+        XCTAssertEqual(rootNodeID, capturedRootViewID)
+        XCTAssertTrue(rootNode.childIDs.contains(capturedContentViewID))
+        XCTAssertGreaterThan(rootNode.bounds.height, contentView.bounds.height)
+        XCTAssertEqual(windowNode.bounds.width, window.frame.width, accuracy: 0.001)
+        XCTAssertEqual(windowNode.bounds.height, window.frame.height, accuracy: 0.001)
+    }
+
+    @MainActor
     func testSnapshotBuilderCapturesSubviewIvarTraces() {
         final class FixtureRootView: NSView {
             let titleLabel = NSTextField(labelWithString: "Hello")
@@ -223,7 +291,8 @@ final class ViewScopeServerTests: XCTestCase {
         window.title = "Ivar Fixture"
         defer {
             window.orderOut(nil)
-            window.close()
+            CATransaction.flush()
+            serverWindowPool.append(window)
         }
 
         let root = FixtureRootView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
@@ -253,6 +322,192 @@ final class ViewScopeServerTests: XCTestCase {
     }
 
     @MainActor
+    func testSnapshotBuilderCapturesLayerBackedSubviewsAsLayerNodes() throws {
+        final class ShapeBackedView: NSView {
+            override func makeBackingLayer() -> CALayer {
+                CAShapeLayer()
+            }
+        }
+
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 320), styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "Layer Fixture"
+        defer {
+            window.orderOut(nil)
+            CATransaction.flush()
+            serverWindowPool.append(window)
+        }
+
+        let root = FlippedFixtureView(frame: NSRect(x: 0, y: 0, width: 420, height: 320))
+        root.wantsLayer = true
+
+        let layerBackedView = ShapeBackedView(frame: NSRect(x: 20, y: 20, width: 180, height: 90))
+        layerBackedView.wantsLayer = true
+        let plainView = NSView(frame: NSRect(x: 220, y: 40, width: 120, height: 60))
+
+        root.addSubview(layerBackedView)
+        root.addSubview(plainView)
+        window.contentView = root
+        window.orderFrontRegardless()
+        root.layoutSubtreeIfNeeded()
+
+        let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
+        let (capture, context) = builder.makeCapture()
+
+        let windowNodeID = try XCTUnwrap(capture.rootNodeIDs.first)
+        let windowNode = try XCTUnwrap(capture.nodes[windowNodeID])
+        let rootNodeID = try XCTUnwrap(windowNode.childIDs.first)
+        let layerBackedNodeID = try XCTUnwrap(context.nodeReferences.first(where: { entry in
+            guard case .layer(let capturedLayer) = entry.value else { return false }
+            return capturedLayer === layerBackedView.layer
+        })?.key)
+        let plainViewNodeID = try XCTUnwrap(context.nodeReferences.first(where: { entry in
+            guard case .view(let capturedView) = entry.value else { return false }
+            return capturedView === plainView
+        })?.key)
+
+        let rootNode = try XCTUnwrap(capture.nodes[rootNodeID])
+        let layerBackedNode = try XCTUnwrap(capture.nodes[layerBackedNodeID])
+        let plainViewNode = try XCTUnwrap(capture.nodes[plainViewNodeID])
+        let detail = try XCTUnwrap(builder.makeDetail(for: layerBackedNodeID, in: context))
+
+        func isDescendant(_ nodeID: String, of ancestorID: String) -> Bool {
+            var currentParentID = capture.nodes[nodeID]?.parentID
+            while let parentID = currentParentID {
+                if parentID == ancestorID {
+                    return true
+                }
+                currentParentID = capture.nodes[parentID]?.parentID
+            }
+            return false
+        }
+
+        XCTAssertTrue([ViewScopeHierarchyNode.Kind.view, .layer].contains(rootNode.kind))
+        XCTAssertTrue(isDescendant(layerBackedNodeID, of: rootNodeID))
+        XCTAssertTrue(isDescendant(plainViewNodeID, of: rootNodeID))
+        XCTAssertEqual(layerBackedNode.kind, .layer)
+        XCTAssertEqual(plainViewNode.kind, .view)
+        XCTAssertTrue(detail.consoleTargets.map { $0.reference.kind }.contains(.layer))
+        XCTAssertTrue(detail.consoleTargets.map { $0.reference.kind }.contains(.view))
+    }
+
+    @MainActor
+    func testSnapshotBuilderMergesControllerAndViewIvarTracesIntoHostedLayerNode() throws {
+        final class ShapeBackedView: NSView {
+            override func makeBackingLayer() -> CALayer {
+                CAShapeLayer()
+            }
+        }
+
+        final class FixtureViewController: NSViewController {
+            let layerBackedView = ShapeBackedView(frame: NSRect(x: 20, y: 20, width: 180, height: 90))
+
+            override func loadView() {
+                let root = FlippedFixtureView(frame: NSRect(x: 0, y: 0, width: 320, height: 240))
+                root.wantsLayer = true
+                layerBackedView.wantsLayer = true
+                root.addSubview(layerBackedView)
+                view = root
+            }
+        }
+
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 280), styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "Layer Ivar Fixture"
+        defer {
+            window.orderOut(nil)
+            CATransaction.flush()
+            serverWindowPool.append(window)
+        }
+
+        let controller = FixtureViewController()
+        window.contentViewController = controller
+        window.orderFrontRegardless()
+        controller.view.layoutSubtreeIfNeeded()
+
+        let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
+        let (capture, context) = builder.makeCapture()
+        let layerNodeID = try XCTUnwrap(context.nodeReferences.first(where: { entry in
+            guard case .layer(let capturedLayer) = entry.value else { return false }
+            return capturedLayer === controller.layerBackedView.layer
+        })?.key)
+        let node = try XCTUnwrap(capture.nodes[layerNodeID])
+        let ivarNames = Set(node.ivarTraces.map { $0.ivarName })
+        let hostClassNames = Set(node.ivarTraces.map { $0.hostClassName })
+
+        // Verify the controller's ivar ("layerBackedView") is merged into the layer node.
+        // The trace's hostClassName reflects the locally-defined FixtureViewController, which
+        // demangles to its enclosing function context. Check against the actual displayName.
+        let expectedControllerClassName = ViewScopeClassNameFormatter.displayName(
+            for: NSStringFromClass(FixtureViewController.self)
+        )
+        XCTAssertTrue(ivarNames.contains("layerBackedView"))
+        XCTAssertTrue(hostClassNames.contains(where: { $0 == expectedControllerClassName || $0.hasPrefix(expectedControllerClassName) }))
+    }
+
+    @MainActor
+    func testSnapshotBuilderAddsSpecialTracesForVisibleTableHeaderRowsAndCells() throws {
+        final class TableFixtureDataSource: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+            let items = ["Alpha", "Beta"]
+
+            func numberOfRows(in tableView: NSTableView) -> Int {
+                items.count
+            }
+
+            func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+                let cell = NSTableCellView(frame: NSRect(x: 0, y: 0, width: 220, height: 28))
+                let label = NSTextField(labelWithString: items[row])
+                label.frame = NSRect(x: 8, y: 4, width: 180, height: 20)
+                cell.addSubview(label)
+                cell.textField = label
+                return cell
+            }
+        }
+
+        let dataSource = TableFixtureDataSource()
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 340, height: 240), styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "Table Trace Fixture"
+        defer {
+            window.orderOut(nil)
+            CATransaction.flush()
+            serverWindowPool.append(window)
+        }
+
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 180))
+        let tableView = NSTableView(frame: scrollView.bounds)
+        defer {
+            tableView.delegate = nil
+            tableView.dataSource = nil
+            scrollView.documentView = nil
+        }
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
+        column.width = 220
+        tableView.addTableColumn(column)
+        tableView.headerView = NSTableHeaderView(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
+        tableView.rowHeight = 28
+        tableView.delegate = dataSource
+        tableView.dataSource = dataSource
+        scrollView.documentView = tableView
+
+        let root = FlippedFixtureView(frame: NSRect(x: 0, y: 0, width: 340, height: 240))
+        root.addSubview(scrollView)
+        window.contentView = root
+        window.orderFrontRegardless()
+        tableView.reloadData()
+        tableView.layoutSubtreeIfNeeded()
+        scrollView.layoutSubtreeIfNeeded()
+        root.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+
+        let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
+        let (capture, _) = builder.makeCapture()
+        let subtitles = Set(capture.nodes.values.compactMap(\.subtitle))
+
+        XCTAssertTrue(subtitles.contains("tableView.headerView"))
+        XCTAssertTrue(subtitles.contains("{ row: 0 }"))
+        XCTAssertTrue(subtitles.contains("{ row: 0, column: 0 }"))
+    }
+
+    @MainActor
     func testSnapshotBuilderCapturesRootViewControllerMetadata() throws {
         final class FixtureViewController: NSViewController {
             let rootView = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
@@ -269,7 +524,8 @@ final class ViewScopeServerTests: XCTestCase {
         window.title = "View Controller Fixture"
         defer {
             window.orderOut(nil)
-            window.close()
+            CATransaction.flush()
+            serverWindowPool.append(window)
         }
 
         let controller = FixtureViewController()
@@ -301,9 +557,11 @@ final class ViewScopeServerTests: XCTestCase {
         let descendantNode = try XCTUnwrap(capture.nodes[descendantID])
         let detail = try XCTUnwrap(builder.makeDetail(for: controllerRootID, in: context))
 
-        XCTAssertEqual(node.rootViewControllerClassName, NSStringFromClass(FixtureViewController.self))
+        let expectedVCClassName = NSStringFromClass(FixtureViewController.self)
+        let expectedVCDisplayName = ViewScopeClassNameFormatter.displayName(for: expectedVCClassName)
+        XCTAssertEqual(node.rootViewControllerClassName, expectedVCClassName)
         XCTAssertNil(descendantNode.rootViewControllerClassName)
-        XCTAssertTrue(propertyValue(titled: "View Controller", in: detail.sections)?.contains("FixtureViewController") == true)
+        XCTAssertEqual(propertyValue(titled: "View Controller", in: detail.sections), expectedVCDisplayName)
     }
 
     @MainActor
@@ -333,7 +591,8 @@ final class ViewScopeServerTests: XCTestCase {
         window.title = "Lazy Child Controller Fixture"
         defer {
             window.orderOut(nil)
-            window.close()
+            CATransaction.flush()
+            serverWindowPool.append(window)
         }
 
         let controller = ParentViewController()
@@ -373,7 +632,8 @@ final class ViewScopeServerTests: XCTestCase {
         window.title = "Preview Fixture"
         defer {
             window.orderOut(nil)
-            window.close()
+            CATransaction.flush()
+            serverWindowPool.append(window)
         }
 
         let controller = FixtureViewController()
@@ -386,13 +646,17 @@ final class ViewScopeServerTests: XCTestCase {
             guard case .view(let capturedView) = reference else { return false }
             return capturedView === controller.view
         })?.key)
+        let windowRootID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
+            guard case .view(let capturedView) = reference else { return false }
+            return capturedView === window.contentView?.superview
+        })?.key)
 
         XCTAssertFalse(capture.captureID.isEmpty)
-        XCTAssertTrue(capture.previewBitmaps.isEmpty)
+        XCTAssertTrue(capture.previewBitmaps.contains(where: { $0.rootNodeID == windowRootID }))
         let detail = try XCTUnwrap(builder.makeDetail(for: controllerRootID, in: context))
         let kinds = detail.consoleTargets.map(\.reference.kind)
 
-        XCTAssertEqual(detail.screenshotRootNodeID, controllerRootID)
+        XCTAssertEqual(detail.screenshotRootNodeID, windowRootID)
         XCTAssertNotNil(detail.screenshotPNGBase64)
         XCTAssertTrue(kinds.contains(.view))
         XCTAssertTrue(kinds.contains(.viewController))
@@ -410,7 +674,8 @@ final class ViewScopeServerTests: XCTestCase {
         window.title = "Node Preview Screenshot Fixture"
         defer {
             window.orderOut(nil)
-            window.close()
+            CATransaction.flush()
+            serverWindowPool.append(window)
         }
 
         let root = FlippedFixtureView(frame: NSRect(x: 0, y: 0, width: 280, height: 180))
@@ -435,8 +700,11 @@ final class ViewScopeServerTests: XCTestCase {
         let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
         let (capture, context) = builder.makeCapture()
         let containerNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
-            guard case .view(let capturedView) = reference else { return false }
-            return capturedView === container
+            switch reference {
+            case .layer(let layer): return layer.viewScopeHostView === container
+            case .view(let v): return v === container
+            default: return false
+            }
         })?.key)
         let screenshots = try XCTUnwrap(
             capture.nodePreviewScreenshots.first(where: { $0.nodeID == containerNodeID })
@@ -469,7 +737,8 @@ final class ViewScopeServerTests: XCTestCase {
         window.title = "Stack Preview Orientation Fixture"
         defer {
             window.orderOut(nil)
-            window.close()
+            CATransaction.flush()
+            serverWindowPool.append(window)
         }
 
         let root = FlippedFixtureView(frame: NSRect(x: 0, y: 0, width: 320, height: 240))
@@ -519,8 +788,11 @@ final class ViewScopeServerTests: XCTestCase {
         let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
         let (capture, context) = builder.makeCapture()
         let stackNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
-            guard case .view(let capturedView) = reference else { return false }
-            return capturedView === stack
+            switch reference {
+            case .layer(let layer): return layer.viewScopeHostView === stack
+            case .view(let v): return v === stack
+            default: return false
+            }
         })?.key)
         let screenshots = try XCTUnwrap(
             capture.nodePreviewScreenshots.first(where: { $0.nodeID == stackNodeID })
@@ -540,7 +812,8 @@ final class ViewScopeServerTests: XCTestCase {
         window.title = "Subview Preview Orientation Fixture"
         defer {
             window.orderOut(nil)
-            window.close()
+            CATransaction.flush()
+            serverWindowPool.append(window)
         }
 
         let root = FlippedFixtureView(frame: NSRect(x: 0, y: 0, width: 320, height: 240))
@@ -573,8 +846,11 @@ final class ViewScopeServerTests: XCTestCase {
         let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
         let (capture, context) = builder.makeCapture()
         let containerNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
-            guard case .view(let capturedView) = reference else { return false }
-            return capturedView === container
+            switch reference {
+            case .layer(let layer): return layer.viewScopeHostView === container
+            case .view(let v): return v === container
+            default: return false
+            }
         })?.key)
         let screenshots = try XCTUnwrap(
             capture.nodePreviewScreenshots.first(where: { $0.nodeID == containerNodeID })
@@ -594,7 +870,8 @@ final class ViewScopeServerTests: XCTestCase {
         window.title = "Flipped Subview Preview Orientation Fixture"
         defer {
             window.orderOut(nil)
-            window.close()
+            CATransaction.flush()
+            serverWindowPool.append(window)
         }
 
         let root = FlippedFixtureView(frame: NSRect(x: 0, y: 0, width: 320, height: 240))
@@ -627,8 +904,11 @@ final class ViewScopeServerTests: XCTestCase {
         let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
         let (capture, context) = builder.makeCapture()
         let containerNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
-            guard case .view(let capturedView) = reference else { return false }
-            return capturedView === container
+            switch reference {
+            case .layer(let layer): return layer.viewScopeHostView === container
+            case .view(let v): return v === container
+            default: return false
+            }
         })?.key)
         let screenshots = try XCTUnwrap(
             capture.nodePreviewScreenshots.first(where: { $0.nodeID == containerNodeID })
@@ -681,7 +961,8 @@ final class ViewScopeServerTests: XCTestCase {
         window.title = "Split Screenshot Fixture"
         defer {
             window.orderOut(nil)
-            window.close()
+            CATransaction.flush()
+            serverWindowPool.append(window)
         }
         window.contentViewController = splitController
         window.orderFrontRegardless()
@@ -693,16 +974,22 @@ final class ViewScopeServerTests: XCTestCase {
         let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
         let (_, context) = builder.makeCapture()
         let sidebarNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
-            guard case .view(let capturedView) = reference else { return false }
-            return capturedView === sidebarController.sidebarRoot
+            switch reference {
+            case .layer(let layer): return layer.viewScopeHostView === sidebarController.sidebarRoot
+            case .view(let v): return v === sidebarController.sidebarRoot
+            default: return false
+            }
         })?.key)
         let contentRootNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
-            guard case .view(let capturedView) = reference else { return false }
-            return capturedView === window.contentView
+            switch reference {
+            case .layer(let layer): return layer.viewScopeHostView === window.contentView?.superview
+            case .view(let v): return v === window.contentView?.superview
+            default: return false
+            }
         })?.key)
         let detail = try XCTUnwrap(builder.makeDetail(for: sidebarNodeID, in: context))
         let screenshot = try XCTUnwrap(decodedImage(fromBase64PNG: detail.screenshotPNGBase64))
-        let contentView = try XCTUnwrap(window.contentView)
+        let contentView = try XCTUnwrap(window.contentView?.superview)
         let sidebarRectInContent = sidebarController.sidebarRoot.convert(sidebarController.sidebarRoot.bounds, to: contentView)
         let expectedHighlightedRect = CGRect(
             x: sidebarRectInContent.minX,
@@ -763,7 +1050,8 @@ final class ViewScopeServerTests: XCTestCase {
         window.title = "Split Detail Root Fixture"
         defer {
             window.orderOut(nil)
-            window.close()
+            CATransaction.flush()
+            serverWindowPool.append(window)
         }
         window.contentViewController = splitController
         window.orderFrontRegardless()
@@ -775,16 +1063,22 @@ final class ViewScopeServerTests: XCTestCase {
         let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
         let (_, context) = builder.makeCapture()
         let contentRootNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
-            guard case .view(let capturedView) = reference else { return false }
-            return capturedView === window.contentView
+            switch reference {
+            case .layer(let layer): return layer.viewScopeHostView === window.contentView?.superview
+            case .view(let v): return v === window.contentView?.superview
+            default: return false
+            }
         })?.key)
         let detailSubviewNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
-            guard case .view(let capturedView) = reference else { return false }
-            return capturedView === detailController.detailSubview
+            switch reference {
+            case .layer(let layer): return layer.viewScopeHostView === detailController.detailSubview
+            case .view(let v): return v === detailController.detailSubview
+            default: return false
+            }
         })?.key)
         let detail = try XCTUnwrap(builder.makeDetail(for: detailSubviewNodeID, in: context))
         let screenshot = try XCTUnwrap(decodedImage(fromBase64PNG: detail.screenshotPNGBase64))
-        let contentView = try XCTUnwrap(window.contentView)
+        let contentView = try XCTUnwrap(window.contentView?.superview)
         let detailSubviewRectInContent = detailController.detailSubview.convert(detailController.detailSubview.bounds, to: contentView)
         let expectedHighlightedRect = CGRect(
             x: detailSubviewRectInContent.minX,
@@ -805,6 +1099,9 @@ final class ViewScopeServerTests: XCTestCase {
     @available(macOS 26.0, *)
     @MainActor
     func testDetailScreenshotPreservesGlassSidebarContentInsideSplitView() throws {
+        guard #available(macOS 26.0, *) else {
+            throw XCTSkip("Requires macOS 26.0 or later")
+        }
         @available(macOS 26.0, *)
         final class SidebarViewController: NSViewController {
             let sidebarRoot = NSGlassEffectView(frame: NSRect(x: 0, y: 0, width: 220, height: 384))
@@ -844,7 +1141,8 @@ final class ViewScopeServerTests: XCTestCase {
         window.title = "Split Glass Sidebar Fixture"
         defer {
             window.orderOut(nil)
-            window.close()
+            CATransaction.flush()
+            serverWindowPool.append(window)
         }
         window.contentViewController = splitController
         window.orderFrontRegardless()
@@ -856,8 +1154,11 @@ final class ViewScopeServerTests: XCTestCase {
         let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
         let (_, context) = builder.makeCapture()
         let markerNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
-            guard case .view(let capturedView) = reference else { return false }
-            return capturedView === sidebarController.marker
+            switch reference {
+            case .layer(let layer): return layer.viewScopeHostView === sidebarController.marker
+            case .view(let v): return v === sidebarController.marker
+            default: return false
+            }
         })?.key)
         let detail = try XCTUnwrap(builder.makeDetail(for: markerNodeID, in: context))
         let screenshot = try XCTUnwrap(decodedImage(fromBase64PNG: detail.screenshotPNGBase64))
@@ -904,7 +1205,8 @@ final class ViewScopeServerTests: XCTestCase {
         window.title = "Unsafe Ivar Fixture"
         defer {
             window.orderOut(nil)
-            window.close()
+            CATransaction.flush()
+            serverWindowPool.append(window)
         }
 
         let root = FixtureRootView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
@@ -952,7 +1254,8 @@ final class ViewScopeServerTests: XCTestCase {
         window.title = "Control Fixture"
         defer {
             window.orderOut(nil)
-            window.close()
+            CATransaction.flush()
+            serverWindowPool.append(window)
         }
 
         let button = NSButton(title: "Press", target: nil, action: nil)
@@ -996,18 +1299,22 @@ final class ViewScopeServerTests: XCTestCase {
             @objc func handleTap(_ sender: Any?) {}
         }
 
+        final class CustomClickGestureRecognizer: NSClickGestureRecognizer {}
+
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
         window.title = "Handlers Fixture"
         defer {
             window.orderOut(nil)
-            window.close()
+            CATransaction.flush()
+            serverWindowPool.append(window)
         }
 
         let target = ControlTarget()
         let button = NSButton(title: "Press", target: target, action: #selector(ControlTarget.handlePress(_:)))
         button.frame = NSRect(x: 20, y: 20, width: 120, height: 32)
+        button.sendAction(on: [.leftMouseDown, .leftMouseUp])
 
-        let gesture = NSClickGestureRecognizer(target: target, action: #selector(ControlTarget.handleTap(_:)))
+        let gesture = CustomClickGestureRecognizer(target: target, action: #selector(ControlTarget.handleTap(_:)))
         gesture.isEnabled = true
         button.addGestureRecognizer(gesture)
 
@@ -1042,12 +1349,17 @@ final class ViewScopeServerTests: XCTestCase {
         XCTAssertEqual(controlHandler.title, "handlePress:")
         XCTAssertEqual(controlHandler.targetActions.first?.actionName, "handlePress:")
         XCTAssertTrue(controlHandler.targetActions.first?.targetClassName?.contains("ControlTarget") == true)
+        XCTAssertTrue(controlHandler.subtitle?.contains("LeftMouseDown") == true)
+        XCTAssertTrue(controlHandler.subtitle?.contains("LeftMouseUp") == true)
 
         let gestureHandler = try XCTUnwrap(handlers.first(where: { $0.kind == .gesture }))
-        XCTAssertEqual(gestureHandler.title, "NSClickGestureRecognizer")
+        // The class is locally-defined so its displayName is the enclosing function context.
+        let expectedGestureTitle = ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(CustomClickGestureRecognizer.self))
+        XCTAssertEqual(gestureHandler.title, expectedGestureTitle)
         XCTAssertEqual(gestureHandler.targetActions.first?.actionName, "handleTap:")
         XCTAssertTrue(gestureHandler.targetActions.first?.targetClassName?.contains("ControlTarget") == true)
         XCTAssertEqual(gestureHandler.isEnabled, true)
+        XCTAssertEqual(gestureHandler.subtitle, "NSClickGestureRecognizer")
     }
 
     @MainActor
@@ -1087,7 +1399,8 @@ final class ViewScopeServerTests: XCTestCase {
             scrollView.documentView = nil
             window.contentView = nil
             window.orderOut(nil)
-            window.close()
+            CATransaction.flush()
+            serverWindowPool.append(window)
         }
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
         column.width = 260
@@ -1188,16 +1501,17 @@ final class ViewScopeServerTests: XCTestCase {
             for: "_TtC6AppKitP33_72EBFCF981BE77E1C6F26FD717D0893922NSTextFieldSimpleLabel"
         )
 
-        XCTAssertEqual(formatted, "AppKit.NSTextFieldSimpleLabel _72EBFCF981BE77E1C6F26FD717D08939")
+        XCTAssertEqual(formatted, "NSTextFieldSimpleLabel _72EBFCF981BE77E1C6F26FD717D08939")
     }
 
     @MainActor
-    func testWindowRootUsesContentBoundsAndFlippedState() {
+    func testWindowRootUsesWindowBoundsAndWindowRootFlippedState() {
         let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 500, height: 320), styleMask: [.titled], backing: .buffered, defer: false)
         window.title = "Flipped Root Fixture"
         defer {
             window.orderOut(nil)
-            window.close()
+            CATransaction.flush()
+            serverWindowPool.append(window)
         }
         let root = FlippedFixtureView(frame: NSRect(x: 0, y: 0, width: 480, height: 280))
         window.contentView = root
@@ -1221,17 +1535,18 @@ final class ViewScopeServerTests: XCTestCase {
             .first(where: { $0.title == window.title }) else {
             return XCTFail("Expected a root window node")
         }
-        let contentBounds = window.contentView?.bounds ?? .zero
+        let rootBounds = window.contentView?.superview?.bounds ?? .zero
         let expectedBounds = ViewScopeRect(
-            x: Double(contentBounds.origin.x),
-            y: Double(contentBounds.origin.y),
-            width: Double(contentBounds.width),
-            height: Double(contentBounds.height)
+            x: 0,
+            y: 0,
+            width: Double(window.frame.width),
+            height: Double(window.frame.height)
         )
 
         XCTAssertEqual(windowNode.frame, expectedBounds)
         XCTAssertEqual(windowNode.bounds, expectedBounds)
-        XCTAssertTrue(windowNode.isFlipped)
+        XCTAssertEqual(windowNode.isFlipped, window.contentView?.superview?.isFlipped ?? false)
+        XCTAssertGreaterThan(rootBounds.height, root.bounds.height)
     }
 
     @MainActor
@@ -1240,7 +1555,8 @@ final class ViewScopeServerTests: XCTestCase {
         window.title = "Highlight Rect Fixture"
         defer {
             window.orderOut(nil)
-            window.close()
+            CATransaction.flush()
+            serverWindowPool.append(window)
         }
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
         let child = NSView(frame: NSRect(x: 12, y: 18, width: 60, height: 24))
@@ -1270,7 +1586,9 @@ final class ViewScopeServerTests: XCTestCase {
         guard let detail = builder.makeDetail(for: childID, in: context) else {
             return XCTFail("Expected detail payload for child view")
         }
-        let expectedY = Double(root.bounds.height - child.frame.maxY)
+        let screenshotRoot = try! XCTUnwrap(window.contentView?.superview)
+        let rectInRoot = child.convert(child.bounds, to: screenshotRoot)
+        let expectedY = Double(screenshotRoot.bounds.height - rectInRoot.maxY)
 
         XCTAssertEqual(detail.highlightedRect, ViewScopeRect(x: 12, y: expectedY, width: 60, height: 24))
     }
@@ -1281,7 +1599,8 @@ final class ViewScopeServerTests: XCTestCase {
         window.title = "Capture Frame Fixture"
         defer {
             window.orderOut(nil)
-            window.close()
+            CATransaction.flush()
+            serverWindowPool.append(window)
         }
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
         let child = NSView(frame: NSRect(x: 12, y: 18, width: 60, height: 24))
@@ -1311,7 +1630,9 @@ final class ViewScopeServerTests: XCTestCase {
         guard let childNode = capture.nodes[childID] else {
             return XCTFail("Expected captured node for child view")
         }
-        let expectedY = Double(root.bounds.height - child.frame.maxY)
+        let captureRoot = try! XCTUnwrap(window.contentView?.superview)
+        let rectInRoot = child.convert(child.bounds, to: captureRoot)
+        let expectedY = Double(captureRoot.bounds.height - rectInRoot.maxY)
 
         XCTAssertEqual(childNode.frame, ViewScopeRect(x: 12, y: expectedY, width: 60, height: 24))
     }
@@ -1322,7 +1643,8 @@ final class ViewScopeServerTests: XCTestCase {
         window.title = "Editable Fixture"
         defer {
             window.orderOut(nil)
-            window.close()
+            CATransaction.flush()
+            serverWindowPool.append(window)
         }
 
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 240, height: 140))
@@ -1369,7 +1691,8 @@ final class ViewScopeServerTests: XCTestCase {
         window.title = "Mixed Flip Fixture"
         defer {
             window.orderOut(nil)
-            window.close()
+            CATransaction.flush()
+            serverWindowPool.append(window)
         }
 
         let root = FlippedFixtureView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
@@ -1403,12 +1726,13 @@ final class ViewScopeServerTests: XCTestCase {
             return XCTFail("Expected detail payload for mixed-flip child view")
         }
 
-        let expectedRect = child.convert(child.bounds, to: root)
+        let screenshotRoot = try! XCTUnwrap(window.contentView?.superview)
+        let expectedRect = child.convert(child.bounds, to: screenshotRoot)
         XCTAssertEqual(
             detail.highlightedRect,
             ViewScopeRect(
                 x: expectedRect.origin.x,
-                y: expectedRect.origin.y,
+                y: screenshotRoot.isFlipped ? expectedRect.origin.y : screenshotRoot.bounds.height - expectedRect.maxY,
                 width: expectedRect.width,
                 height: expectedRect.height
             )
@@ -1421,7 +1745,8 @@ final class ViewScopeServerTests: XCTestCase {
         window.title = "Non-Flipped Screenshot Fixture"
         defer {
             window.orderOut(nil)
-            window.close()
+            CATransaction.flush()
+            serverWindowPool.append(window)
         }
 
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
@@ -1441,8 +1766,11 @@ final class ViewScopeServerTests: XCTestCase {
         let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
         let (_, context) = builder.makeCapture()
         let rootNodeID = try! XCTUnwrap(context.nodeReferences.first(where: { _, reference in
-            guard case .view(let capturedView) = reference else { return false }
-            return capturedView === root
+            switch reference {
+            case .layer(let layer): return layer.viewScopeHostView === root
+            case .view(let v): return v === root
+            default: return false
+            }
         })?.key)
         let detail = try! XCTUnwrap(builder.makeDetail(for: rootNodeID, in: context))
         let screenshot = try! XCTUnwrap(decodedImage(fromBase64PNG: detail.screenshotPNGBase64))
@@ -1475,7 +1803,8 @@ final class ViewScopeServerTests: XCTestCase {
         window.title = "Flipped Screenshot Fixture"
         defer {
             window.orderOut(nil)
-            window.close()
+            CATransaction.flush()
+            serverWindowPool.append(window)
         }
 
         let root = FlippedFixtureView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
@@ -1495,8 +1824,11 @@ final class ViewScopeServerTests: XCTestCase {
         let builder = ViewScopeSnapshotBuilder(hostInfo: makeHostInfo())
         let (_, context) = builder.makeCapture()
         let rootNodeID = try! XCTUnwrap(context.nodeReferences.first(where: { _, reference in
-            guard case .view(let capturedView) = reference else { return false }
-            return capturedView === root
+            switch reference {
+            case .layer(let layer): return layer.viewScopeHostView === root
+            case .view(let v): return v === root
+            default: return false
+            }
         })?.key)
         let detail = try! XCTUnwrap(builder.makeDetail(for: rootNodeID, in: context))
         let screenshot = try! XCTUnwrap(decodedImage(fromBase64PNG: detail.screenshotPNGBase64))

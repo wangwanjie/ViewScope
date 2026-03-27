@@ -325,7 +325,7 @@ final class WorkspaceStore: NSObject {
     }
 
     func toggleVisibility(for nodeID: String) async -> Bool {
-        guard let node = node(withID: nodeID), node.kind == .view else { return false }
+        guard let node = node(withID: nodeID), node.kind != .window else { return false }
         return await applyMutation(nodeID: nodeID, property: .toggle(key: "hidden", value: !node.isHidden))
     }
 

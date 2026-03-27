@@ -31,7 +31,7 @@ struct PreviewToolbarStateBuilder {
 
         var visibilityToolTip = L10n.previewToggleVisibility
         var visibilitySymbolName: String?
-        let visibilityButtonEnabled = selectedNode?.kind == .view
+        let visibilityButtonEnabled = selectedNode.map { $0.kind != .window } ?? false
         if let selectedNode {
             visibilitySymbolName = selectedNode.isHidden ? "eye.slash" : "eye"
             visibilityToolTip = selectedNode.isHidden ? L10n.hierarchyMenuShowView : L10n.hierarchyMenuHideView

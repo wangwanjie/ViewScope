@@ -103,13 +103,17 @@ final class ViewScopeSnapshotBuilder {
                 return left.isVisible && !right.isVisible
             }
 
+        ViewScopeTraceManager.reload(windows: windows)
+
         var nodes: [String: ViewScopeHierarchyNode] = [:]
         var references: [String: ViewScopeInspectableReference] = [:]
+        var visitedViews = Set<ObjectIdentifier>()
+        var visitedLayers = Set<ObjectIdentifier>()
         var rootNodeIDs: [String] = []
         for (index, window) in windows.enumerated() {
             let windowID = "window-\(index)"
-            let contentBounds = window.contentView?.bounds ?? .zero
-            let contentIsFlipped = window.contentView?.isFlipped ?? false
+            let rootView = window.viewScopeRootView
+            let windowBounds = window.viewScopeBounds
             nodes[windowID] = ViewScopeHierarchyNode(
                 id: windowID,
                 parentID: nil,
@@ -118,61 +122,51 @@ final class ViewScopeSnapshotBuilder {
                 title: sanitizedDisplayText(window.title) ?? interfaceLanguage.text("server.value.window_fallback"),
                 subtitle: "#\(window.windowNumber)",
                 address: window.viewScopeAddress,
-                frame: contentBounds.viewScopeRect,
-                bounds: contentBounds.viewScopeRect,
+                frame: windowBounds.viewScopeRect,
+                bounds: windowBounds.viewScopeRect,
                 childIDs: [],
                 isHidden: !window.isVisible,
                 alphaValue: Double(window.alphaValue),
                 wantsLayer: true,
-                isFlipped: contentIsFlipped,
+                isFlipped: rootView?.isFlipped ?? false,
                 clippingEnabled: true,
                 depth: 0
             )
             references[windowID] = .window(window)
             rootNodeIDs.append(windowID)
 
-            if let contentView = window.contentView {
-                let contentViewNodeID = "\(windowID)-view-root"
-                let title = sanitizedDisplayText(contentView.viewScopeTitle(interfaceLanguage: interfaceLanguage))
-                    ?? ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(type(of: contentView)))
-                nodes[contentViewNodeID] = ViewScopeHierarchyNode(
-                    id: contentViewNodeID,
+            if let rootView, let rootLayer = rootView.layer {
+                let rootLayerNodeID = "\(windowID)-layer-root"
+                buildLayerNode(
+                    layer: rootLayer,
+                    rootView: rootView,
+                    rootLayer: rootLayer,
+                    nodeID: rootLayerNodeID,
                     parentID: windowID,
-                    kind: .view,
-                    className: NSStringFromClass(type(of: contentView)),
-                    title: title,
-                    subtitle: sanitizedDisplayText(contentView.viewScopeSubtitle(interfaceLanguage: interfaceLanguage)),
-                    identifier: sanitizedDisplayText(contentView.identifier?.rawValue),
-                    address: contentView.viewScopeAddress,
-                    frame: contentBounds.viewScopeRect,
-                    bounds: contentView.bounds.viewScopeRect,
-                    childIDs: [],
-                    isHidden: contentView.isHidden,
-                    alphaValue: Double(contentView.alphaValue),
-                    wantsLayer: contentView.wantsLayer,
-                    isFlipped: contentView.isFlipped,
-                    clippingEnabled: contentView.layer?.masksToBounds ?? false,
+                    prefix: "\(windowID)-layer",
                     depth: 1,
-                    ivarName: nil,
-                    ivarTraces: [],
-                    rootViewControllerClassName: contentView.viewScopeExactRootViewControllerClassName,
-                    controlTargetClassName: nil,
-                    controlActionName: nil,
-                    eventHandlers: contentView.viewScopeEventHandlers(interfaceLanguage: interfaceLanguage).nonEmpty
-                )
-                references[contentViewNodeID] = .view(contentView)
-
-                let childIDs = buildNodes(
-                    from: contentView,
-                    rootView: contentView,
-                    parentID: contentViewNodeID,
-                    prefix: "\(windowID)-view",
-                    depth: 2,
                     nodes: &nodes,
-                    references: &references
+                    references: &references,
+                    visitedViews: &visitedViews,
+                    visitedLayers: &visitedLayers
                 )
-                nodes[contentViewNodeID]?.childIDs = childIDs
-                nodes[windowID]?.childIDs = [contentViewNodeID]
+                nodes[windowID]?.childIDs = [rootLayerNodeID]
+            } else if let rootView {
+                let rootViewNodeID = "\(windowID)-view-root"
+                buildViewNode(
+                    view: rootView,
+                    rootView: rootView,
+                    rootLayer: nil,
+                    nodeID: rootViewNodeID,
+                    parentID: windowID,
+                    prefix: "\(windowID)-view",
+                    depth: 1,
+                    nodes: &nodes,
+                    references: &references,
+                    visitedViews: &visitedViews,
+                    visitedLayers: &visitedLayers
+                )
+                nodes[windowID]?.childIDs = [rootViewNodeID]
             }
         }
 
@@ -194,15 +188,15 @@ final class ViewScopeSnapshotBuilder {
         let bitmapEncoder = ViewScopeImageEncoder()
         for (index, window) in windows.enumerated() {
             guard window.isVisible,
-                  let contentView = window.contentView,
-                  contentView.bounds.width > 0, contentView.bounds.height > 0 else { continue }
-            let contentViewNodeID = "window-\(index)-view-root"
-            if let image = makeViewScreenshot(view: contentView),
+                  let rootView = window.viewScopeRootView,
+                  rootView.bounds.width > 0, rootView.bounds.height > 0 else { continue }
+            let rootNodeID = rootView.layer == nil ? "window-\(index)-view-root" : "window-\(index)-layer-root"
+            if let image = makeWindowScreenshot(window: window),
                let base64 = bitmapEncoder.base64PNG(for: image) {
                 previewBitmaps.append(ViewScopePreviewBitmap(
-                    rootNodeID: contentViewNodeID,
+                    rootNodeID: rootNodeID,
                     pngBase64: base64,
-                    size: contentView.bounds.size.viewScopeSize,
+                    size: image.size.viewScopeSize,
                     capturedAt: capturedAt,
                     scale: Double(window.screen?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1)
                 ))
@@ -241,13 +235,13 @@ final class ViewScopeSnapshotBuilder {
                 screenshotRootNodeID: nodeID,
                 screenshotPNGBase64: image.flatMap(ViewScopeImageEncoder().base64PNG),
                 screenshotSize: image?.size.viewScopeSize ?? .zero,
-                highlightedRect: window.contentView?.bounds.viewScopeRect ?? .zero,
+                highlightedRect: window.viewScopeBounds.viewScopeRect,
                 consoleTargets: makeConsoleTargets(for: .window(window), nodeID: nodeID, context: context)
             )
         case .view(let view):
             let screenshotRootView = screenshotRootView(for: view)
             let image = screenshotRootView.flatMap { root in
-                makeViewScreenshot(view: root)
+                makeCanvasScreenshot(rootView: root)
             }
             let highlightRect = screenshotRootView.map { root in
                 normalizedCanvasRect(for: view, in: root).viewScopeRect
@@ -263,6 +257,32 @@ final class ViewScopeSnapshotBuilder {
                 screenshotSize: image?.size.viewScopeSize ?? .zero,
                 highlightedRect: highlightRect,
                 consoleTargets: makeConsoleTargets(for: .view(view), nodeID: nodeID, context: context)
+            )
+        case .layer(let layer):
+            let screenshotRootView = screenshotRootView(for: layer)
+            let screenshotRootLayer = screenshotRootView?.layer
+            let image = screenshotRootView.flatMap { root in
+                makeCanvasScreenshot(rootView: root)
+            }
+            let highlightRect = screenshotRootView.map { rootView -> ViewScopeRect in
+                if let hostView = layer.viewScopeHostView {
+                    return normalizedCanvasRect(for: hostView, in: rootView).viewScopeRect
+                } else if let rootLayer = screenshotRootLayer {
+                    return normalizedCanvasRect(for: layer, in: rootLayer, rootView: rootView).viewScopeRect
+                }
+                return .zero
+            } ?? .zero
+            return ViewScopeNodeDetailPayload(
+                nodeID: nodeID,
+                host: hostInfo,
+                sections: layerSections(for: layer),
+                constraints: [],
+                ancestry: ancestry(for: layer),
+                screenshotRootNodeID: screenshotRootView.flatMap { screenshotRootNodeID(for: $0, in: context) },
+                screenshotPNGBase64: image.flatMap(ViewScopeImageEncoder().base64PNG),
+                screenshotSize: image?.size.viewScopeSize ?? .zero,
+                highlightedRect: highlightRect,
+                consoleTargets: makeConsoleTargets(for: .layer(layer), nodeID: nodeID, context: context)
             )
         case .viewController(let controller):
             return ViewScopeNodeDetailPayload(
@@ -313,62 +333,265 @@ final class ViewScopeSnapshotBuilder {
         }
     }
 
-    private func buildNodes(
-        from view: NSView,
+    private func buildViewNode(
+        view: NSView,
         rootView: NSView,
+        rootLayer: CALayer?,
+        nodeID: String,
         parentID: String,
         prefix: String,
         depth: Int,
         nodes: inout [String: ViewScopeHierarchyNode],
-        references: inout [String: ViewScopeInspectableReference]
-    ) -> [String] {
-        // 递归构建子树时，child.frame 会立即被归一成相对 rootView 的统一画布坐标。
-        var childIDs: [String] = []
-        let ivarTracesBySubview = directSubviewIvarTraces(in: view)
+        references: inout [String: ViewScopeInspectableReference],
+        visitedViews: inout Set<ObjectIdentifier>,
+        visitedLayers: inout Set<ObjectIdentifier>
+    ) {
+        guard visitedViews.insert(ObjectIdentifier(view)).inserted else {
+            return
+        }
+        let ivarTraces = view.viewScopeIvarTracesForNode
+        let childIDs = buildChildNodeIDs(
+            for: view,
+            rootView: rootView,
+            rootLayer: rootLayer,
+            parentNodeID: nodeID,
+            prefix: prefix,
+            depth: depth + 1,
+            nodes: &nodes,
+            references: &references,
+            visitedViews: &visitedViews,
+            visitedLayers: &visitedLayers
+        )
 
-        for (index, child) in capturedChildViews(of: view).enumerated() {
-            let nodeID = "\(prefix)-\(index)"
-            let title = sanitizedDisplayText(child.viewScopeTitle(interfaceLanguage: interfaceLanguage))
-                ?? ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(type(of: child)))
-            let ivarTraces = ivarTracesBySubview[ObjectIdentifier(child)] ?? []
-            let childFrame = normalizedCanvasRect(for: child, in: rootView)
-            nodes[nodeID] = ViewScopeHierarchyNode(
-                id: nodeID,
-                parentID: parentID,
-                kind: .view,
-                className: NSStringFromClass(type(of: child)),
-                title: title,
-                subtitle: sanitizedDisplayText(child.viewScopeSubtitle(interfaceLanguage: interfaceLanguage)),
-                identifier: sanitizedDisplayText(child.identifier?.rawValue),
-                address: child.viewScopeAddress,
-                frame: childFrame.viewScopeRect,
-                bounds: child.bounds.viewScopeRect,
-                childIDs: [],
-                isHidden: child.isHidden,
-                alphaValue: Double(child.alphaValue),
-                wantsLayer: child.wantsLayer,
-                isFlipped: child.isFlipped,
-                clippingEnabled: child.layer?.masksToBounds ?? false,
-                depth: depth,
-                ivarName: ivarTraces.first?.ivarName,
-                ivarTraces: ivarTraces,
-                rootViewControllerClassName: child.viewScopeExactRootViewControllerClassName,
-                controlTargetClassName: (child as? NSControl)?.viewScopeTargetClassName,
-                controlActionName: (child as? NSControl)?.viewScopeActionName,
-                eventHandlers: child.viewScopeEventHandlers(interfaceLanguage: interfaceLanguage).nonEmpty
-            )
-            references[nodeID] = .view(child)
-            let nestedIDs = buildNodes(
-                from: child,
+        nodes[nodeID] = ViewScopeHierarchyNode(
+            id: nodeID,
+            parentID: parentID,
+            kind: .view,
+            className: NSStringFromClass(type(of: view)),
+            hostViewClassName: nil,
+            title: sanitizedDisplayText(view.viewScopeTitle(interfaceLanguage: interfaceLanguage))
+                ?? ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(type(of: view))),
+            subtitle: sanitizedDisplayText(view.viewScopeStoredSpecialTrace)
+                ?? sanitizedDisplayText(view.viewScopeSubtitle(interfaceLanguage: interfaceLanguage)),
+            identifier: sanitizedDisplayText(view.identifier?.rawValue),
+            address: view.viewScopeAddress,
+            frame: normalizedCanvasRect(for: view, in: rootView).viewScopeRect,
+            bounds: view.bounds.viewScopeRect,
+            childIDs: childIDs,
+            isHidden: view.isHidden,
+            alphaValue: Double(view.alphaValue),
+            wantsLayer: view.wantsLayer,
+            isFlipped: view.isFlipped,
+            clippingEnabled: view.layer?.masksToBounds ?? false,
+            depth: depth,
+            ivarName: ivarTraces.first?.ivarName,
+            ivarTraces: ivarTraces,
+            rootViewControllerClassName: view.viewScopeExactRootViewControllerClassName,
+            controlTargetClassName: (view as? NSControl)?.viewScopeTargetClassName,
+            controlActionName: (view as? NSControl)?.viewScopeActionName,
+            eventHandlers: view.viewScopeEventHandlers(interfaceLanguage: interfaceLanguage).nonEmpty
+        )
+        references[nodeID] = .view(view)
+    }
+
+    private func buildLayerNode(
+        layer: CALayer,
+        rootView: NSView,
+        rootLayer: CALayer,
+        nodeID: String,
+        parentID: String,
+        prefix: String,
+        depth: Int,
+        nodes: inout [String: ViewScopeHierarchyNode],
+        references: inout [String: ViewScopeInspectableReference],
+        visitedViews: inout Set<ObjectIdentifier>,
+        visitedLayers: inout Set<ObjectIdentifier>
+    ) {
+        guard visitedLayers.insert(ObjectIdentifier(layer)).inserted else {
+            return
+        }
+        let ivarTraces = layer.viewScopeIvarTracesForNode
+        let childIDs = buildChildNodeIDs(
+            for: layer,
+            rootView: rootView,
+            rootLayer: rootLayer,
+            parentNodeID: nodeID,
+            prefix: prefix,
+            depth: depth + 1,
+            nodes: &nodes,
+            references: &references,
+            visitedViews: &visitedViews,
+            visitedLayers: &visitedLayers
+        )
+        let layerClassName = NSStringFromClass(type(of: layer))
+
+        nodes[nodeID] = ViewScopeHierarchyNode(
+            id: nodeID,
+            parentID: parentID,
+            kind: .layer,
+            className: layerClassName,
+            hostViewClassName: layer.viewScopeHostView.map { NSStringFromClass(type(of: $0)) },
+            title: sanitizedDisplayText(layer.viewScopeHostView?.viewScopeTitle(interfaceLanguage: interfaceLanguage))
+                ?? ViewScopeClassNameFormatter.displayName(for: layerClassName),
+            subtitle: sanitizedDisplayText(layer.viewScopeSpecialTraceForNode)
+                ?? sanitizedDisplayText(layer.viewScopeHostView?.viewScopeSubtitle(interfaceLanguage: interfaceLanguage)),
+            identifier: layer.viewScopeHostView.flatMap { sanitizedDisplayText($0.identifier?.rawValue) },
+            address: layer.viewScopeAddress,
+            frame: normalizedCanvasRect(for: layer, in: rootLayer, rootView: rootView).viewScopeRect,
+            bounds: layer.bounds.viewScopeRect,
+            childIDs: childIDs,
+            isHidden: layer.isHidden,
+            alphaValue: Double(layer.opacity),
+            wantsLayer: true,
+            isFlipped: layer.viewScopeHostView?.isFlipped ?? layer.isGeometryFlipped,
+            clippingEnabled: layer.masksToBounds,
+            depth: depth,
+            ivarName: ivarTraces.first?.ivarName,
+            ivarTraces: ivarTraces,
+            rootViewControllerClassName: layer.viewScopeHostView?.viewScopeOwningViewController.map { NSStringFromClass(type(of: $0)) },
+            controlTargetClassName: (layer.viewScopeHostView as? NSControl)?.viewScopeTargetClassName,
+            controlActionName: (layer.viewScopeHostView as? NSControl)?.viewScopeActionName,
+            eventHandlers: layer.viewScopeHostView?.viewScopeEventHandlers(interfaceLanguage: interfaceLanguage).nonEmpty
+        )
+        references[nodeID] = .layer(layer)
+    }
+
+    private func buildChildNodeIDs(
+        for view: NSView,
+        rootView: NSView,
+        rootLayer: CALayer?,
+        parentNodeID: String,
+        prefix: String,
+        depth: Int,
+        nodes: inout [String: ViewScopeHierarchyNode],
+        references: inout [String: ViewScopeInspectableReference],
+        visitedViews: inout Set<ObjectIdentifier>,
+        visitedLayers: inout Set<ObjectIdentifier>
+    ) -> [String] {
+        var childIDs: [String] = []
+        let childViews = capturedChildViews(of: view)
+
+        for child in childViews {
+            let nodeID = "\(prefix)-\(childIDs.count)"
+            if let childLayer = child.layer {
+                buildLayerNode(
+                    layer: childLayer,
+                    rootView: rootView,
+                    rootLayer: rootLayer ?? childLayer,
+                    nodeID: nodeID,
+                    parentID: parentNodeID,
+                    prefix: nodeID,
+                    depth: depth,
+                    nodes: &nodes,
+                    references: &references,
+                    visitedViews: &visitedViews,
+                    visitedLayers: &visitedLayers
+                )
+            } else {
+                buildViewNode(
+                    view: child,
+                    rootView: rootView,
+                    rootLayer: rootLayer,
+                    nodeID: nodeID,
+                    parentID: parentNodeID,
+                    prefix: nodeID,
+                    depth: depth,
+                    nodes: &nodes,
+                    references: &references,
+                    visitedViews: &visitedViews,
+                    visitedLayers: &visitedLayers
+                )
+            }
+            if nodes[nodeID] != nil {
+                childIDs.append(nodeID)
+            }
+        }
+
+        return childIDs
+    }
+
+    private func buildChildNodeIDs(
+        for layer: CALayer,
+        rootView: NSView,
+        rootLayer: CALayer,
+        parentNodeID: String,
+        prefix: String,
+        depth: Int,
+        nodes: inout [String: ViewScopeHierarchyNode],
+        references: inout [String: ViewScopeInspectableReference],
+        visitedViews: inout Set<ObjectIdentifier>,
+        visitedLayers: inout Set<ObjectIdentifier>
+    ) -> [String] {
+        var childIDs: [String] = []
+        var representedLayerIDs = Set<ObjectIdentifier>()
+
+        if let hostView = layer.viewScopeHostView {
+            for childView in capturedChildViews(of: hostView) {
+                let nodeID = "\(prefix)-\(childIDs.count)"
+                if let childLayer = childView.layer {
+                    representedLayerIDs.insert(ObjectIdentifier(childLayer))
+                    buildLayerNode(
+                        layer: childLayer,
+                        rootView: rootView,
+                        rootLayer: rootLayer,
+                        nodeID: nodeID,
+                    parentID: parentNodeID,
+                    prefix: nodeID,
+                    depth: depth,
+                    nodes: &nodes,
+                    references: &references,
+                    visitedViews: &visitedViews,
+                    visitedLayers: &visitedLayers
+                )
+                } else {
+                    buildViewNode(
+                        view: childView,
+                        rootView: rootView,
+                        rootLayer: rootLayer,
+                        nodeID: nodeID,
+                        parentID: parentNodeID,
+                        prefix: nodeID,
+                        depth: depth,
+                        nodes: &nodes,
+                        references: &references,
+                        visitedViews: &visitedViews,
+                        visitedLayers: &visitedLayers
+                    )
+                }
+                if nodes[nodeID] != nil {
+                    childIDs.append(nodeID)
+                }
+            }
+        }
+
+        for sublayer in layer.sublayers ?? [] {
+            let identifier = ObjectIdentifier(sublayer)
+            guard representedLayerIDs.contains(identifier) == false else {
+                continue
+            }
+            if let hostView = layer.viewScopeHostView,
+               let sublayerHostView = sublayer.viewScopeHostView,
+               (sublayerHostView === hostView || sublayerHostView.viewScopeIsDescendant(of: hostView)) {
+                continue
+            }
+
+            let nodeID = "\(prefix)-\(childIDs.count)"
+            buildLayerNode(
+                layer: sublayer,
                 rootView: rootView,
-                parentID: nodeID,
+                rootLayer: rootLayer,
+                nodeID: nodeID,
+                parentID: parentNodeID,
                 prefix: nodeID,
-                depth: depth + 1,
+                depth: depth,
                 nodes: &nodes,
-                references: &references
+                references: &references,
+                visitedViews: &visitedViews,
+                visitedLayers: &visitedLayers
             )
-            nodes[nodeID]?.childIDs = nestedIDs
-            childIDs.append(nodeID)
+            if nodes[nodeID] != nil {
+                childIDs.append(nodeID)
+            }
         }
 
         return childIDs
@@ -431,59 +654,11 @@ final class ViewScopeSnapshotBuilder {
         return orderedChildren
     }
 
-    private func directSubviewIvarTraces(in hostView: NSView) -> [ObjectIdentifier: [ViewScopeIvarTrace]] {
-        var tracesBySubview: [ObjectIdentifier: Set<ViewScopeIvarTrace>] = [:]
-        let subviewsByAddress = Dictionary(uniqueKeysWithValues: hostView.subviews.map { subview in
-            (UInt(bitPattern: Unmanaged.passUnretained(subview).toOpaque()), subview)
-        })
-        var currentClass: AnyClass? = type(of: hostView)
-
-        while let targetClass = currentClass,
-              targetClass != NSView.self,
-              targetClass != NSResponder.self,
-              targetClass != NSObject.self {
-            var count: UInt32 = 0
-            guard let ivars = class_copyIvarList(targetClass, &count) else {
-                currentClass = class_getSuperclass(targetClass)
-                continue
-            }
-
-            defer { free(ivars) }
-
-            for index in 0 ..< Int(count) {
-                let ivar = ivars[index]
-                guard let rawObjectPointer = ViewScopeRuntimeIvarReader.storedObjectPointer(in: hostView, ivar: ivar),
-                      let subview = subviewsByAddress[UInt(bitPattern: rawObjectPointer)],
-                      let namePointer = ivar_getName(ivar) else {
-                    continue
-                }
-
-                let trace = ViewScopeIvarTrace(
-                    relation: "superview",
-                    hostClassName: ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(targetClass)),
-                    ivarName: String(cString: namePointer)
-                )
-                tracesBySubview[ObjectIdentifier(subview), default: []].insert(trace)
-            }
-
-            currentClass = class_getSuperclass(targetClass)
-        }
-
-        return tracesBySubview.mapValues { traces in
-            traces.sorted {
-                if $0.hostClassName == $1.hostClassName {
-                    return $0.ivarName < $1.ivarName
-                }
-                return $0.hostClassName < $1.hostClassName
-            }
-        }
-    }
-
     private func screenshotRootView(for view: NSView) -> NSView? {
-        if let contentView = view.window?.contentView,
-           contentView.bounds.width > 0,
-           contentView.bounds.height > 0 {
-            return contentView
+        if let rootView = view.window?.viewScopeRootView,
+           rootView.bounds.width > 0,
+           rootView.bounds.height > 0 {
+            return rootView
         }
 
         var current: NSView = view
@@ -493,11 +668,40 @@ final class ViewScopeSnapshotBuilder {
         return current.bounds.width > 0 && current.bounds.height > 0 ? current : nil
     }
 
+    private func screenshotRootView(for layer: CALayer) -> NSView? {
+        let window = layer.viewScopeWindow
+
+        // If the layer's host view is the window's direct content view, use it as
+        // the screenshot root to avoid including the title bar in the screenshot.
+        if let hostView = layer.viewScopeHostView,
+           hostView === window?.contentView,
+           hostView.bounds.width > 0, hostView.bounds.height > 0 {
+            return hostView
+        }
+
+        if let rootView = window?.viewScopeRootView,
+           rootView.bounds.width > 0,
+           rootView.bounds.height > 0 {
+            return rootView
+        }
+        if let hostView = layer.viewScopeHostView {
+            return screenshotRootView(for: hostView)
+        }
+        return nil
+    }
+
     private func screenshotRootNodeID(for view: NSView, in context: ReferenceContext) -> String? {
-        context.nodeReferences.first { _, reference in
-            guard case .view(let capturedView) = reference else { return false }
+        if let layer = view.layer,
+           let key = context.nodeReferences.first(where: { entry in
+               guard case .layer(let capturedLayer) = entry.value else { return false }
+               return capturedLayer === layer
+           })?.key {
+            return key
+        }
+        return context.nodeReferences.first(where: { entry in
+            guard case .view(let capturedView) = entry.value else { return false }
             return capturedView === view
-        }?.key
+        })?.key
     }
 
     private func makeNodePreviewScreenshots(
@@ -555,6 +759,34 @@ final class ViewScopeSnapshotBuilder {
                     scale: Double(view.window?.screen?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1)
                 )
 
+            case .layer(let layer):
+                guard let hostView = layer.viewScopeHostView else { return nil }
+                if hostView.window?.contentView === hostView || node.childIDs.isEmpty {
+                    return nil
+                }
+
+                guard node.bounds.width > 2, node.bounds.height > 2 else {
+                    return nil
+                }
+                if node.depth > 4, node.childIDs.count <= 3 {
+                    return nil
+                }
+
+                let soloImage = makeSoloLayerScreenshot(layer: layer)
+                let soloPNGBase64 = soloImage.flatMap(encoder.base64PNG)
+                guard soloPNGBase64 != nil else {
+                    return nil
+                }
+
+                return ViewScopeNodePreviewScreenshotSet(
+                    nodeID: nodeID,
+                    groupPNGBase64: nil,
+                    soloPNGBase64: soloPNGBase64,
+                    size: layer.bounds.size.viewScopeSize,
+                    capturedAt: capturedAt,
+                    scale: Double(hostView.window?.screen?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1)
+                )
+
             case .viewController, .object:
                 return nil
             }
@@ -599,7 +831,111 @@ final class ViewScopeSnapshotBuilder {
         return makeTransparentImage(size: view.bounds.size)
     }
 
+    /// Returns true for layers that use (or are nested inside) a compositor-backed view such as
+    /// NSVisualEffectView or NSGlassEffectView, and therefore cannot safely be rendered via
+    /// CALayer.render(in:) in an off-screen context (the compositor must own the render pass).
+    private func isCompositorRenderedLayer(_ layer: CALayer) -> Bool {
+        var current: CALayer? = layer
+        while let l = current {
+            if let hostView = l.viewScopeHostView {
+                if hostView is NSVisualEffectView { return true }
+                if #available(macOS 26.0, *), hostView is NSGlassEffectView { return true }
+                // Found a concrete, non-compositor host view — safe to render below this level.
+                return false
+            }
+            current = l.superlayer
+        }
+        return false
+    }
+
+    private func makeLayerScreenshot(layer: CALayer) -> NSImage? {
+        guard layer.bounds.width > 0, layer.bounds.height > 0 else {
+            return nil
+        }
+        if isCompositorRenderedLayer(layer) {
+            return nil
+        }
+
+        if let hostView = layer.viewScopeHostView,
+           let image = makeDirectViewScreenshot(view: hostView) {
+            return normalizedScreenshot(image, for: hostView)
+        }
+
+        let image = NSImage(size: layer.bounds.size)
+        image.lockFocusFlipped(layer.isGeometryFlipped)
+        guard let context = NSGraphicsContext.current?.cgContext else {
+            image.unlockFocus()
+            return nil
+        }
+        layer.render(in: context)
+        image.unlockFocus()
+        return image
+    }
+
+    private func makeSoloLayerScreenshot(layer: CALayer) -> NSImage? {
+        guard layer.bounds.width > 0, layer.bounds.height > 0 else {
+            return nil
+        }
+        guard (layer.sublayers?.isEmpty == false) || layer.viewScopeHostView != nil else {
+            return nil
+        }
+        if isCompositorRenderedLayer(layer) {
+            return nil
+        }
+
+        let hiddenStates = (layer.sublayers ?? []).map { sublayer in
+            (layer: sublayer, isHidden: sublayer.isHidden)
+        }
+        for (sublayer, isHidden) in hiddenStates where isHidden == false {
+            sublayer.isHidden = true
+        }
+        defer {
+            for (sublayer, isHidden) in hiddenStates {
+                sublayer.isHidden = isHidden
+            }
+        }
+
+        if let hostView = layer.viewScopeHostView,
+           let image = makeDirectViewScreenshot(view: hostView) {
+            return normalizedScreenshot(image, for: hostView)
+        }
+
+        let image = NSImage(size: layer.bounds.size)
+        image.lockFocusFlipped(layer.isGeometryFlipped)
+        guard let context = NSGraphicsContext.current?.cgContext else {
+            image.unlockFocus()
+            return nil
+        }
+        layer.render(in: context)
+        image.unlockFocus()
+        return image
+    }
+
     private func makeDirectViewScreenshot(view: NSView) -> NSImage? {
+        guard view.bounds.width > 0, view.bounds.height > 0 else { return nil }
+
+        // Use layer.render for explicitly layer-backed views so that CALayer properties
+        // (e.g. backgroundColor) are captured. Implicit system layer-backing (wantsLayer=false)
+        // uses cacheDisplay to avoid unsafe rendering of system-private layer delegates.
+        //
+        // NSVisualEffectView and NSGlassEffectView (macOS 26+) use compositor rendering
+        // that is incompatible with off-screen layer.render calls — calling render on their
+        // layers crashes once the window compositor is active. Fall through to cacheDisplay.
+        if view.wantsLayer, let layer = view.layer {
+            var usesCompositorRendering = view is NSVisualEffectView
+            if !usesCompositorRendering, #available(macOS 26.0, *) {
+                usesCompositorRendering = view is NSGlassEffectView
+            }
+            if !usesCompositorRendering {
+                let image = NSImage(size: view.bounds.size)
+                image.lockFocusFlipped(!layer.isGeometryFlipped)
+                defer { image.unlockFocus() }
+                guard let context = NSGraphicsContext.current?.cgContext else { return nil }
+                layer.render(in: context)
+                return image
+            }
+        }
+
         guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
             return nil
         }
@@ -703,11 +1039,28 @@ final class ViewScopeSnapshotBuilder {
         return false
     }
 
+    /// Returns a canvas-level screenshot for a given root view in `makeDetail`.
+    ///
+    /// When the root view is the window's frame root (NSThemeFrame), the window compositor
+    /// snapshot (CGWindowListCreateImage) is preferred so that compositor-backed content
+    /// such as NSGlassEffectView and NSVisualEffectView renders correctly. A regular
+    /// view screenshot is used as a fallback, and for content-view-only canvas roots.
+    private func makeCanvasScreenshot(rootView: NSView) -> NSImage? {
+        if let window = rootView.window,
+           window.viewScopeRootView === rootView {
+            return makeWindowScreenshot(window: window)
+        }
+        return makeViewScreenshot(view: rootView)
+    }
+
     private func makeWindowScreenshot(window: NSWindow) -> NSImage? {
-        guard let contentView = window.contentView else {
+        if let snapshot = window.viewScopeSnapshotImage {
+            return snapshot
+        }
+        guard let rootView = window.viewScopeRootView else {
             return nil
         }
-        return makeViewScreenshot(view: contentView)
+        return makeViewScreenshot(view: rootView)
     }
 
     private func makeTransparentImage(size: CGSize) -> NSImage {
@@ -720,8 +1073,24 @@ final class ViewScopeSnapshotBuilder {
     }
 
     private func normalizedScreenshot(_ image: NSImage, for view: NSView) -> NSImage {
-        _ = view
-        return image
+        // layer.render(in:) always produces a y-down (screen-coords) bitmap regardless of
+        // isGeometryFlipped. lockFocusFlipped(!layer.isGeometryFlipped) compensates at draw
+        // time but leaves the resulting NSImage in y-down orientation. Flip it vertically
+        // here so that NSBitmapImageRep.colorAt(x:y:) uses y-up convention (y=0 = visual
+        // bottom) consistently for both flipped and non-flipped views.
+        let size = image.size
+        let result = NSImage(size: size)
+        result.lockFocusFlipped(false)
+        defer { result.unlockFocus() }
+        image.draw(
+            in: CGRect(origin: .zero, size: size),
+            from: CGRect(origin: .zero, size: size),
+            operation: .sourceOver,
+            fraction: 1,
+            respectFlipped: false,
+            hints: nil
+        )
+        return result
     }
 
     private func normalizedCanvasRect(for view: NSView, in rootView: NSView) -> NSRect {
@@ -733,6 +1102,22 @@ final class ViewScopeSnapshotBuilder {
             return rect
         }
 
+        return NSRect(
+            x: rect.origin.x,
+            y: rootView.bounds.height - rect.maxY,
+            width: rect.width,
+            height: rect.height
+        )
+    }
+
+    private func normalizedCanvasRect(for layer: CALayer, in rootLayer: CALayer, rootView: NSView) -> NSRect {
+        if let hostView = layer.viewScopeHostView {
+            return normalizedCanvasRect(for: hostView, in: rootView)
+        }
+        let rect = rootLayer.convert(layer.bounds, from: layer)
+        guard rootView.isFlipped == false else {
+            return rect
+        }
         return NSRect(
             x: rect.origin.x,
             y: rootView.bounds.height - rect.maxY,
@@ -922,22 +1307,6 @@ final class ViewScopeSnapshotBuilder {
             ViewScopePropertySection(title: text("server.section.rendering"), items: renderingItems)
         ]
 
-        if let scrollView = view as? NSScrollView {
-            let insets = scrollView.contentInsets
-            sections.append(
-                ViewScopePropertySection(
-                    title: text("server.section.geometry"),
-                    items: [
-                        ViewScopePropertyItem(title: text("server.item.content_insets"), value: insets.viewScopeString),
-                        editableNumberItem(title: text("server.item.inset_top"), key: "contentInsets.top", value: Double(insets.top), decimals: 1),
-                        editableNumberItem(title: text("server.item.inset_left"), key: "contentInsets.left", value: Double(insets.left), decimals: 1),
-                        editableNumberItem(title: text("server.item.inset_bottom"), key: "contentInsets.bottom", value: Double(insets.bottom), decimals: 1),
-                        editableNumberItem(title: text("server.item.inset_right"), key: "contentInsets.right", value: Double(insets.right), decimals: 1)
-                    ]
-                )
-            )
-        }
-
         if let control = view as? NSControl {
             let editableControlValue: ViewScopeEditableProperty = {
                 if control is NSButton || control is NSTextField || control is NSSegmentedControl {
@@ -995,10 +1364,276 @@ final class ViewScopeSnapshotBuilder {
                 )
             }
 
+            // Control 通用属性：controlSize / alignment / fontSize（Lookin NSControl group）
+            if let fontName = control.font?.fontName {
+                controlItems.append(ViewScopePropertyItem(title: "Font Name", value: fontName))
+            }
+            controlItems.append(contentsOf: [
+                editableNumberItem(title: "Control Size", key: "control.controlSize", value: Double(control.controlSize.rawValue), decimals: 0),
+                editableNumberItem(title: "Alignment", key: "control.alignment", value: Double(control.alignment.rawValue), decimals: 0),
+                editableNumberItem(title: "Font Size", key: "control.fontSize", value: Double(control.font?.pointSize ?? NSFont.systemFontSize), decimals: 1)
+            ])
+
             sections.append(
                 ViewScopePropertySection(
                     title: text("server.section.control"),
                     items: controlItems
+                )
+            )
+        }
+
+        sections.append(contentsOf: appKitSpecificSections(for: view))
+        return sections
+    }
+
+    private func layerSections(for layer: CALayer) -> [ViewScopePropertySection] {
+        var identityItems = [
+            ViewScopePropertyItem(
+                title: text("server.item.class"),
+                value: ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(type(of: layer)))
+            ),
+            ViewScopePropertyItem(title: text("server.item.address"), value: layer.viewScopeAddress)
+        ]
+        if let hostView = layer.viewScopeHostView {
+            identityItems.append(
+                ViewScopePropertyItem(
+                    title: "Hosted View",
+                    value: ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(type(of: hostView)))
+                )
+            )
+            if let identifier = hostView.identifier?.rawValue, !identifier.isEmpty {
+                identityItems.append(ViewScopePropertyItem(title: text("server.item.identifier"), value: identifier))
+            }
+            if let title = sanitizedDisplayText(hostView.viewScopeTitle(interfaceLanguage: interfaceLanguage)) {
+                identityItems.append(ViewScopePropertyItem(title: text("server.item.title"), value: title))
+            }
+            if let rootViewControllerClassName = hostView.viewScopeExactRootViewControllerClassName {
+                identityItems.append(
+                    ViewScopePropertyItem(
+                        title: text("server.item.view_controller"),
+                        value: ViewScopeClassNameFormatter.displayName(for: rootViewControllerClassName)
+                    )
+                )
+            }
+        }
+
+        let layoutItems = [
+            ViewScopePropertyItem(title: text("server.item.frame"), value: layer.frame.viewScopeString),
+            editableNumberItem(title: text("server.item.x"), key: "frame.x", value: Double(layer.frame.origin.x), decimals: 1),
+            editableNumberItem(title: text("server.item.y"), key: "frame.y", value: Double(layer.frame.origin.y), decimals: 1),
+            editableNumberItem(title: text("server.item.width"), key: "frame.width", value: Double(layer.frame.width), decimals: 1),
+            editableNumberItem(title: text("server.item.height"), key: "frame.height", value: Double(layer.frame.height), decimals: 1),
+            ViewScopePropertyItem(title: text("server.item.bounds"), value: layer.bounds.viewScopeString),
+            editableNumberItem(title: text("server.item.bounds_x"), key: "bounds.x", value: Double(layer.bounds.origin.x), decimals: 1),
+            editableNumberItem(title: text("server.item.bounds_y"), key: "bounds.y", value: Double(layer.bounds.origin.y), decimals: 1),
+            editableNumberItem(title: text("server.item.bounds_width"), key: "bounds.width", value: Double(layer.bounds.width), decimals: 1),
+            editableNumberItem(title: text("server.item.bounds_height"), key: "bounds.height", value: Double(layer.bounds.height), decimals: 1)
+        ]
+
+        var renderingItems = [
+            editableToggleItem(title: text("server.item.hidden"), key: "hidden", value: layer.isHidden),
+            editableNumberItem(title: text("server.item.alpha"), key: "alpha", value: Double(layer.opacity), decimals: 2),
+            ViewScopePropertyItem(title: text("server.item.flipped"), value: (layer.viewScopeHostView?.isFlipped ?? layer.isGeometryFlipped).viewScopeBoolText(interfaceLanguage: interfaceLanguage)),
+            ViewScopePropertyItem(title: "Masks To Bounds", value: layer.masksToBounds.viewScopeBoolText(interfaceLanguage: interfaceLanguage)),
+            ViewScopePropertyItem(title: "Sublayers", value: String(layer.sublayers?.count ?? 0))
+        ]
+        if let background = layer.backgroundColor?.viewScopeHexString {
+            renderingItems.append(editableColorItem(title: text("server.item.background"), key: "backgroundColor", value: background))
+        }
+        renderingItems.append(
+            editableNumberItem(
+                title: text("server.item.corner_radius"),
+                key: "layer.cornerRadius",
+                value: Double(layer.cornerRadius),
+                decimals: 1
+            )
+        )
+        renderingItems.append(
+            editableNumberItem(
+                title: text("server.item.border_width"),
+                key: "layer.borderWidth",
+                value: Double(layer.borderWidth),
+                decimals: 1
+            )
+        )
+
+        return [
+            ViewScopePropertySection(title: text("server.section.identity"), items: identityItems),
+            ViewScopePropertySection(title: text("server.section.layout"), items: layoutItems),
+            ViewScopePropertySection(title: text("server.section.rendering"), items: renderingItems)
+        ]
+    }
+
+    private func appKitSpecificSections(for view: NSView) -> [ViewScopePropertySection] {
+        var sections: [ViewScopePropertySection] = []
+
+        if let imageView = view as? NSImageView {
+            var imageItems: [ViewScopePropertyItem] = []
+            if let imageName = imageView.image?.name() {
+                imageItems.append(ViewScopePropertyItem(title: "Image Name", value: imageName))
+            }
+            imageItems.append(contentsOf: [
+                editableNumberItem(title: "Image Scaling", key: "imageView.imageScaling", value: Double(imageView.imageScaling.rawValue), decimals: 0),
+                editableNumberItem(title: "Image Alignment", key: "imageView.imageAlignment", value: Double(imageView.imageAlignment.rawValue), decimals: 0),
+                editableToggleItem(title: "Animates", key: "imageView.animates", value: imageView.animates)
+            ])
+            sections.append(ViewScopePropertySection(title: "Image View", items: imageItems))
+        }
+
+        if let scrollView = view as? NSScrollView {
+            sections.append(
+                ViewScopePropertySection(
+                    title: "Scroll View",
+                    items: [
+                        editableNumberItem(title: "Content Offset X", key: "contentOffset.x", value: Double(scrollView.contentView.bounds.origin.x), decimals: 1),
+                        editableNumberItem(title: "Content Offset Y", key: "contentOffset.y", value: Double(scrollView.contentView.bounds.origin.y), decimals: 1),
+                        editableNumberItem(title: "Content Size Width", key: "contentSize.width", value: Double(scrollView.documentView?.frame.width ?? 0), decimals: 1),
+                        editableNumberItem(title: "Content Size Height", key: "contentSize.height", value: Double(scrollView.documentView?.frame.height ?? 0), decimals: 1),
+                        editableToggleItem(title: "Automatically Adjusts Content Insets", key: "automaticallyAdjustsContentInsets", value: scrollView.automaticallyAdjustsContentInsets),
+                        editableNumberItem(title: "Border Type", key: "borderType", value: Double(scrollView.borderType.rawValue), decimals: 0),
+                        editableToggleItem(title: "Horizontal Scroller", key: "hasHorizontalScroller", value: scrollView.hasHorizontalScroller),
+                        editableToggleItem(title: "Vertical Scroller", key: "hasVerticalScroller", value: scrollView.hasVerticalScroller),
+                        editableToggleItem(title: "Autohides Scrollers", key: "autohidesScrollers", value: scrollView.autohidesScrollers),
+                        editableNumberItem(title: "Scroller Style", key: "scrollerStyle", value: Double(scrollView.scrollerStyle.rawValue), decimals: 0),
+                        editableNumberItem(title: "Scroller Knob Style", key: "scrollerKnobStyle", value: Double(scrollView.scrollerKnobStyle.rawValue), decimals: 0),
+                        editableToggleItem(title: "Scrolls Dynamically", key: "scrollsDynamically", value: scrollView.scrollsDynamically),
+                        editableToggleItem(title: "Uses Predominant Axis Scrolling", key: "usesPredominantAxisScrolling", value: scrollView.usesPredominantAxisScrolling),
+                        editableToggleItem(title: "Allows Magnification", key: "allowsMagnification", value: scrollView.allowsMagnification),
+                        editableNumberItem(title: "Magnification", key: "magnification", value: Double(scrollView.magnification), decimals: 2),
+                        editableNumberItem(title: "Max Magnification", key: "maxMagnification", value: Double(scrollView.maxMagnification), decimals: 2),
+                        editableNumberItem(title: "Min Magnification", key: "minMagnification", value: Double(scrollView.minMagnification), decimals: 2)
+                    ]
+                )
+            )
+        }
+
+        if let tableView = view as? NSTableView {
+            var tableItems: [ViewScopePropertyItem] = [
+                editableNumberItem(title: "Row Height", key: "rowHeight", value: Double(tableView.rowHeight), decimals: 1),
+                editableToggleItem(title: "Uses Automatic Row Heights", key: "usesAutomaticRowHeights", value: tableView.usesAutomaticRowHeights),
+                editableNumberItem(title: "Intercell Spacing Width", key: "intercellSpacing.width", value: Double(tableView.intercellSpacing.width), decimals: 1),
+                editableNumberItem(title: "Intercell Spacing Height", key: "intercellSpacing.height", value: Double(tableView.intercellSpacing.height), decimals: 1),
+                editableNumberItem(title: "Style", key: "style", value: Double(tableView.style.rawValue), decimals: 0),
+                editableNumberItem(title: "Column Autoresizing", key: "columnAutoresizingStyle", value: Double(tableView.columnAutoresizingStyle.rawValue), decimals: 0),
+                editableNumberItem(title: "Grid Style Mask", key: "gridStyleMask", value: Double(tableView.gridStyleMask.rawValue), decimals: 0),
+                editableNumberItem(title: "Selection Highlight Style", key: "selectionHighlightStyle", value: Double(tableView.selectionHighlightStyle.rawValue), decimals: 0),
+                editableNumberItem(title: "Row Size Style", key: "rowSizeStyle", value: Double(tableView.rowSizeStyle.rawValue), decimals: 0),
+                ViewScopePropertyItem(title: "Number Of Rows", value: String(tableView.numberOfRows)),
+                ViewScopePropertyItem(title: "Number Of Columns", value: String(tableView.numberOfColumns)),
+                editableToggleItem(title: "Alternating Row Backgrounds", key: "usesAlternatingRowBackgroundColors", value: tableView.usesAlternatingRowBackgroundColors),
+                editableToggleItem(title: "Allows Column Reordering", key: "allowsColumnReordering", value: tableView.allowsColumnReordering),
+                editableToggleItem(title: "Allows Column Resizing", key: "allowsColumnResizing", value: tableView.allowsColumnResizing),
+                editableToggleItem(title: "Allows Multiple Selection", key: "allowsMultipleSelection", value: tableView.allowsMultipleSelection),
+                editableToggleItem(title: "Allows Empty Selection", key: "allowsEmptySelection", value: tableView.allowsEmptySelection),
+                editableToggleItem(title: "Allows Column Selection", key: "allowsColumnSelection", value: tableView.allowsColumnSelection),
+                editableToggleItem(title: "Allows Type Select", key: "allowsTypeSelect", value: tableView.allowsTypeSelect),
+                editableToggleItem(title: "Floats Group Rows", key: "floatsGroupRows", value: tableView.floatsGroupRows),
+                editableToggleItem(title: "Vertical Motion Can Begin Drag", key: "verticalMotionCanBeginDrag", value: tableView.verticalMotionCanBeginDrag)
+            ]
+            if let color = tableView.gridColor.cgColor.viewScopeHexString {
+                tableItems.append(editableColorItem(title: "Grid Color", key: "gridColor", value: color))
+            }
+            sections.append(ViewScopePropertySection(title: "Table View", items: tableItems))
+        }
+
+        if let textView = view as? NSTextView {
+            var textViewItems: [ViewScopePropertyItem] = [
+                editableTextItem(title: "String", key: "textView.string", value: textView.string)
+            ]
+            if let fontName = textView.font?.fontName {
+                textViewItems.append(ViewScopePropertyItem(title: "Font Name", value: fontName))
+            }
+            textViewItems.append(contentsOf: [
+                editableNumberItem(title: "Font Size", key: "textView.fontSize", value: Double(textView.font?.pointSize ?? NSFont.systemFontSize), decimals: 1),
+                editableNumberItem(title: "Alignment", key: "textView.alignment", value: Double(textView.alignment.rawValue), decimals: 0),
+                editableNumberItem(title: "Text Container Inset Width", key: "textView.textContainerInset.width", value: Double(textView.textContainerInset.width), decimals: 1),
+                editableNumberItem(title: "Text Container Inset Height", key: "textView.textContainerInset.height", value: Double(textView.textContainerInset.height), decimals: 1),
+                editableNumberItem(title: "Max Size Width", key: "textView.maxSize.width", value: Double(textView.maxSize.width), decimals: 1),
+                editableNumberItem(title: "Max Size Height", key: "textView.maxSize.height", value: Double(textView.maxSize.height), decimals: 1),
+                editableNumberItem(title: "Min Size Width", key: "textView.minSize.width", value: Double(textView.minSize.width), decimals: 1),
+                editableNumberItem(title: "Min Size Height", key: "textView.minSize.height", value: Double(textView.minSize.height), decimals: 1),
+                editableToggleItem(title: "Editable", key: "textView.isEditable", value: textView.isEditable),
+                editableToggleItem(title: "Selectable", key: "textView.isSelectable", value: textView.isSelectable),
+                editableToggleItem(title: "Rich Text", key: "textView.isRichText", value: textView.isRichText),
+                editableToggleItem(title: "Imports Graphics", key: "textView.importsGraphics", value: textView.importsGraphics),
+                editableToggleItem(title: "Horizontally Resizable", key: "textView.isHorizontallyResizable", value: textView.isHorizontallyResizable),
+                editableToggleItem(title: "Vertically Resizable", key: "textView.isVerticallyResizable", value: textView.isVerticallyResizable)
+            ])
+            if let color = textView.textColor?.cgColor.viewScopeHexString {
+                textViewItems.append(editableColorItem(title: "Text Color", key: "textView.textColor", value: color))
+            }
+            sections.append(ViewScopePropertySection(title: "Text View", items: textViewItems))
+        }
+
+        if let textField = view as? NSTextField {
+            var textFieldItems: [ViewScopePropertyItem] = [
+                editableToggleItem(title: "Bordered", key: "textField.isBordered", value: textField.isBordered),
+                editableToggleItem(title: "Bezeled", key: "textField.isBezeled", value: textField.isBezeled),
+                editableNumberItem(title: "Bezel Style", key: "textField.bezelStyle", value: Double(textField.bezelStyle.rawValue), decimals: 0),
+                editableToggleItem(title: "Editable", key: "textField.isEditable", value: textField.isEditable),
+                editableToggleItem(title: "Selectable", key: "textField.isSelectable", value: textField.isSelectable),
+                editableToggleItem(title: "Draws Background", key: "textField.drawsBackground", value: textField.drawsBackground),
+                editableNumberItem(title: "Preferred Max Layout Width", key: "textField.preferredMaxLayoutWidth", value: Double(textField.preferredMaxLayoutWidth), decimals: 1),
+                editableNumberItem(title: "Maximum Number Of Lines", key: "textField.maximumNumberOfLines", value: Double(textField.maximumNumberOfLines), decimals: 0),
+                editableToggleItem(title: "Allows Default Tightening", key: "textField.allowsDefaultTighteningForTruncation", value: textField.allowsDefaultTighteningForTruncation),
+                editableNumberItem(title: "Line Break Strategy", key: "textField.lineBreakStrategy", value: Double(textField.lineBreakStrategy.rawValue), decimals: 0)
+            ]
+            if let color = textField.textColor?.cgColor.viewScopeHexString {
+                textFieldItems.append(editableColorItem(title: "Text Color", key: "textField.textColor", value: color))
+            }
+            sections.append(ViewScopePropertySection(title: "Text Field", items: textFieldItems))
+        }
+
+        if let button = view as? NSButton {
+            var buttonItems: [ViewScopePropertyItem] = [
+                editableTextItem(title: "Title", key: "button.title", value: button.title),
+                editableTextItem(title: "Alternate Title", key: "button.alternateTitle", value: button.alternateTitle),
+                editableNumberItem(title: "Button Type", key: "button.buttonType", value: Double(button.viewScopeButtonType.rawValue), decimals: 0),
+                editableNumberItem(title: "Bezel Style", key: "button.bezelStyle", value: Double(button.bezelStyle.rawValue), decimals: 0),
+                editableToggleItem(title: "Bordered", key: "button.isBordered", value: button.isBordered),
+                editableToggleItem(title: "Transparent", key: "button.isTransparent", value: button.isTransparent),
+                editableToggleItem(title: "Shows Border Only While Mouse Inside", key: "button.showsBorderOnlyWhileMouseInside", value: button.showsBorderOnlyWhileMouseInside),
+                editableToggleItem(title: "Spring Loaded", key: "button.isSpringLoaded", value: button.isSpringLoaded)
+            ]
+            if let color = button.bezelColor?.cgColor.viewScopeHexString {
+                buttonItems.append(editableColorItem(title: "Bezel Color", key: "button.bezelColor", value: color))
+            }
+            if let color = button.contentTintColor?.cgColor.viewScopeHexString {
+                buttonItems.append(editableColorItem(title: "Content Tint Color", key: "button.contentTintColor", value: color))
+            }
+            sections.append(ViewScopePropertySection(title: "Button", items: buttonItems))
+        }
+
+        if let visualEffectView = view as? NSVisualEffectView {
+            sections.append(
+                ViewScopePropertySection(
+                    title: "Visual Effect",
+                    items: [
+                        editableNumberItem(title: "Material", key: "visualEffect.material", value: Double(visualEffectView.material.rawValue), decimals: 0),
+                        ViewScopePropertyItem(title: "Interior Background Style", value: String(visualEffectView.interiorBackgroundStyle.rawValue)),
+                        editableNumberItem(title: "Blending Mode", key: "visualEffect.blendingMode", value: Double(visualEffectView.blendingMode.rawValue), decimals: 0),
+                        editableNumberItem(title: "State", key: "visualEffect.state", value: Double(visualEffectView.state.rawValue), decimals: 0),
+                        editableToggleItem(title: "Emphasized", key: "visualEffect.isEmphasized", value: visualEffectView.isEmphasized)
+                    ]
+                )
+            )
+        }
+
+        if let stackView = view as? NSStackView {
+            sections.append(
+                ViewScopePropertySection(
+                    title: "Stack View",
+                    items: [
+                        editableNumberItem(title: "Orientation", key: "stack.orientation", value: Double(stackView.orientation.rawValue), decimals: 0),
+                        editableNumberItem(title: "Edge Insets Top", key: "stack.edgeInsets.top", value: Double(stackView.edgeInsets.top), decimals: 1),
+                        editableNumberItem(title: "Edge Insets Left", key: "stack.edgeInsets.left", value: Double(stackView.edgeInsets.left), decimals: 1),
+                        editableNumberItem(title: "Edge Insets Bottom", key: "stack.edgeInsets.bottom", value: Double(stackView.edgeInsets.bottom), decimals: 1),
+                        editableNumberItem(title: "Edge Insets Right", key: "stack.edgeInsets.right", value: Double(stackView.edgeInsets.right), decimals: 1),
+                        editableToggleItem(title: "Detaches Hidden Views", key: "stack.detachesHiddenViews", value: stackView.detachesHiddenViews),
+                        editableNumberItem(title: "Distribution", key: "stack.distribution", value: Double(stackView.distribution.rawValue), decimals: 0),
+                        editableNumberItem(title: "Alignment", key: "stack.alignment", value: Double(stackView.alignment.rawValue), decimals: 0),
+                        editableNumberItem(title: "Spacing", key: "stack.spacing", value: Double(stackView.spacing), decimals: 1)
+                    ]
                 )
             )
         }
@@ -1014,6 +1649,23 @@ final class ViewScopeSnapshotBuilder {
             cursor = current.superview
         }
         if let title = sanitizedDisplayText(view.window?.title), !title.isEmpty {
+            chain.append(title)
+        }
+        return chain.reversed()
+    }
+
+    private func ancestry(for layer: CALayer) -> [String] {
+        if let hostView = layer.viewScopeHostView {
+            return ancestry(for: hostView)
+        }
+
+        var chain: [String] = []
+        var cursor: CALayer? = layer
+        while let current = cursor {
+            chain.append(ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(type(of: current))))
+            cursor = current.superlayer
+        }
+        if let title = sanitizedDisplayText(layer.viewScopeWindow?.title), !title.isEmpty {
             chain.append(title)
         }
         return chain.reversed()
@@ -1088,6 +1740,35 @@ final class ViewScopeSnapshotBuilder {
                 targets.append(descriptor)
             }
             return targets
+        case .layer(let layer):
+            var targets: [ViewScopeConsoleTargetDescriptor] = []
+            if let descriptor = makeConsoleTargetDescriptor(
+                reference: .layer(layer),
+                sourceNodeID: nodeID,
+                captureID: context.captureID,
+                subtitle: ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(type(of: layer)))
+            ) {
+                targets.append(descriptor)
+            }
+            if let hostView = layer.viewScopeHostView,
+               let descriptor = makeConsoleTargetDescriptor(
+                reference: .view(hostView),
+                sourceNodeID: nodeID,
+                captureID: context.captureID,
+                subtitle: ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(type(of: hostView)))
+               ) {
+                targets.append(descriptor)
+            }
+            if let controller = layer.viewScopeHostView?.viewScopeOwningViewController,
+               let descriptor = makeConsoleTargetDescriptor(
+                reference: .viewController(controller),
+                sourceNodeID: nodeID,
+                captureID: context.captureID,
+                subtitle: ViewScopeClassNameFormatter.displayName(for: NSStringFromClass(type(of: controller)))
+               ) {
+                targets.append(descriptor)
+            }
+            return targets
         case .viewController(let controller):
             return [
                 makeConsoleTargetDescriptor(
@@ -1117,6 +1798,9 @@ final class ViewScopeSnapshotBuilder {
         case .view(let view):
             object = view
             kind = .view
+        case .layer(let layer):
+            object = layer
+            kind = .layer
         case .viewController(let controller):
             object = controller
             kind = .viewController
@@ -1137,16 +1821,18 @@ final class ViewScopeSnapshotBuilder {
         let title = "<\(ViewScopeClassNameFormatter.displayName(for: className)): \(address)>"
         return ViewScopeConsoleTargetDescriptor(reference: referencePayload, title: title, subtitle: subtitle)
     }
+
 }
 
 enum ViewScopeInspectableReference {
     case window(NSWindow)
     case view(NSView)
+    case layer(CALayer)
     case viewController(NSViewController)
     case object(AnyObject)
 }
 
-private extension NSView {
+extension NSView {
     var viewScopeOwningViewController: NSViewController? {
         guard let windowController = window?.contentViewController else {
             return nil
@@ -1279,6 +1965,19 @@ private extension NSViewController {
     }
 }
 
+private extension NSView {
+    func viewScopeIsDescendant(of ancestor: NSView) -> Bool {
+        var candidate = superview
+        while let current = candidate {
+            if current === ancestor {
+                return true
+            }
+            candidate = current.superview
+        }
+        return false
+    }
+}
+
 private extension NSLayoutConstraint.Attribute {
     var viewScopeName: String {
         switch self {
@@ -1300,9 +1999,35 @@ private extension NSLayoutConstraint.Attribute {
     }
 }
 
-private extension NSWindow {
+extension NSWindow {
     var viewScopeAddress: String {
         String(describing: Unmanaged.passUnretained(self).toOpaque())
+    }
+
+    var viewScopeRootView: NSView? {
+        contentView?.superview ?? contentView
+    }
+
+    var viewScopeBounds: NSRect {
+        NSRect(origin: .zero, size: frame.size)
+    }
+
+    var viewScopeSnapshotImage: NSImage? {
+        guard windowNumber > 0,
+              let cgImage = CGWindowListCreateImage(.null, .optionIncludingWindow, CGWindowID(windowNumber), [.boundsIgnoreFraming]) else {
+            return nil
+        }
+        return NSImage(cgImage: cgImage, size: frame.size)
+    }
+}
+
+private extension NSButton {
+    var viewScopeButtonType: NSButton.ButtonType {
+        if let rawValue = cell?.value(forKey: "_buttonType") as? NSNumber,
+           let buttonType = NSButton.ButtonType(rawValue: rawValue.uintValue) {
+            return buttonType
+        }
+        return .momentaryPushIn
     }
 }
 
@@ -1340,8 +2065,20 @@ private extension NSControl {
         return ViewScopeEventHandler(
             kind: .controlAction,
             title: targetAction.actionName ?? interfaceLanguage.text("server.item.action"),
+            subtitle: viewScopeEventMaskDescription,
             targetActions: [targetAction]
         )
+    }
+
+    var viewScopeEventMaskDescription: String? {
+        guard let cell,
+              cell.responds(to: Selector(("sendActionOnMask"))) else {
+            return nil
+        }
+        let rawValue = (cell.value(forKey: "sendActionOnMask") as? NSNumber)?.uint64Value ?? 0
+        let mask = NSEvent.EventTypeMask(rawValue: rawValue)
+        let names = mask.viewScopeNames
+        return names.isEmpty ? nil : names.joined(separator: " | ")
     }
 }
 
@@ -1357,10 +2094,75 @@ private extension NSGestureRecognizer {
         return ViewScopeEventHandler(
             kind: .gesture,
             title: title,
+            subtitle: viewScopeInheritedRecognizerName,
             targetActions: (targetAction.targetClassName != nil || targetAction.actionName != nil) ? [targetAction] : [],
             isEnabled: isEnabled,
             delegateClassName: delegateClassName
         )
+    }
+
+    var viewScopeInheritedRecognizerName: String? {
+        let bases: [NSGestureRecognizer.Type] = [
+            NSClickGestureRecognizer.self,
+            NSMagnificationGestureRecognizer.self,
+            NSPanGestureRecognizer.self,
+            NSPressGestureRecognizer.self,
+            NSRotationGestureRecognizer.self
+        ]
+
+        for base in bases {
+            if type(of: self) == base {
+                return nil
+            }
+            if isKind(of: base) {
+                return String(describing: base)
+            }
+        }
+        return "NSGestureRecognizer"
+    }
+}
+
+private extension NSEvent.EventTypeMask {
+    var viewScopeNames: [String] {
+        let mappings: [(NSEvent.EventTypeMask, String)] = [
+            (.leftMouseDown, "LeftMouseDown"),
+            (.leftMouseUp, "LeftMouseUp"),
+            (.rightMouseDown, "RightMouseDown"),
+            (.rightMouseUp, "RightMouseUp"),
+            (.mouseMoved, "MouseMoved"),
+            (.leftMouseDragged, "LeftMouseDragged"),
+            (.rightMouseDragged, "RightMouseDragged"),
+            (.mouseEntered, "MouseEntered"),
+            (.mouseExited, "MouseExited"),
+            (.keyDown, "KeyDown"),
+            (.keyUp, "KeyUp"),
+            (.flagsChanged, "FlagsChanged"),
+            (.appKitDefined, "AppKitDefined"),
+            (.systemDefined, "SystemDefined"),
+            (.applicationDefined, "ApplicationDefined"),
+            (.periodic, "Periodic"),
+            (.cursorUpdate, "CursorUpdate"),
+            (.scrollWheel, "ScrollWheel"),
+            (.tabletPoint, "TabletPoint"),
+            (.tabletProximity, "TabletProximity"),
+            (.otherMouseDown, "OtherMouseDown"),
+            (.otherMouseUp, "OtherMouseUp"),
+            (.otherMouseDragged, "OtherMouseDragged"),
+            (.gesture, "Gesture"),
+            (.magnify, "Magnify"),
+            (.swipe, "Swipe"),
+            (.rotate, "Rotate"),
+            (.beginGesture, "BeginGesture"),
+            (.endGesture, "EndGesture"),
+            (.smartMagnify, "SmartMagnify"),
+            (.pressure, "Pressure"),
+            (.directTouch, "DirectTouch")
+        ]
+
+        if contains(.any) {
+            return ["Any"]
+        }
+        return mappings.compactMap { contains($0.0) ? $0.1 : nil }
     }
 }
 

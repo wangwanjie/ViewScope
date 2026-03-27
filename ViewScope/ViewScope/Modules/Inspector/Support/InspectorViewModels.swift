@@ -227,7 +227,11 @@ struct InspectorPanelModelBuilder {
                 )
             )
         case .text:
-            if property.key == "backgroundColor" {
+            // 颜色 key 统一用 color row：backgroundColor 以及所有包含 "Color" 的 key
+            let isColorKey = property.key == "backgroundColor" ||
+                property.key.lowercased().hasSuffix("color") ||
+                (property.textValue.map { $0.hasPrefix("#") && ($0.count == 7 || $0.count == 9) } ?? false)
+            if isColorKey {
                 return .color(
                     InspectorEditableColorModel(
                         title: item.title,

@@ -85,7 +85,9 @@ enum ConsoleModelBuilder {
     }
 
     static func preferredTarget(from descriptors: [ViewScopeConsoleTargetDescriptor]) -> ViewScopeConsoleTargetDescriptor? {
-        descriptors.first(where: { $0.reference.kind == .view }) ?? descriptors.first
+        descriptors.first(where: { $0.reference.kind == .view })
+            ?? descriptors.first(where: { $0.reference.kind == .layer })
+            ?? descriptors.first
     }
 
     private static func deduplicatedOptions(

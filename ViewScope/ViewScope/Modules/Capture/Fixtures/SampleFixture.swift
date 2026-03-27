@@ -137,7 +137,16 @@ enum SampleFixture {
                 reference: ViewScopeRemoteObjectReference(
                     captureID: captureID,
                     objectID: "view-\(nodeID)",
-                    kind: node.kind == .window ? .window : .view,
+                    kind: {
+                        switch node.kind {
+                        case .window:
+                            return .window
+                        case .view:
+                            return .view
+                        case .layer:
+                            return .layer
+                        }
+                    }(),
                     className: node.className,
                     address: node.address,
                     sourceNodeID: nodeID
