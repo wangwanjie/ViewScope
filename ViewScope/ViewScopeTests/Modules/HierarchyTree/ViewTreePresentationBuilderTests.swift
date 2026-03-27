@@ -46,6 +46,37 @@ struct ViewTreePresentationBuilderTests {
         }
     }
 
+    @Test func presentationBuilderKeepsRegularAppKitContainersVisibleWhenSystemWrappersAreHidden() throws {
+        let capture = makeClipViewCapture()
+        let builder = ViewTreePresentationBuilder()
+
+        let roots = builder.buildRoots(
+            capture: capture,
+            focusedNodeID: nil,
+            showsSystemWrappers: false,
+            query: ""
+        )
+
+        #expect(roots.first?.node.id == "window-0")
+        #expect(roots.first?.children.first?.node.id == "clip-view")
+        #expect(roots.first?.children.first?.children.first?.node.id == "document-view")
+    }
+
+    @Test func presentationBuilderFiltersLayerBackedSystemWrappersUsingHostedViewClass() throws {
+        let capture = makeLayerWrapperCapture()
+        let builder = ViewTreePresentationBuilder()
+
+        let roots = builder.buildRoots(
+            capture: capture,
+            focusedNodeID: nil,
+            showsSystemWrappers: false,
+            query: ""
+        )
+
+        #expect(roots.first?.node.id == "window-0")
+        #expect(roots.first?.children.first?.node.id == "content-layer")
+    }
+
     @Test func selectionSynchronizerSkipsReentrantProgrammaticSelection() {
         let synchronizer = ViewTreeSelectionSynchronizer()
         let item = ViewTreeNodeItem(node: makeNode(id: "selected-node", depth: 0), children: [])
@@ -159,11 +190,106 @@ struct ViewTreePresentationBuilderTests {
         )
     }
 
+    private func makeClipViewCapture() -> ViewScopeCapturePayload {
+        let window = makeNode(
+            id: "window-0",
+            parentID: nil,
+            kind: .window,
+            className: "NSWindow",
+            title: "Window",
+            childIDs: ["clip-view"],
+            depth: 0
+        )
+        let clipView = makeNode(
+            id: "clip-view",
+            parentID: "window-0",
+            className: "NSClipView",
+            title: "Clip View",
+            childIDs: ["document-view"],
+            depth: 1
+        )
+        let documentView = makeNode(
+            id: "document-view",
+            parentID: "clip-view",
+            className: "NSTextView",
+            title: "Document",
+            childIDs: [],
+            depth: 2
+        )
+
+        return ViewScopeCapturePayload(
+            host: SampleFixture.capture().host,
+            capturedAt: Date(),
+            summary: ViewScopeCaptureSummary(
+                nodeCount: 3,
+                windowCount: 1,
+                visibleWindowCount: 1,
+                captureDurationMilliseconds: 1
+            ),
+            rootNodeIDs: ["window-0"],
+            nodes: [
+                "window-0": window,
+                "clip-view": clipView,
+                "document-view": documentView
+            ]
+        )
+    }
+
+    private func makeLayerWrapperCapture() -> ViewScopeCapturePayload {
+        let window = makeNode(
+            id: "window-0",
+            parentID: nil,
+            kind: .window,
+            className: "NSWindow",
+            title: "Window",
+            childIDs: ["wrapper-layer"],
+            depth: 0
+        )
+        let wrapperLayer = makeNode(
+            id: "wrapper-layer",
+            parentID: "window-0",
+            kind: .layer,
+            className: "NSViewBackingLayer",
+            hostViewClassName: "_NSSplitViewItemViewWrapper",
+            title: "Wrapper Layer",
+            childIDs: ["content-layer"],
+            depth: 1
+        )
+        let contentLayer = makeNode(
+            id: "content-layer",
+            parentID: "wrapper-layer",
+            kind: .layer,
+            className: "NSViewBackingLayer",
+            hostViewClassName: "NSScrollView",
+            title: "Content Layer",
+            childIDs: [],
+            depth: 2
+        )
+
+        return ViewScopeCapturePayload(
+            host: SampleFixture.capture().host,
+            capturedAt: Date(),
+            summary: ViewScopeCaptureSummary(
+                nodeCount: 3,
+                windowCount: 1,
+                visibleWindowCount: 1,
+                captureDurationMilliseconds: 1
+            ),
+            rootNodeIDs: ["window-0"],
+            nodes: [
+                "window-0": window,
+                "wrapper-layer": wrapperLayer,
+                "content-layer": contentLayer
+            ]
+        )
+    }
+
     private func makeNode(
         id: String,
         parentID: String? = nil,
         kind: ViewScopeHierarchyNode.Kind = .view,
         className: String = "NSView",
+        hostViewClassName: String? = nil,
         title: String = "Node",
         identifier: String? = nil,
         childIDs: [String] = [],
@@ -177,6 +303,7 @@ struct ViewTreePresentationBuilderTests {
             parentID: parentID,
             kind: kind,
             className: className,
+            hostViewClassName: hostViewClassName,
             title: title,
             subtitle: nil,
             identifier: identifier,

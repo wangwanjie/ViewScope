@@ -219,6 +219,10 @@ final class ViewTreePanelController: NSViewController {
         copyToPasteboard(selectedMenuItem.map { ViewScopeClassNameFormatter.displayName(for: $0.node.className) })
     }
 
+    @objc private func copySelectedNodeControllerClassName(_ sender: Any?) {
+        copyToPasteboard(selectedMenuItem.flatMap { ViewTreeNodePresentation.controllerClassNameText(for: $0.node) })
+    }
+
     @objc private func copySelectedNodeIvarNames(_ sender: Any?) {
         copyToPasteboard(selectedMenuItem.flatMap { ViewTreeNodePresentation.ivarText(for: $0.node) })
     }
@@ -301,7 +305,6 @@ extension ViewTreePanelController: NSOutlineViewDataSource, NSOutlineViewDelegat
         let identifier = NSUserInterfaceItemIdentifier("ViewTreeCell")
         let cell = outlineView.makeView(withIdentifier: identifier, owner: self) as? ViewTreeNodeCellView ?? ViewTreeNodeCellView(frame: .zero)
         cell.identifier = identifier
-        cell.delegate = self
         cell.configure(node: item.node, isEffectivelyHidden: item.isEffectivelyHidden)
         return cell
     }
@@ -352,7 +355,7 @@ extension ViewTreePanelController: NSMenuDelegate {
         let toggleTitle = node.isHidden ? L10n.hierarchyMenuShowView : L10n.hierarchyMenuHideView
         let toggleItem = NSMenuItem(title: toggleTitle, action: #selector(toggleSelectedNodeVisibility(_:)), keyEquivalent: "")
         toggleItem.target = self
-        toggleItem.isEnabled = node.kind == .view
+        toggleItem.isEnabled = node.kind != .window
         menu.addItem(toggleItem)
 
         let focusItem = NSMenuItem(title: L10n.hierarchyMenuFocusSubtree, action: #selector(focusSelectedNode(_:)), keyEquivalent: "")
@@ -386,6 +389,16 @@ extension ViewTreePanelController: NSMenuDelegate {
         let copyClassNameItem = NSMenuItem(title: L10n.hierarchyMenuCopyClassName, action: #selector(copySelectedNodeClassName(_:)), keyEquivalent: "")
         copyClassNameItem.target = self
         copyItems.append(copyClassNameItem)
+
+        if let controllerClassName = ViewTreeNodePresentation.controllerClassNameText(for: node) {
+            let copyControllerClassNameItem = NSMenuItem(
+                title: "\(L10n.menuCopy) \(controllerClassName)",
+                action: #selector(copySelectedNodeControllerClassName(_:)),
+                keyEquivalent: ""
+            )
+            copyControllerClassNameItem.target = self
+            copyItems.append(copyControllerClassNameItem)
+        }
 
         if ViewTreeNodePresentation.ivarText(for: node) != nil {
             let copyIvarNameItem = NSMenuItem(title: L10n.hierarchyMenuCopyIvarName, action: #selector(copySelectedNodeIvarNames(_:)), keyEquivalent: "")
@@ -428,33 +441,37 @@ extension ViewTreePanelController: NSMenuDelegate {
     }
 }
 
-private protocol ViewTreeNodeCellViewDelegate: AnyObject {
-    func viewTreeNodeCellViewDidToggleVisibility(_ cell: ViewTreeNodeCellView, nodeID: String)
-}
-
 enum ViewTreeNodePresentation {
     enum IconKind: Equatable {
         case window
+        case layer
         case viewController
+        case tabView
         case button
         case label
         case image
         case scrollView
         case tableView
+        case collectionView
         case outlineView
         case stackView
         case textField
         case slider
         case segmentedControl
         case control
+        case effectView
         case view
 
         var symbolCandidates: [String] {
             switch self {
             case .window:
                 return ["macwindow", "rectangle"]
+            case .layer:
+                return ["square.stack.3d.forward.dottedline", "square.3.layers.3d", "square.stack.3d.up"]
             case .viewController:
                 return ["rectangle.stack.person.crop", "person.crop.rectangle.stack", "square.stack.3d.up"]
+            case .tabView:
+                return ["rectangle.split.3x1", "square.split.2x1"]
             case .button:
                 return ["button.programmable", "capsule", "rectangle.and.hand.point.up.left"]
             case .label:
@@ -465,6 +482,8 @@ enum ViewTreeNodePresentation {
                 return ["scroll", "rectangle.3.group"]
             case .tableView:
                 return ["tablecells", "list.bullet.rectangle"]
+            case .collectionView:
+                return ["square.grid.2x2", "square.grid.3x3"]
             case .outlineView:
                 return ["list.bullet.indent", "list.bullet"]
             case .stackView:
@@ -477,6 +496,8 @@ enum ViewTreeNodePresentation {
                 return ["rectangle.split.3x1", "square.split.2x1"]
             case .control:
                 return ["switch.2", "slider.horizontal.3"]
+            case .effectView:
+                return ["sparkles.rectangle.stack", "sparkles"]
             case .view:
                 return ["square.on.square", "square"]
             }
@@ -484,18 +505,43 @@ enum ViewTreeNodePresentation {
     }
 
     static func classText(for node: ViewScopeHierarchyNode) -> String {
-        let classText = ViewScopeClassNameFormatter.displayName(for: node.className)
-        guard let controllerText = controllerText(for: node) else {
-            return classText
-        }
-        return "\(classText) \(controllerText).view"
+        preferredDisplayClassName(for: node)
     }
 
+    static func controllerAnnotationText(for node: ViewScopeHierarchyNode) -> String? {
+        guard let controllerClassNameText = controllerClassNameText(for: node) else {
+            return nil
+        }
+        return "\(controllerClassNameText).view"
+    }
+
+    static func controllerClassNameText(for node: ViewScopeHierarchyNode) -> String? {
+        controllerText(for: node)
+    }
+
+    static func trailingText(for node: ViewScopeHierarchyNode) -> String? {
+        ivarText(for: node)
+    }
+
+    static func rowText(for node: ViewScopeHierarchyNode) -> String {
+        var parts = [classText(for: node)]
+        if let controllerAnnotationText = controllerAnnotationText(for: node) {
+            parts.append(controllerAnnotationText)
+        }
+        if let trailingText = trailingText(for: node) {
+            parts.append(trailingText)
+        }
+        return parts.joined(separator: " ")
+    }
+
+    /// 副标题：优先显示 specialTrace（如 "VCName.view"），其次显示 ivar 名称。
+    /// 与 Lookin 的 subtitle 逻辑一致：specialTrace > ivarName。
     static func secondaryText(for node: ViewScopeHierarchyNode) -> String? {
-        [ivarText(for: node)]
-            .compactMap { sanitized($0) }
-            .joined(separator: " • ")
-            .nonEmpty
+        // specialTrace 来自 ViewScopeSnapshotBuilder 的 subtitle 字段
+        if let subtitle = sanitized(node.subtitle), !subtitle.isEmpty {
+            return subtitle
+        }
+        return ivarText(for: node)
     }
 
     static func controllerText(for node: ViewScopeHierarchyNode) -> String? {
@@ -504,14 +550,14 @@ enum ViewTreeNodePresentation {
     }
 
     static func ivarText(for node: ViewScopeHierarchyNode) -> String? {
-        let traces = node.ivarTraces
+        let traces = preferredIvarTraces(for: node)
         if !traces.isEmpty {
-            let names = traces.map(\.ivarName)
+            let names = orderedUniqueIvarNames(from: traces.map(\.ivarName))
             let joined = names.joined(separator: ", ")
             return joined.isEmpty ? nil : joined
         }
 
-        guard let ivarName = sanitized(node.ivarName) else { return nil }
+        guard let ivarName = sanitizedIvarName(node.ivarName) else { return nil }
         return ivarName
     }
 
@@ -525,16 +571,31 @@ enum ViewTreeNodePresentation {
         if node.kind == .window {
             return .window
         }
+        // layer 节点：若有宿主视图，按宿主视图类名决定图标（和 Lookin 一致）；
+        // 否则用通用的 layer 图标。
+        if node.kind == .layer {
+            if node.hostViewClassName == nil {
+                return .layer
+            }
+            // Fall through to class-name-based icon resolution below.
+        }
         if sanitized(node.rootViewControllerClassName) != nil {
             return .viewController
         }
 
+        // classText 现在返回纯类名（对 layer 节点返回宿主视图类名）
         let className = classText(for: node)
+        if className.contains("NSTabView") {
+            return .tabView
+        }
         if className.contains("NSOutlineView") {
             return .outlineView
         }
         if className.contains("NSTableView") {
             return .tableView
+        }
+        if className.contains("NSCollectionView") {
+            return .collectionView
         }
         if className.contains("NSScrollView") || className.contains("NSClipView") {
             return .scrollView
@@ -559,6 +620,9 @@ enum ViewTreeNodePresentation {
         }
         if className.contains("NSImageView") {
             return .image
+        }
+        if className.contains("NSVisualEffectView") || className.contains("NSGlassEffectView") {
+            return .effectView
         }
         if className.contains("NSControl") {
             return .control
@@ -613,6 +677,7 @@ enum ViewTreeNodePresentation {
         var searchText = ""
         let parts = [
             node.title,
+            node.subtitle ?? "",
             node.className,
             classText(for: node),
             node.rootViewControllerClassName ?? "",
@@ -661,13 +726,121 @@ enum ViewTreeNodePresentation {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
+
+    private static func preferredDisplayClassName(for node: ViewScopeHierarchyNode) -> String {
+        if node.kind == .layer, let hostViewClassName = sanitized(node.hostViewClassName) {
+            return ViewScopeClassNameFormatter.displayName(for: hostViewClassName)
+        }
+        return ViewScopeClassNameFormatter.displayName(for: node.className)
+    }
+
+    private static func preferredTraceHostClassName(for node: ViewScopeHierarchyNode) -> String? {
+        let grouped = Dictionary(grouping: node.ivarTraces) { trace in
+            canonicalTraceHostClassName(from: trace.hostClassName) ?? ""
+        }
+        let groupedCandidates: [(candidate: String, traces: [ViewScopeIvarTrace])] = grouped.compactMap { candidate, traces in
+            guard candidate.isEmpty == false else {
+                return nil
+            }
+            return (candidate: candidate, traces: traces)
+        }
+
+        return groupedCandidates
+            .sorted { lhs, rhs in
+                let lhsPriority = traceHostClassPriority(lhs.candidate)
+                let rhsPriority = traceHostClassPriority(rhs.candidate)
+                if lhsPriority != rhsPriority {
+                    return lhsPriority < rhsPriority
+                }
+                if lhs.traces.count != rhs.traces.count {
+                    return lhs.traces.count > rhs.traces.count
+                }
+                return ViewScopeClassNameFormatter.displayName(for: lhs.candidate) <
+                    ViewScopeClassNameFormatter.displayName(for: rhs.candidate)
+            }
+            .first?
+            .candidate
+    }
+
+    private static func preferredIvarTraces(for node: ViewScopeHierarchyNode) -> [ViewScopeIvarTrace] {
+        guard node.kind == .layer, node.ivarTraces.isEmpty == false else {
+            return node.ivarTraces
+        }
+
+        let preferredHostClassName = sanitized(node.hostViewClassName) ?? preferredTraceHostClassName(for: node)
+        guard let preferredHostClassName else {
+            return node.ivarTraces
+        }
+
+        let preferredDisplayName = ViewScopeClassNameFormatter.displayName(for: preferredHostClassName)
+        let filtered = node.ivarTraces.filter { trace in
+            guard let traceHostClassName = canonicalTraceHostClassName(from: trace.hostClassName) else {
+                return false
+            }
+            return ViewScopeClassNameFormatter.displayName(for: traceHostClassName) == preferredDisplayName
+        }
+        return filtered.isEmpty ? node.ivarTraces : filtered
+    }
+
+    private static func orderedUniqueIvarNames(from names: [String]) -> [String] {
+        var result: [String] = []
+        var seen = Set<String>()
+        for name in names {
+            guard let sanitizedName = sanitizedIvarName(name) else { continue }
+            guard isUUIDLikeIvarName(sanitizedName) == false else { continue }
+            guard seen.insert(sanitizedName).inserted else { continue }
+            result.append(sanitizedName)
+        }
+        return result
+    }
+
+    private static func isUUIDLikeIvarName(_ name: String) -> Bool {
+        let stripped = String(name.drop(while: { $0 == "_" }))
+        guard stripped.count >= 16 else { return false }
+        return stripped.allSatisfy { $0.isHexDigit }
+    }
+
+    private static func sanitizedIvarName(_ value: String?) -> String? {
+        sanitized(value)
+    }
+
+    private static func canonicalTraceHostClassName(from value: String?) -> String? {
+        sanitized(value)?
+            .components(separatedBy: " : ")
+            .first
+    }
+
+    private static func traceHostClassPriority(_ className: String) -> Int {
+        let displayName = ViewScopeClassNameFormatter.displayName(for: className)
+        if displayName.localizedCaseInsensitiveContains("layer") {
+            return 2
+        }
+        if systemWrapperClassNames.contains(displayName) {
+            return 1
+        }
+        return 0
+    }
+
+    private static let systemWrapperClassNames: Set<String> = [
+        "_NSSplitViewItemViewWrapper",
+        "_NSSplitViewCollapsedInteractionsView",
+        "NSBlurryAlleywayView",
+        "NSThemeFrame",
+        "NSTitlebarContainerBlockingView",
+        "NSTitlebarView",
+        "_NSTitlebarDecorationView",
+        "_NSTitlebarContainerView",
+        "_NSToolbarFullScreenWindowContentView"
+    ]
 }
 
 enum ViewTreeLayoutMetrics {
-    static let rowHeight: CGFloat = 36
+    static let rowHeight: CGFloat = 28
     static let horizontalInset: CGFloat = 6
-    static let verticalInset: CGFloat = 4
+    static let verticalInset: CGFloat = 3
     static let trailingSpacing: CGFloat = 8
+    static let titleFont = NSFont.systemFont(ofSize: 12, weight: .medium)
+    static let trailingFont = NSFont.systemFont(ofSize: 10.5)
 }
 
 private struct ViewTreeHandlersButtonMetrics {
@@ -724,16 +897,16 @@ private final class ViewTreeHandlersButton: NSButton {
 }
 
 private final class ViewTreeNodeCellView: NSTableCellView {
-    weak var delegate: ViewTreeNodeCellViewDelegate?
     private let handlersButton = ViewTreeHandlersButton()
     private let iconView = NSImageView()
+    private let leadingLabelsStackView = NSStackView()
     private let titleLabel = NSTextField(labelWithString: "")
-    private let secondaryLabel = NSTextField(labelWithString: "")
-    private let labelsStackView = NSStackView()
-    private let visibilityButton = NSButton()
+    private let controllerLabel = NSTextField(labelWithString: "")
+    private let ivarLabel = NSTextField(labelWithString: "")
     private var handlersButtonWidthConstraint: Constraint?
     private var handlersButtonHeightConstraint: Constraint?
     private var nodeID: String?
+    private var node: ViewScopeHierarchyNode?
     private var eventHandlers: [ViewScopeEventHandler] = []
     private var handlersPopover: NSPopover?
     private var isEffectivelyHidden = false
@@ -761,30 +934,36 @@ private final class ViewTreeNodeCellView: NSTableCellView {
 
         iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
 
-        titleLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        titleLabel.font = ViewTreeLayoutMetrics.titleFont
         titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        titleLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        titleLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        titleLabel.cell?.usesSingleLineMode = true
 
-        secondaryLabel.font = NSFont.systemFont(ofSize: 10.5)
-        secondaryLabel.textColor = .secondaryLabelColor
-        secondaryLabel.lineBreakMode = .byTruncatingTail
-        secondaryLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        controllerLabel.font = ViewTreeLayoutMetrics.trailingFont
+        controllerLabel.lineBreakMode = .byTruncatingTail
+        controllerLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        controllerLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        controllerLabel.cell?.usesSingleLineMode = true
 
-        visibilityButton.bezelStyle = .inline
-        visibilityButton.imagePosition = .imageOnly
-        visibilityButton.target = self
-        visibilityButton.action = #selector(handleVisibilityButton(_:))
+        ivarLabel.font = ViewTreeLayoutMetrics.trailingFont
+        ivarLabel.lineBreakMode = .byTruncatingHead
+        ivarLabel.alignment = .right
+        ivarLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        ivarLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        ivarLabel.cell?.usesSingleLineMode = true
 
-        labelsStackView.orientation = .vertical
-        labelsStackView.alignment = .leading
-        labelsStackView.spacing = 1
-        labelsStackView.addArrangedSubview(titleLabel)
-        labelsStackView.addArrangedSubview(secondaryLabel)
+        leadingLabelsStackView.orientation = .horizontal
+        leadingLabelsStackView.alignment = .centerY
+        leadingLabelsStackView.spacing = 4
+        leadingLabelsStackView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        leadingLabelsStackView.addArrangedSubview(titleLabel)
+        leadingLabelsStackView.addArrangedSubview(controllerLabel)
 
         addSubview(handlersButton)
         addSubview(iconView)
-        addSubview(labelsStackView)
-        addSubview(visibilityButton)
+        addSubview(leadingLabelsStackView)
+        addSubview(ivarLabel)
 
         handlersButton.snp.makeConstraints { make in
             make.leading.equalToSuperview().offset(2)
@@ -797,17 +976,16 @@ private final class ViewTreeNodeCellView: NSTableCellView {
             make.centerY.equalToSuperview()
             make.width.height.equalTo(14)
         }
-        labelsStackView.snp.makeConstraints { make in
+        leadingLabelsStackView.snp.makeConstraints { make in
             make.leading.equalTo(iconView.snp.trailing).offset(6)
-            make.top.greaterThanOrEqualToSuperview().inset(ViewTreeLayoutMetrics.verticalInset)
-            make.bottom.lessThanOrEqualToSuperview().inset(ViewTreeLayoutMetrics.verticalInset)
+            make.top.greaterThanOrEqualToSuperview().inset(ViewTreeLayoutMetrics.verticalInset).priority(.low)
+            make.bottom.lessThanOrEqualToSuperview().inset(ViewTreeLayoutMetrics.verticalInset).priority(.low)
             make.centerY.equalToSuperview()
-            make.trailing.lessThanOrEqualTo(visibilityButton.snp.leading).offset(-ViewTreeLayoutMetrics.trailingSpacing)
         }
-        visibilityButton.snp.makeConstraints { make in
-            make.trailing.equalToSuperview().inset(4)
+        ivarLabel.snp.makeConstraints { make in
+            make.leading.greaterThanOrEqualTo(leadingLabelsStackView.snp.trailing).offset(8)
             make.centerY.equalToSuperview()
-            make.width.height.equalTo(18)
+            make.trailing.lessThanOrEqualToSuperview().inset(ViewTreeLayoutMetrics.trailingSpacing)
         }
 
         updateHandlersButtonAppearance()
@@ -819,28 +997,24 @@ private final class ViewTreeNodeCellView: NSTableCellView {
     }
 
     func configure(node: ViewScopeHierarchyNode, isEffectivelyHidden: Bool) {
+        self.node = node
         nodeID = node.id
         self.isEffectivelyHidden = isEffectivelyHidden
         eventHandlers = ViewTreeNodePresentation.eventHandlers(for: node)
-        titleLabel.stringValue = ViewTreeNodePresentation.classText(for: node)
         iconView.image = ViewTreeNodePresentation.iconImage(for: node)
-        let secondaryText = ViewTreeNodePresentation.secondaryText(for: node)
-        secondaryLabel.isHidden = secondaryText == nil
-        secondaryLabel.stringValue = secondaryText ?? ""
-        visibilityButton.image = NSImage(systemSymbolName: node.isHidden ? "eye.slash" : "eye", accessibilityDescription: nil)
-        visibilityButton.toolTip = node.isHidden ? L10n.hierarchyMenuShowView : L10n.hierarchyMenuHideView
-        visibilityButton.isEnabled = node.kind == .view
+        titleLabel.stringValue = ViewTreeNodePresentation.classText(for: node)
+        let controllerAnnotationText = ViewTreeNodePresentation.controllerAnnotationText(for: node)
+        controllerLabel.stringValue = controllerAnnotationText ?? ""
+        controllerLabel.isHidden = controllerAnnotationText == nil
+        let trailingText = ViewTreeNodePresentation.trailingText(for: node)
+        ivarLabel.stringValue = trailingText ?? ""
+        ivarLabel.isHidden = trailingText == nil
         updateHandlersButtonMetrics(animated: false)
         updateContentAppearance()
         if eventHandlers.isEmpty {
             handlersPopover?.close()
             handlersPopover = nil
         }
-    }
-
-    @objc private func handleVisibilityButton(_ sender: Any?) {
-        guard let nodeID else { return }
-        delegate?.viewTreeNodeCellViewDidToggleVisibility(self, nodeID: nodeID)
     }
 
     @objc private func handleHandlersButton(_ sender: Any?) {
@@ -920,9 +1094,9 @@ private final class ViewTreeNodeCellView: NSTableCellView {
         }
 
         titleLabel.textColor = titleColor
-        secondaryLabel.textColor = secondaryColor
+        controllerLabel.textColor = secondaryColor
+        ivarLabel.textColor = secondaryColor
         iconView.contentTintColor = accessoryColor
-        visibilityButton.contentTintColor = accessoryColor
         updateHandlersButtonAppearance()
     }
 }
@@ -1139,12 +1313,6 @@ private final class ViewTreeEventHandlerItemView: NSView {
 private extension String {
     var nonEmpty: String? {
         isEmpty ? nil : self
-    }
-}
-
-extension ViewTreePanelController: ViewTreeNodeCellViewDelegate {
-    fileprivate func viewTreeNodeCellViewDidToggleVisibility(_ cell: ViewTreeNodeCellView, nodeID: String) {
-        Task { await store.toggleVisibility(for: nodeID) }
     }
 }
 

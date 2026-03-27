@@ -14,6 +14,7 @@ final class WorkspaceToolbarViewController: NSViewController {
     private var cancellables = Set<AnyCancellable>()
     private var liveHosts: [ViewScopeHostAnnouncement] = []
     private var isRebuildingHostMenu = false
+    private var pendingHostIdentifier: String?
 
     private let hostPopUpButton = NSPopUpButton(frame: .zero, pullsDown: false)
     private let refreshButton = NSButton(title: "", target: nil, action: nil)
@@ -107,6 +108,10 @@ final class WorkspaceToolbarViewController: NSViewController {
         Publishers.CombineLatest3(store.$connectionState, store.$errorMessage, AppLocalization.shared.$language)
             .receive(on: RunLoop.main)
             .sink { [weak self] _, _, _ in
+                self?.pendingHostIdentifier = WorkspaceToolbarHostSelectionState.syncedPendingHostIdentifier(
+                    existingPendingHostIdentifier: self?.pendingHostIdentifier,
+                    connectionState: self?.store.connectionState ?? .idle
+                )
                 self?.applyLocalization()
                 self?.rebuildHostMenu()
                 self?.updateConnectionState()
@@ -126,6 +131,10 @@ final class WorkspaceToolbarViewController: NSViewController {
 
         hostPopUpButton.removeAllItems()
         let activeHost = store.connectionState.activeHost
+        let selectedHostIdentifier = WorkspaceToolbarHostSelectionState.menuSelectedHostIdentifier(
+            connectionState: store.connectionState,
+            pendingHostIdentifier: pendingHostIdentifier
+        )
 
         if liveHosts.isEmpty {
             let placeholder = activeHost?.displayName ?? store.connectionState.importedCaptureName ?? L10n.noHostsOnlineTitle
@@ -147,8 +156,8 @@ final class WorkspaceToolbarViewController: NSViewController {
             hostPopUpButton.lastItem?.representedObject = host.identifier
         }
 
-        if let activeHost,
-           let index = liveHosts.firstIndex(where: { $0.identifier == activeHost.identifier }) {
+        if let selectedHostIdentifier,
+           let index = hostPopUpButton.itemArray.firstIndex(where: { ($0.representedObject as? String) == selectedHostIdentifier }) {
             hostPopUpButton.selectItem(at: index)
         } else {
             hostPopUpButton.selectItem(at: 0)
@@ -202,6 +211,7 @@ final class WorkspaceToolbarViewController: NSViewController {
             return
         }
 
+        pendingHostIdentifier = identifier
         Task { await store.connect(to: host) }
     }
 
@@ -211,5 +221,32 @@ final class WorkspaceToolbarViewController: NSViewController {
 
     @objc private func disconnectHost(_ sender: Any?) {
         store.disconnect()
+    }
+}
+
+enum WorkspaceToolbarHostSelectionState {
+    static func menuSelectedHostIdentifier(
+        connectionState: WorkspaceConnectionState,
+        pendingHostIdentifier: String?
+    ) -> String? {
+        connectionState.activeHost?.identifier ?? pendingHostIdentifier
+    }
+
+    static func syncedPendingHostIdentifier(
+        existingPendingHostIdentifier: String?,
+        connectionState: WorkspaceConnectionState
+    ) -> String? {
+        if let activeHost = connectionState.activeHost {
+            return activeHost.identifier
+        }
+
+        switch connectionState {
+        case .idle, .imported, .failed:
+            return nil
+        case .connecting:
+            return existingPendingHostIdentifier
+        case .connected:
+            return existingPendingHostIdentifier
+        }
     }
 }

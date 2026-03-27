@@ -51,12 +51,63 @@ struct ViewScopeTests {
         #expect(ViewTreeNodePresentation.classText(for: node).contains("_NSCoreHostingView"))
         #expect(ViewTreeNodePresentation.classText(for: node).contains("AppKitPopUpButton"))
         #expect(ViewTreeNodePresentation.classText(for: node) != rawClassName)
+        #expect(ViewTreeNodePresentation.controllerClassNameText(for: node) == "SettingsViewController")
         #expect(ViewTreeNodePresentation.ivarText(for: node) == "confirmButton, primaryButton")
-        #expect(ViewTreeNodePresentation.classText(for: node).contains("SettingsViewController.view"))
-        #expect(ViewTreeNodePresentation.secondaryText(for: node)?.contains("confirmButton") == true)
+        #expect(ViewTreeNodePresentation.secondaryText(for: node) == "confirmButton, primaryButton")
     }
 
-    @Test func treePresentationAppendsControllerViewSuffixOnlyInTitle() async throws {
+    @Test func treeRowTextUsesClassNameWithTrailingIvarOnly() async throws {
+        let node = ViewScopeHierarchyNode(
+            id: "node-inline-text",
+            parentID: nil,
+            kind: .view,
+            className: "NSButton",
+            title: "Confirm",
+            subtitle: "Legacy Subtitle",
+            frame: .zero,
+            bounds: .zero,
+            childIDs: [],
+            isHidden: false,
+            alphaValue: 1,
+            wantsLayer: false,
+            isFlipped: true,
+            clippingEnabled: false,
+            depth: 1,
+            ivarTraces: [ViewScopeIvarTrace(hostClassName: "HostView", ivarName: "confirmButton")]
+        )
+
+        #expect(ViewTreeNodePresentation.trailingText(for: node) == "confirmButton")
+        #expect(ViewTreeNodePresentation.rowText(for: node) == "NSButton confirmButton")
+    }
+
+    @Test func treeRowTextIncludesControllerAnnotationBeforeTrailingIvar() async throws {
+        let node = ViewScopeHierarchyNode(
+            id: "node-inline-text-fallback",
+            parentID: nil,
+            kind: .view,
+            className: "NSView",
+            title: "Root",
+            subtitle: "RootViewController.view",
+            frame: .zero,
+            bounds: .zero,
+            childIDs: [],
+            isHidden: false,
+            alphaValue: 1,
+            wantsLayer: true,
+            isFlipped: true,
+            clippingEnabled: false,
+            depth: 1,
+            ivarName: "contentView",
+            rootViewControllerClassName: "Demo.RootViewController"
+        )
+
+        #expect(ViewTreeNodePresentation.classText(for: node) == "NSView")
+        #expect(ViewTreeNodePresentation.controllerAnnotationText(for: node) == "RootViewController.view")
+        #expect(ViewTreeNodePresentation.trailingText(for: node) == "contentView")
+        #expect(ViewTreeNodePresentation.rowText(for: node) == "NSView RootViewController.view contentView")
+    }
+
+    @Test func treePresentationShowsClassWithControllerAnnotationAndNoSecondaryTextWhenNoIvars() async throws {
         let node = ViewScopeHierarchyNode(
             id: "node-controller-root",
             parentID: nil,
@@ -76,8 +127,93 @@ struct ViewScopeTests {
             rootViewControllerClassName: "Demo.RootViewController"
         )
 
-        #expect(ViewTreeNodePresentation.classText(for: node) == "NSView RootViewController.view")
+        #expect(ViewTreeNodePresentation.classText(for: node) == "NSView")
+        #expect(ViewTreeNodePresentation.controllerAnnotationText(for: node) == "RootViewController.view")
         #expect(ViewTreeNodePresentation.secondaryText(for: node) == nil)
+    }
+
+    @Test func treePresentationUsesLayerIconAndShowsHostViewClassName() async throws {
+        let node = ViewScopeHierarchyNode(
+            id: "node-layer",
+            parentID: nil,
+            kind: .layer,
+            className: "CAShapeLayer",
+            hostViewClassName: "Demo.ShapeBackedView",
+            title: "ShapeBackedView",
+            subtitle: "shapeLayerHost",
+            frame: .zero,
+            bounds: .zero,
+            childIDs: [],
+            isHidden: false,
+            alphaValue: 1,
+            wantsLayer: true,
+            isFlipped: true,
+            clippingEnabled: false,
+            depth: 1,
+            ivarTraces: [ViewScopeIvarTrace(hostClassName: "FixtureViewController", ivarName: "shapeLayerHost")]
+        )
+
+        #expect(ViewTreeNodePresentation.iconKind(for: node) == .view)
+        #expect(ViewTreeNodePresentation.classText(for: node) == "ShapeBackedView")
+        #expect(ViewTreeNodePresentation.secondaryText(for: node) == "shapeLayerHost")
+    }
+
+    @Test func treePresentationShowsOwnClassNameForUnhostedLayerAndDeduplicatesIvarNames() async throws {
+        let node = ViewScopeHierarchyNode(
+            id: "node-layer-fallback",
+            parentID: nil,
+            kind: .layer,
+            className: "NSViewBackingLayer",
+            title: "NSViewBackingLayer",
+            subtitle: nil,
+            frame: .zero,
+            bounds: .zero,
+            childIDs: [],
+            isHidden: false,
+            alphaValue: 1,
+            wantsLayer: true,
+            isFlipped: true,
+            clippingEnabled: false,
+            depth: 1,
+            ivarTraces: [
+                ViewScopeIvarTrace(hostClassName: "NSVisualEffectView", ivarName: "_observedVisualEffectView"),
+                ViewScopeIvarTrace(hostClassName: "NSVisualEffectView", ivarName: "_observedVisualEffectView")
+            ]
+        )
+
+        #expect(ViewTreeNodePresentation.classText(for: node) == "NSViewBackingLayer")
+        #expect(ViewTreeNodePresentation.ivarText(for: node) == "_observedVisualEffectView")
+        #expect(ViewTreeNodePresentation.secondaryText(for: node) == "_observedVisualEffectView")
+    }
+
+    @Test func treePresentationHidesGenericBackdropLayerClassForHostedAppKitLayer() async throws {
+        let node = ViewScopeHierarchyNode(
+            id: "node-backdrop",
+            parentID: nil,
+            kind: .layer,
+            className: "CABackdropLayer",
+            hostViewClassName: "BackdropView",
+            title: "BackdropView",
+            subtitle: nil,
+            frame: .zero,
+            bounds: .zero,
+            childIDs: [],
+            isHidden: false,
+            alphaValue: 1,
+            wantsLayer: true,
+            isFlipped: true,
+            clippingEnabled: false,
+            depth: 1,
+            ivarTraces: [
+                ViewScopeIvarTrace(hostClassName: "BackdropView", ivarName: "backgroundCapture"),
+                ViewScopeIvarTrace(hostClassName: "BackdropView", ivarName: "_windowBackdropCaptureView")
+            ]
+        )
+
+        #expect(ViewTreeNodePresentation.classText(for: node) == "BackdropView")
+        #expect(ViewTreeNodePresentation.ivarText(for: node) == "backgroundCapture, _windowBackdropCaptureView")
+        #expect(ViewTreeNodePresentation.secondaryText(for: node) == "backgroundCapture, _windowBackdropCaptureView")
+        #expect(ViewTreeNodePresentation.secondaryText(for: node)?.contains("CABackdropLayer") == false)
     }
 
     @Test func treePresentationRecognizesSystemWrapperViews() async throws {
@@ -132,10 +268,46 @@ struct ViewScopeTests {
             clippingEnabled: false,
             depth: 1
         )
+        let clipViewNode = ViewScopeHierarchyNode(
+            id: "node-clip-view",
+            parentID: nil,
+            kind: .view,
+            className: "NSClipView",
+            title: "Clip View",
+            subtitle: nil,
+            frame: .zero,
+            bounds: .zero,
+            childIDs: [],
+            isHidden: false,
+            alphaValue: 1,
+            wantsLayer: false,
+            isFlipped: true,
+            clippingEnabled: false,
+            depth: 1
+        )
+        let effectViewNode = ViewScopeHierarchyNode(
+            id: "node-effect-view",
+            parentID: nil,
+            kind: .view,
+            className: "NSVisualEffectView",
+            title: "Effect View",
+            subtitle: nil,
+            frame: .zero,
+            bounds: .zero,
+            childIDs: [],
+            isHidden: false,
+            alphaValue: 1,
+            wantsLayer: true,
+            isFlipped: true,
+            clippingEnabled: false,
+            depth: 1
+        )
 
         #expect(ViewTreeNodePresentation.isSystemWrapper(node: wrapperNode))
         #expect(ViewTreeNodePresentation.isSystemWrapper(node: titlebarWrapperNode))
         #expect(ViewTreeNodePresentation.isSystemWrapper(node: regularNode) == false)
+        #expect(ViewTreeNodePresentation.isSystemWrapper(node: clipViewNode) == false)
+        #expect(ViewTreeNodePresentation.isSystemWrapper(node: effectViewNode) == false)
     }
 
     @Test func treeSearchTextIncludesIvarName() async throws {
@@ -388,11 +560,65 @@ struct ViewScopeTests {
             clippingEnabled: false,
             depth: 1
         )
+        let tabViewNode = ViewScopeHierarchyNode(
+            id: "tabs",
+            parentID: "window",
+            kind: .view,
+            className: "NSTabView",
+            title: "Tabs",
+            subtitle: nil,
+            frame: .zero,
+            bounds: .zero,
+            childIDs: [],
+            isHidden: false,
+            alphaValue: 1,
+            wantsLayer: true,
+            isFlipped: true,
+            clippingEnabled: false,
+            depth: 1
+        )
+        let collectionNode = ViewScopeHierarchyNode(
+            id: "collection",
+            parentID: "window",
+            kind: .view,
+            className: "NSCollectionView",
+            title: "Collection",
+            subtitle: nil,
+            frame: .zero,
+            bounds: .zero,
+            childIDs: [],
+            isHidden: false,
+            alphaValue: 1,
+            wantsLayer: true,
+            isFlipped: true,
+            clippingEnabled: false,
+            depth: 1
+        )
+        let effectNode = ViewScopeHierarchyNode(
+            id: "effect",
+            parentID: "window",
+            kind: .view,
+            className: "NSVisualEffectView",
+            title: "Effect",
+            subtitle: nil,
+            frame: .zero,
+            bounds: .zero,
+            childIDs: [],
+            isHidden: false,
+            alphaValue: 1,
+            wantsLayer: true,
+            isFlipped: true,
+            clippingEnabled: false,
+            depth: 1
+        )
 
         #expect(ViewTreeNodePresentation.iconKind(for: windowNode) == .window)
         #expect(ViewTreeNodePresentation.iconKind(for: controllerRootNode) == .viewController)
         #expect(ViewTreeNodePresentation.iconKind(for: buttonNode) == .button)
         #expect(ViewTreeNodePresentation.iconKind(for: labelNode) == .textField)
+        #expect(ViewTreeNodePresentation.iconKind(for: tabViewNode) == .tabView)
+        #expect(ViewTreeNodePresentation.iconKind(for: collectionNode) == .collectionView)
+        #expect(ViewTreeNodePresentation.iconKind(for: effectNode) == .effectView)
     }
 
     @Test func sampleFixtureProvidesPreviewBitmapAndConsoleTargets() async throws {
@@ -405,7 +631,9 @@ struct ViewScopeTests {
         #expect(detail.consoleTargets.isEmpty == false)
         #expect(detail.consoleTargets.first?.reference.captureID == capture.captureID)
         #expect(contentRoot.rootViewControllerClassName == "SampleNotes.ContentViewController")
-        #expect(ViewTreeNodePresentation.classText(for: contentRoot) == "ContentPaneView ContentViewController.view")
+        #expect(ViewTreeNodePresentation.classText(for: contentRoot) == "ContentPaneView")
+        #expect(ViewTreeNodePresentation.controllerAnnotationText(for: contentRoot) == "ContentViewController.view")
+        #expect(ViewTreeNodePresentation.secondaryText(for: contentRoot) == "Chart workspace")
     }
 
     @Test func liveCapturePreviewImageResolverFallsBackToDetailWhenCaptureOmitsPreviewBitmap() async throws {
@@ -2144,7 +2372,7 @@ struct ViewScopeTests {
             for: "_TtC6AppKitP33_72EBFCF981BE77E1C6F26FD717D0893922NSTextFieldSimpleLabel"
         )
 
-        #expect(formatted == "AppKit.NSTextFieldSimpleLabel _72EBFCF981BE77E1C6F26FD717D08939")
+        #expect(formatted == "NSTextFieldSimpleLabel _72EBFCF981BE77E1C6F26FD717D08939")
     }
 
     @Test func releaseVersionComparison() async throws {
@@ -2471,10 +2699,10 @@ struct ViewScopeTests {
     }
 
     @Test func integrationGuideEntriesUseCurrentReleaseVersion() async throws {
-        let entries = IntegrationGuideContent.entries(releaseVersion: "1.2.1")
+        let entries = IntegrationGuideContent.entries(releaseVersion: "1.2.2")
 
         #expect(entries.count == 3)
-        #expect(entries.allSatisfy { $0.snippet.contains("1.2.1") || $0.snippet.contains("~> 1.2") })
+        #expect(entries.allSatisfy { $0.snippet.contains("1.2.2") || $0.snippet.contains("~> 1.2") })
     }
 
     @Test func treePanelShowsEmptyStateWhenDisconnected() async throws {
@@ -2518,6 +2746,42 @@ struct ViewScopeTests {
         #expect(hostPopUpButton.numberOfItems == 2)
     }
 
+    @Test func toolbarSelectionStateKeepsPendingHostIdentifierWhileConnecting() async throws {
+        let host = ViewScopeHostAnnouncement(
+            identifier: "host-toolbar",
+            authToken: "token",
+            displayName: "Toolbar Host",
+            bundleIdentifier: "cn.vanjay.toolbar-host",
+            version: "1.0",
+            build: "1",
+            processIdentifier: 42,
+            port: 7001,
+            updatedAt: Date(),
+            supportsHighlighting: true,
+            protocolVersion: viewScopeCurrentProtocolVersion,
+            runtimeVersion: viewScopeServerRuntimeVersion
+        )
+
+        #expect(
+            WorkspaceToolbarHostSelectionState.menuSelectedHostIdentifier(
+                connectionState: .connecting(host.displayName),
+                pendingHostIdentifier: host.identifier
+            ) == host.identifier
+        )
+        #expect(
+            WorkspaceToolbarHostSelectionState.syncedPendingHostIdentifier(
+                existingPendingHostIdentifier: host.identifier,
+                connectionState: .failed("boom")
+            ) == nil
+        )
+        #expect(
+            WorkspaceToolbarHostSelectionState.syncedPendingHostIdentifier(
+                existingPendingHostIdentifier: nil,
+                connectionState: .connected(host)
+            ) == host.identifier
+        )
+    }
+
     @Test func integrationGuideShowsAllPackagesVerticallyWithBottomHelpButton() async throws {
         let guideView = IntegrationGuideView(frame: NSRect(x: 0, y: 0, width: 720, height: 480))
         guideView.layoutSubtreeIfNeeded()
@@ -2529,7 +2793,7 @@ struct ViewScopeTests {
             L10n.integrationCarthage
         ])
         #expect(guideView.visibleSnippets.count == 3)
-        #expect(guideView.visibleSnippets.joined(separator: "\n").contains("1.2.1"))
+        #expect(guideView.visibleSnippets.joined(separator: "\n").contains("1.2.2"))
         #expect(guideView.helpButtonTitle == L10n.menuGitHub)
         #expect(guideView.helpButtonPlacement == .bottom)
     }

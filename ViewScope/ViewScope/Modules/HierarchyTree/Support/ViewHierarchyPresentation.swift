@@ -9,8 +9,21 @@ import ViewScopeServer
 /// 否则展开链、挖空区域和图层层级会和树面板脱节。
 enum ViewHierarchyPresentation {
     static func isSystemWrapper(_ node: ViewScopeHierarchyNode) -> Bool {
-        let className = ViewScopeClassNameFormatter.displayName(for: node.className)
-        let exactMatches = [
+        let candidateClassName: String
+        switch node.kind {
+        case .view:
+            candidateClassName = node.className
+        case .layer:
+            guard let hostViewClassName = node.hostViewClassName else {
+                return false
+            }
+            candidateClassName = hostViewClassName
+        case .window:
+            return false
+        }
+
+        let className = ViewScopeClassNameFormatter.displayName(for: candidateClassName)
+        let exactMatches: Set<String> = [
             "_NSSplitViewItemViewWrapper",
             "_NSSplitViewCollapsedInteractionsView",
             "NSBlurryAlleywayView",
@@ -21,24 +34,7 @@ enum ViewHierarchyPresentation {
             "_NSTitlebarContainerView",
             "_NSToolbarFullScreenWindowContentView"
         ]
-        if exactMatches.contains(where: { className.contains($0) }) {
-            return true
-        }
-
-        let wrapperKeywords = [
-            "Wrapper",
-            "Collapsed",
-            "Titlebar",
-            "Toolbar",
-            "ThemeFrame",
-            "Decoration",
-            "Auxiliary",
-            "Blocking",
-            "Overlay",
-            "FullScreen"
-        ]
-        let looksSystemOwned = className.hasPrefix("_NS") || className.hasPrefix("NS")
-        return looksSystemOwned && wrapperKeywords.contains(where: { className.contains($0) })
+        return exactMatches.contains(className)
     }
 
     static func presentedRootNodeIDs(
