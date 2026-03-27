@@ -8,7 +8,7 @@ struct IntegrationGuideContent {
         let snippet: String
     }
 
-    static let currentReleaseVersion = "1.2.1"
+    static let currentReleaseVersion = "1.2.2"
 
     static func entries(releaseVersion: String) -> [Entry] {
         let minorVersion = releaseVersion
