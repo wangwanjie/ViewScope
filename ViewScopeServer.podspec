@@ -7,7 +7,7 @@ Pod::Spec.new do |spec|
   spec.license = { :type => 'MIT', :file => 'LICENSE' }
   spec.author = { 'VanJay' => 'vanjay.dev@gmail.com' }
   spec.source = { :git => 'https://github.com/wangwanjie/ViewScope.git', :tag => "v#{spec.version}" }
-  spec.osx.deployment_target = '11.0'
+  spec.osx.deployment_target = '12.0'
   spec.swift_version = '6.0'
   spec.requires_arc = true
   spec.source_files = 'ViewScopeServer/Sources/ViewScopeServer/**/*.swift', 'ViewScopeServer/Sources/ViewScopeServerBootstrap/*.{h,m}'
