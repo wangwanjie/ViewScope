@@ -113,6 +113,8 @@ struct WorkspaceStoreConnectionLifecycleTests {
             captureResponses: [.resolved(.success(makeCapture(nodeID: "old-node", host: hostA)))],
             nodeDetailResponses: [
                 "old-node": [
+                    // 连接后首次抓取会自动选中根节点并拉取一次 detail，测试里显式选中再拉取一次
+                    .resolved(.success(makeDetail(nodeID: "old-node", host: hostA))),
                     .resolved(.success(makeDetail(nodeID: "old-node", host: hostA))),
                     .pending
                 ]
@@ -132,7 +134,7 @@ struct WorkspaceStoreConnectionLifecycleTests {
         await store.selectNode(withID: "old-node", highlightInHost: false)
 
         let staleDetailTask = Task { await store.selectNode(withID: "old-node", highlightInHost: false) }
-        try await waitUntil { await sessionA.detailRequestCount(for: "old-node") == 2 }
+        try await waitUntil { await sessionA.detailRequestCount(for: "old-node") == 3 }
 
         let switchTask = Task { await store.connect(to: hostB) }
         try await waitUntil { await sessionB.captureRequestCount == 1 }

@@ -50,7 +50,9 @@ enum ViewHierarchyPresentation {
         nodes: [String: ViewScopeHierarchyNode],
         showsSystemWrappers: Bool
     ) -> [String] {
-        guard let node = nodes[nodeID] else { return [] }
+        guard let node = nodes[nodeID] else {
+            return []
+        }
         return flatten(nodeIDs: node.childIDs, nodes: nodes, showsSystemWrappers: showsSystemWrappers)
     }
 
@@ -83,6 +85,9 @@ enum ViewHierarchyPresentation {
     /// 这里的“可见”包含两层含义：
     /// 1. 节点没有被 wrapper flatten 掉。
     /// 2. 它到根路径上的 presented 祖先都处于展开状态。
+    ///
+    /// 隐藏（isHidden）的节点在层级树里仍然显示（半透明），因此也算“可见”：
+    /// 否则选中隐藏节点后任意展开/折叠、或“隐藏视图”后刷新，选中都会被错误地清除或跳到父节点。
     static func visiblePresentedNodeIDs(
         rootNodeIDs: [String],
         nodes: [String: ViewScopeHierarchyNode],
@@ -97,14 +102,16 @@ enum ViewHierarchyPresentation {
         var result = Set<String>()
 
         func visit(nodeID: String, expandsAutomatically: Bool) {
-            guard let node = nodes[nodeID], node.isHidden == false else {
+            guard nodes[nodeID] != nil else {
                 return
             }
 
             result.insert(nodeID)
 
             let shouldExpand = expandsAutomatically || expandedNodeIDs.contains(nodeID)
-            guard shouldExpand else { return }
+            guard shouldExpand else {
+                return
+            }
 
             for childNodeID in presentedChildNodeIDs(
                 of: nodeID,
@@ -131,7 +138,9 @@ enum ViewHierarchyPresentation {
         result.reserveCapacity(nodeIDs.count)
 
         for nodeID in nodeIDs {
-            guard let node = nodes[nodeID] else { continue }
+            guard let node = nodes[nodeID] else {
+                continue
+            }
             if showsSystemWrappers || isSystemWrapper(node) == false {
                 result.append(nodeID)
             } else {

@@ -27,8 +27,10 @@ final class StatusItemController: NSObject {
 
     private func bindStore() {
         Publishers.CombineLatest4(store.$discoveredHosts, store.$connectionState, store.settings.$showConnectedCountInStatusBar, store.settings.$autoRefreshEnabled)
+            .map { _ in () }
+            .merge(with: store.settings.$autoHighlightSelection.map { _ in () })
             .receive(on: RunLoop.main)
-            .sink { [weak self] _, _, _, _ in
+            .sink { [weak self] _ in
                 self?.rebuildMenu()
             }
             .store(in: &cancellables)
@@ -45,6 +47,8 @@ final class StatusItemController: NSObject {
         statusItem.button?.title = statusTitle
 
         let menu = NSMenu()
+        // 手动控制可用状态：NSMenu 默认会根据 target/action 自动启用，导致 isEnabled 被忽略
+        menu.autoenablesItems = false
         let summary = NSMenuItem(title: statusSummary, action: nil, keyEquivalent: "")
         summary.isEnabled = false
         menu.addItem(summary)
@@ -56,7 +60,7 @@ final class StatusItemController: NSObject {
 
         let refreshItem = NSMenuItem(title: L10n.statusRefresh, action: #selector(refreshCapture), keyEquivalent: "")
         refreshItem.target = self
-        refreshItem.isEnabled = store.capture != nil
+        refreshItem.isEnabled = store.canRefreshCapture
         menu.addItem(refreshItem)
 
         let autoRefreshItem = NSMenuItem(title: L10n.statusAutoRefresh, action: #selector(toggleAutoRefresh), keyEquivalent: "")
@@ -74,11 +78,21 @@ final class StatusItemController: NSObject {
             let header = NSMenuItem(title: L10n.liveHosts, action: nil, keyEquivalent: "")
             header.isEnabled = false
             menu.addItem(header)
-            for host in store.discoveredHosts.prefix(5) {
-                let item = NSMenuItem(title: host.displayName, action: #selector(connectToHost(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = host.identifier
-                menu.addItem(item)
+            // 按设备分组显示，最多 8 个宿主
+            var remaining = 8
+            for group in WorkspaceHostPresentation.groupedByDevice(store.discoveredHosts) where remaining > 0 {
+                let groupHeader = NSMenuItem(title: group.title, action: nil, keyEquivalent: "")
+                groupHeader.isEnabled = false
+                menu.addItem(groupHeader)
+                for host in group.hosts.prefix(remaining) {
+                    let item = NSMenuItem(title: WorkspaceHostPresentation.hostTitle(of: host), action: #selector(connectToHost(_:)), keyEquivalent: "")
+                    item.target = self
+                    item.representedObject = host.identifier
+                    item.indentationLevel = 1
+                    item.state = store.connectionState.activeHost?.identifier == host.identifier ? .on : .off
+                    menu.addItem(item)
+                    remaining -= 1
+                }
             }
         }
 
@@ -117,6 +131,8 @@ final class StatusItemController: NSObject {
             return L10n.loadedCaptureFile(name)
         case .failed(let message):
             return message
+        case .lost:
+            return L10n.connectedHostDisappeared
         }
     }
 
@@ -125,7 +141,9 @@ final class StatusItemController: NSObject {
     }
 
     @objc private func refreshCapture() {
-        Task { await store.refreshCapture(forceReloadSelectionDetail: true, clearingVisibleState: true) }
+        Task {
+            await store.refreshCapture(forceReloadSelectionDetail: true, clearingVisibleState: true)
+        }
     }
 
     @objc private func toggleAutoRefresh() {
@@ -143,7 +161,9 @@ final class StatusItemController: NSObject {
               let host = store.discoveredHosts.first(where: { $0.identifier == identifier }) else {
             return
         }
-        Task { await store.connect(to: host) }
+        Task {
+            await self.store.connect(to: host)
+        }
         openMainWindowHandler()
     }
 

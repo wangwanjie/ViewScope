@@ -19,6 +19,9 @@ final class WorkspaceToolbarViewController: NSViewController {
     private let hostPopUpButton = NSPopUpButton(frame: .zero, pullsDown: false)
     private let refreshButton = NSButton(title: "", target: nil, action: nil)
     private let disconnectButton = NSButton(title: "", target: nil, action: nil)
+    private let modificationLogButton = NSButton(title: "", target: nil, action: nil)
+    private let captureDiffButton = NSButton(title: "", target: nil, action: nil)
+    private let inspectorToggleButton = NSButton(title: "", target: nil, action: nil)
     private let connectionBadge = CapsuleBadgeView(fontSize: 10, horizontalInset: 8, verticalInset: 3, minimumHeight: 20)
     private let statusLabel = NSTextField(labelWithString: "")
 
@@ -66,6 +69,11 @@ final class WorkspaceToolbarViewController: NSViewController {
         disconnectButton.target = self
         disconnectButton.action = #selector(disconnectHost(_:))
 
+        configureIconButton(modificationLogButton, symbolName: "list.bullet.rectangle", action: #selector(showModificationLog(_:)))
+        configureIconButton(captureDiffButton, symbolName: "arrow.left.arrow.right.square", action: #selector(showCaptureDiff(_:)))
+        configureIconButton(inspectorToggleButton, symbolName: "sidebar.right", action: #selector(toggleInspector(_:)))
+        inspectorToggleButton.setButtonType(.pushOnPushOff)
+
         statusLabel.lineBreakMode = .byTruncatingTail
         statusLabel.textColor = .secondaryLabelColor
 
@@ -74,9 +82,16 @@ final class WorkspaceToolbarViewController: NSViewController {
         controls.alignment = .centerY
         controls.spacing = 8
 
+        let toolControls = NSStackView(views: [modificationLogButton, captureDiffButton, inspectorToggleButton])
+        toolControls.orientation = .horizontal
+        toolControls.alignment = .centerY
+        toolControls.spacing = 6
+        toolControls.setContentCompressionResistancePriority(.required, for: .horizontal)
+
         view.addSubview(controls)
         view.addSubview(connectionBadge)
         view.addSubview(statusLabel)
+        view.addSubview(toolControls)
 
         controls.snp.makeConstraints { make in
             make.leading.equalToSuperview().offset(Layout.leadingInset)
@@ -91,6 +106,11 @@ final class WorkspaceToolbarViewController: NSViewController {
         }
         statusLabel.snp.makeConstraints { make in
             make.leading.equalTo(connectionBadge.snp.trailing).offset(10)
+            make.trailing.lessThanOrEqualTo(toolControls.snp.leading).offset(-10)
+            make.centerY.equalToSuperview()
+        }
+        statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        toolControls.snp.makeConstraints { make in
             make.trailing.equalToSuperview().inset(Layout.trailingInset)
             make.centerY.equalToSuperview()
         }
@@ -102,6 +122,28 @@ final class WorkspaceToolbarViewController: NSViewController {
             .sink { [weak self] hosts in
                 self?.liveHosts = hosts
                 self?.rebuildHostMenu()
+            }
+            .store(in: &cancellables)
+
+        Publishers.CombineLatest(store.$recentHosts, store.$connectedDevices)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _, _ in
+                self?.rebuildHostMenu()
+            }
+            .store(in: &cancellables)
+
+        store.settings.$showsInspector
+            .receive(on: RunLoop.main)
+            .sink { [weak self] showsInspector in
+                self?.inspectorToggleButton.state = showsInspector ? .on : .off
+                self?.inspectorToggleButton.toolTip = showsInspector ? L10n.hideInspector : L10n.showInspector
+            }
+            .store(in: &cancellables)
+
+        store.$captureInsight
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.updateConnectionState()
             }
             .store(in: &cancellables)
 
@@ -121,26 +163,44 @@ final class WorkspaceToolbarViewController: NSViewController {
 
     private func applyLocalization() {
         refreshButton.title = L10n.refresh
-        disconnectButton.title = L10n.disconnect
+        disconnectButton.title = store.connectionState.importedCaptureName == nil ? L10n.disconnect : L10n.menuCloseImportedCapture
         hostPopUpButton.toolTip = L10n.liveHosts
+        modificationLogButton.toolTip = L10n.menuModificationLog
+        captureDiffButton.toolTip = L10n.menuCaptureDiff
+        inspectorToggleButton.toolTip = store.settings.showsInspector ? L10n.hideInspector : L10n.showInspector
     }
 
     private func rebuildHostMenu() {
         isRebuildingHostMenu = true
-        defer { isRebuildingHostMenu = false }
+        defer {
+            isRebuildingHostMenu = false
+        }
 
         hostPopUpButton.removeAllItems()
+        hostPopUpButton.autoenablesItems = false
         let activeHost = store.connectionState.activeHost
         let selectedHostIdentifier = WorkspaceToolbarHostSelectionState.menuSelectedHostIdentifier(
             connectionState: store.connectionState,
             pendingHostIdentifier: pendingHostIdentifier
         )
+        let devicesWithoutHosts = WorkspaceHostPresentation.devicesWithoutHosts(
+            devices: store.connectedDevices,
+            hosts: liveHosts
+        )
+        let liveBundleIdentifiers = Set(liveHosts.map(\.bundleIdentifier))
+        let offlineRecentHosts = store.recentHosts.filter { liveBundleIdentifiers.contains($0.bundleIdentifier) == false }.prefix(5)
 
         if liveHosts.isEmpty {
-            let placeholder = activeHost?.displayName ?? store.connectionState.importedCaptureName ?? L10n.noHostsOnlineTitle
+            let placeholder = activeHost?.displayName
+                ?? store.connectionState.lostHost?.displayName
+                ?? store.connectionState.importedCaptureName
+                ?? L10n.noHostsOnlineTitle
             hostPopUpButton.addItem(withTitle: placeholder)
             hostPopUpButton.lastItem?.isEnabled = false
-            hostPopUpButton.isEnabled = false
+            appendDeviceHints(devicesWithoutHosts)
+            appendRecentHosts(Array(offlineRecentHosts))
+            hostPopUpButton.isEnabled = devicesWithoutHosts.isEmpty == false || offlineRecentHosts.isEmpty == false
+            hostPopUpButton.selectItem(at: 0)
             return
         }
 
@@ -150,11 +210,25 @@ final class WorkspaceToolbarViewController: NSViewController {
             hostPopUpButton.lastItem?.isEnabled = false
         }
 
-        for host in liveHosts {
-            let title = "\(host.displayName)  ·  \(host.bundleIdentifier)"
-            hostPopUpButton.addItem(withTitle: title)
-            hostPopUpButton.lastItem?.representedObject = host.identifier
+        // 按设备分组：分组标题不可选，宿主条目缩进显示
+        let groups = WorkspaceHostPresentation.groupedByDevice(liveHosts)
+        for group in groups {
+            if let menu = hostPopUpButton.menu, menu.items.isEmpty == false {
+                menu.addItem(.separator())
+            }
+            let header = NSMenuItem(title: group.title, action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            hostPopUpButton.menu?.addItem(header)
+            for host in group.hosts {
+                let item = NSMenuItem(title: WorkspaceHostPresentation.hostTitle(of: host), action: nil, keyEquivalent: "")
+                item.representedObject = host.identifier
+                item.indentationLevel = 1
+                item.toolTip = "\(host.bundleIdentifier) · pid \(host.processIdentifier)"
+                hostPopUpButton.menu?.addItem(item)
+            }
         }
+        appendDeviceHints(devicesWithoutHosts)
+        appendRecentHosts(Array(offlineRecentHosts))
 
         if let selectedHostIdentifier,
            let index = hostPopUpButton.itemArray.firstIndex(where: { ($0.representedObject as? String) == selectedHostIdentifier }) {
@@ -164,11 +238,50 @@ final class WorkspaceToolbarViewController: NSViewController {
         }
     }
 
+    /// “设备已连接但未发现宿主”提示。
+    private func appendDeviceHints(_ devices: [WorkspaceConnectedDevice]) {
+        guard devices.isEmpty == false else {
+            return
+        }
+        hostPopUpButton.menu?.addItem(.separator())
+        for device in devices {
+            let title = L10n.hostDeviceWithoutHosts(
+                "\(device.name) (\(WorkspaceHostPresentation.connectionTypeTitle(device.connectionType)))"
+            )
+            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            hostPopUpButton.menu?.addItem(item)
+        }
+    }
+
+    /// 最近连接过但当前不在线的宿主，选中时尝试按 bundle id 重连。
+    private func appendRecentHosts(_ records: [RecentHostRecord]) {
+        guard records.isEmpty == false else {
+            return
+        }
+        hostPopUpButton.menu?.addItem(.separator())
+        let header = NSMenuItem(title: L10n.hostRecentSection, action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        hostPopUpButton.menu?.addItem(header)
+        for record in records {
+            let item = NSMenuItem(
+                title: "\(record.displayName) · \(record.bundleIdentifier) \(L10n.hostRecentNotRunningSuffix)",
+                action: nil,
+                keyEquivalent: ""
+            )
+            item.indentationLevel = 1
+            item.isEnabled = false
+            hostPopUpButton.menu?.addItem(item)
+        }
+    }
+
     private func updateConnectionState() {
         let state = store.connectionState
         statusLabel.stringValue = store.errorMessage ?? state.statusText
-        refreshButton.isEnabled = state.activeHost != nil
-        disconnectButton.isEnabled = state.activeHost != nil
+        statusLabel.toolTip = captureInsightToolTip
+        refreshButton.isEnabled = store.canRefreshCapture
+        disconnectButton.isEnabled = store.canDisconnect
+        disconnectButton.title = state.importedCaptureName == nil ? L10n.disconnect : L10n.menuCloseImportedCapture
 
         let badgeText: String
         let textColor: NSColor
@@ -194,6 +307,10 @@ final class WorkspaceToolbarViewController: NSViewController {
             badgeText = L10n.errorBadge
             textColor = NSColor(calibratedRed: 0.66, green: 0.19, blue: 0.19, alpha: 1)
             backgroundColor = NSColor(calibratedRed: 0.99, green: 0.90, blue: 0.90, alpha: 1)
+        case .lost:
+            badgeText = L10n.lostBadge
+            textColor = NSColor(calibratedRed: 0.55, green: 0.35, blue: 0.10, alpha: 1)
+            backgroundColor = NSColor(calibratedRed: 0.98, green: 0.93, blue: 0.86, alpha: 1)
         }
 
         connectionBadge.text = badgeText
@@ -212,15 +329,48 @@ final class WorkspaceToolbarViewController: NSViewController {
         }
 
         pendingHostIdentifier = identifier
-        Task { await store.connect(to: host) }
+        Task {
+            await store.connect(to: host)
+        }
+    }
+
+    /// 抓取历史统计（captureInsight）作为状态文字的提示信息。
+    private var captureInsightToolTip: String? {
+        let insight = store.captureInsight
+        guard insight.totalCaptures > 0 else {
+            return nil
+        }
+        return L10n.historySummary(count: insight.totalCaptures, averageMilliseconds: insight.averageDurationMilliseconds)
+    }
+
+    private func configureIconButton(_ button: NSButton, symbolName: String, action: Selector) {
+        button.bezelStyle = .texturedRounded
+        button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+        button.imagePosition = .imageOnly
+        button.target = self
+        button.action = action
     }
 
     @objc private func refreshCapture(_ sender: Any?) {
-        Task { await store.refreshCapture(forceReloadSelectionDetail: true, clearingVisibleState: true) }
+        Task {
+            await store.refreshCapture(forceReloadSelectionDetail: true, clearingVisibleState: true)
+        }
     }
 
     @objc private func disconnectHost(_ sender: Any?) {
         store.disconnect()
+    }
+
+    @objc private func showModificationLog(_ sender: Any?) {
+        store.requestPanel(.modificationLog)
+    }
+
+    @objc private func showCaptureDiff(_ sender: Any?) {
+        store.requestPanel(.captureDiff)
+    }
+
+    @objc private func toggleInspector(_ sender: Any?) {
+        store.settings.showsInspector.toggle()
     }
 }
 
@@ -241,7 +391,7 @@ enum WorkspaceToolbarHostSelectionState {
         }
 
         switch connectionState {
-        case .idle, .imported, .failed:
+        case .idle, .imported, .failed, .lost:
             return nil
         case .connecting:
             return existingPendingHostIdentifier

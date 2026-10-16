@@ -1,6 +1,5 @@
 import AppKit
 import ViewScopeServer
-import ViewScopeServer
 
 enum ViewTreeUserSelectionChange: Equatable {
     case ignored
@@ -11,24 +10,36 @@ enum ViewTreeUserSelectionChange: Equatable {
 final class ViewTreeSelectionSynchronizer {
     private var isApplyingProgrammaticSelection = false
 
+    /// 把 store 的选中同步到树。
+    ///
+    /// 所有对 NSOutlineView 选中状态的程序化修改（包括取消选中）都包在 `withProgrammaticSelection` 里，
+    /// 否则 `deselectAll` 触发的回调会被当成用户操作，把 store 的选中清空。
     func syncSelection(
         selectedNodeID: String?,
-        rootItems: [ViewTreeNodeItem],
+        item: ViewTreeNodeItem?,
         outlineView: NSOutlineView,
-        expandAncestors: (ViewTreeNodeItem) -> Void
+        revealItem: (ViewTreeNodeItem) -> Void
     ) {
-        guard let selectedNodeID,
-              let item = findItem(nodeID: selectedNodeID, items: rootItems) else {
-            outlineView.deselectAll(nil)
+        guard selectedNodeID != nil, let item else {
+            withProgrammaticSelection {
+                outlineView.deselectAll(nil)
+            }
             return
         }
 
-        expandAncestors(item)
+        revealItem(item)
         let row = outlineView.row(forItem: item)
-        guard row >= 0 else { return }
+        guard row >= 0 else {
+            withProgrammaticSelection {
+                outlineView.deselectAll(nil)
+            }
+            return
+        }
 
         withProgrammaticSelection {
-            outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            if outlineView.selectedRow != row {
+                outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            }
             outlineView.scrollRowToVisible(row)
         }
     }
@@ -39,7 +50,9 @@ final class ViewTreeSelectionSynchronizer {
     ) -> ViewTreeUserSelectionChange {
         // 程序化选中会触发 NSOutlineView 的回调；这里显式忽略，
         // 防止把“同步 UI 状态”误当成“用户操作”再写回 store。
-        guard !isApplyingProgrammaticSelection else { return .ignored }
+        guard !isApplyingProgrammaticSelection else {
+            return .ignored
+        }
         guard selectedRow >= 0,
               let item = itemAtRow(selectedRow) as? ViewTreeNodeItem else {
             return .update(nil)
@@ -55,21 +68,13 @@ final class ViewTreeSelectionSynchronizer {
         isApplyingProgrammaticSelection = false
     }
 
+    /// 支持嵌套调用：内层结束时不会提前清除外层的标记。
     func withProgrammaticSelection<T>(_ operation: () -> T) -> T {
-        beginProgrammaticSelection()
-        defer { endProgrammaticSelection() }
-        return operation()
-    }
-
-    private func findItem(nodeID: String, items: [ViewTreeNodeItem]) -> ViewTreeNodeItem? {
-        for item in items {
-            if item.node.id == nodeID {
-                return item
-            }
-            if let child = findItem(nodeID: nodeID, items: item.children) {
-                return child
-            }
+        let wasApplying = isApplyingProgrammaticSelection
+        isApplyingProgrammaticSelection = true
+        defer {
+            isApplyingProgrammaticSelection = wasApplying
         }
-        return nil
+        return operation()
     }
 }

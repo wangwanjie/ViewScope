@@ -247,6 +247,90 @@ enum L10n {
     static func serverTabs(_ count: Int) -> String { tr("server.subtitle.tabs", count) }
     static func serverArranged(_ count: Int) -> String { tr("server.subtitle.arranged", count) }
 
+    // MARK: - 1.3 主界面与工具（App 块）
+
+    static var consoleErrorArgumentsRequireNewerHost: String { tr("app.console.error.arguments_need_v3") }
+    static var consoleErrorKeyPathRequireNewerHost: String { tr("app.console.error.keypath_need_v3") }
+    static var consoleInsertObjectReference: String { tr("app.console.action.insert_reference") }
+    static var consoleNoRecentObjects: String { tr("app.console.reference.none") }
+    static var consoleInputPlaceholderExtended: String { tr("app.console.input.placeholder_v3") }
+
+    static var hostRecentSection: String { tr("app.host.recent_section") }
+    static var hostRecentNotRunningSuffix: String { tr("app.host.recent_not_running") }
+    static var lostBadge: String { tr("app.badge.lost") }
+    static func hostPlatformSimulator(_ platform: String) -> String { tr("app.host.platform.simulator", platform) }
+    static func hostPlatformDevice(_ platform: String, _ connection: String) -> String { tr("app.host.platform.device", platform, connection) }
+    static func hostDeviceWithoutHosts(_ device: String) -> String { tr("app.host.device_without_hosts", device) }
+
+    static var menuHost: String { tr("app.menu.host") }
+    static var menuDisconnect: String { tr("app.menu.disconnect") }
+    static var menuCloseImportedCapture: String { tr("app.menu.close_imported") }
+    static var menuRecentHosts: String { tr("app.menu.recent_hosts") }
+    static var menuNoRecentHosts: String { tr("app.menu.no_recent_hosts") }
+    static var menuDisplay2D: String { tr("app.menu.display_2d") }
+    static var menuDisplay3D: String { tr("app.menu.display_3d") }
+    static var menuZoomIn: String { tr("app.menu.zoom_in") }
+    static var menuZoomOut: String { tr("app.menu.zoom_out") }
+    static var menuActualSize: String { tr("app.menu.actual_size") }
+    static var menuFocusSelection: String { tr("app.menu.focus_selection") }
+    static var menuClearFocus: String { tr("app.menu.clear_focus") }
+    static var menuMeasurement: String { tr("app.menu.measurement") }
+    static var menuDiagnostics: String { tr("app.menu.diagnostics") }
+    static var menuModificationLog: String { tr("app.menu.modification_log") }
+    static var menuCaptureDiff: String { tr("app.menu.capture_diff") }
+    static var menuSetDiffBaseline: String { tr("app.menu.set_diff_baseline") }
+    static var importFailedTitle: String { tr("app.alert.import_failed") }
+    static var exportFailedTitle: String { tr("app.alert.export_failed") }
+
+    static var inspectorGroupContentInset: String { tr("app.inspector.group.content_inset") }
+    static var inspectorGroupLayoutMargins: String { tr("app.inspector.group.layout_margins") }
+    static var inspectorGroupEdgeInsets: String { tr("app.inspector.group.edge_insets") }
+    static var inspectorGroupTextContainerInset: String { tr("app.inspector.group.text_container_inset") }
+    static var inspectorGroupSectionInset: String { tr("app.inspector.group.section_inset") }
+    static var inspectorGroupContentEdgeInsets: String { tr("app.inspector.group.content_edge_insets") }
+    static var inspectorGroupContentOffset: String { tr("app.inspector.group.content_offset") }
+    static var inspectorGroupContentSize: String { tr("app.inspector.group.content_size") }
+    static var inspectorGroupIntercellSpacing: String { tr("app.inspector.group.intercell_spacing") }
+
+    static var changesTitle: String { tr("app.changes.title") }
+    static var changesColumnTime: String { tr("app.changes.column.time") }
+    static var changesColumnObject: String { tr("app.changes.column.object") }
+    static var changesColumnProperty: String { tr("app.changes.column.property") }
+    static var changesColumnChange: String { tr("app.changes.column.change") }
+    static var changesRevert: String { tr("app.changes.action.revert") }
+    static var changesClear: String { tr("app.changes.action.clear") }
+    static var changesExportCode: String { tr("app.changes.action.export_code") }
+    static var changesCopyCode: String { tr("app.changes.action.copy_code") }
+    static var changesSaveCode: String { tr("app.changes.action.save_code") }
+    static var changesEmpty: String { tr("app.changes.empty") }
+    static var changesUndoneSuffix: String { tr("app.changes.undone") }
+    static var changesCodeCopied: String { tr("app.changes.code_copied") }
+    static var changesReadOnlyHint: String { tr("app.changes.read_only_hint") }
+
+    static var diffTitle: String { tr("app.diff.title") }
+    static var diffSetBaseline: String { tr("app.diff.action.set_baseline") }
+    static var diffImportBaseline: String { tr("app.diff.action.import_baseline") }
+    static var diffClearBaseline: String { tr("app.diff.action.clear_baseline") }
+    static var diffColumnCategory: String { tr("app.diff.column.category") }
+    static var diffColumnDetail: String { tr("app.diff.column.detail") }
+    static var diffNoBaseline: String { tr("app.diff.empty.no_baseline") }
+    static var diffNoCapture: String { tr("app.diff.empty.no_capture") }
+    static var diffNoChanges: String { tr("app.diff.empty.no_changes") }
+    static var diffFilterAll: String { tr("app.diff.filter.all") }
+    static var diffNodeMissing: String { tr("app.diff.node_missing") }
+    static func diffBaselineInfo(_ name: String, _ time: String) -> String { tr("app.diff.baseline_info", name, time) }
+    static func diffCategoryTitle(_ category: CaptureDiffEntry.Category) -> String {
+        tr("app.diff.category.\(category.rawValue)")
+    }
+
+    static var preferencesAutoReconnect: String { tr("app.preferences.auto_reconnect") }
+
+    static var integrationOr: String { tr("app.integration.or") }
+    static var integrationAutoStartComment: String { tr("app.integration.auto_start") }
+    static var integrationIOSTitle: String { tr("app.integration.ios.title") }
+    static var integrationIOSSimulatorNote: String { tr("app.integration.ios.simulator") }
+    static var integrationIOSDeviceNote: String { tr("app.integration.ios.device") }
+
     private static func tr(_ key: String, _ arguments: CVarArg...) -> String {
         AppLocalization.shared.string(key, arguments: arguments)
     }

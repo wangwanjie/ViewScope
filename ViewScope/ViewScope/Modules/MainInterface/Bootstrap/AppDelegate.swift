@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var preferencesWindowController: PreferencesWindowController?
     private var mainMenuController: MainMenuController?
     private var statusItemController: StatusItemController?
+    private var auxiliaryPanelCoordinator: WorkspaceAuxiliaryPanelCoordinator?
     private var hasPresentedInitialWindow = false
     private var pendingOpenFileURLs: [URL] = []
 
@@ -31,13 +32,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 captureFileService: captureFileService,
                 openMainWindowHandler: { [weak self] in self?.openMainWindow(nil) },
                 openPreferencesHandler: { [weak self] in self?.preferencesWindowController?.showPreferencesWindow() },
-                presentErrorHandler: { [weak self] error in self?.presentErrorAlert(error) }
+                presentErrorHandler: { [weak self] error, title in
+                    self?.presentErrorAlert(error, messageText: title)
+                }
             )
             self.statusItemController = StatusItemController(
                 store: store,
                 openMainWindowHandler: { [weak self] in self?.openMainWindow(nil) },
                 openPreferencesHandler: { [weak self] in self?.preferencesWindowController?.showPreferencesWindow() }
             )
+
+            self.auxiliaryPanelCoordinator = WorkspaceAuxiliaryPanelCoordinator(store: store)
+            // 发现服务在启动时开启，不依赖主窗口视图是否加载
+            store.start()
 
             store.updateManager.configure()
             store.updateManager.scheduleBackgroundUpdateCheck()
@@ -60,6 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         captureFileService = nil
         mainMenuController = nil
         statusItemController = nil
+        auxiliaryPanelCoordinator = nil
         mainWindowController = nil
         preferencesWindowController = nil
     }
@@ -82,8 +90,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         captureFileService?.importFiles(
             at: urls,
-            didImport: { [weak self] in self?.openMainWindow(nil) },
-            onError: { [weak self] error in self?.presentErrorAlert(error) }
+            didImport: { [weak self] in
+                self?.openMainWindow(nil)
+            },
+            onError: { [weak self] error in
+                self?.presentErrorAlert(error, messageText: L10n.importFailedTitle)
+            }
         )
     }
 
@@ -136,8 +148,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pendingOpenFileURLs.removeAll()
         captureFileService?.importFiles(
             at: urls,
-            didImport: { [weak self] in self?.openMainWindow(nil) },
-            onError: { [weak self] error in self?.presentErrorAlert(error) }
+            didImport: { [weak self] in
+                self?.openMainWindow(nil)
+            },
+            onError: { [weak self] error in
+                self?.presentErrorAlert(error, messageText: L10n.importFailedTitle)
+            }
         )
     }
 

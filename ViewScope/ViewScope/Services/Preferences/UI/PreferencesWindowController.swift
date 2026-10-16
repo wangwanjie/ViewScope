@@ -79,6 +79,7 @@ private final class PreferencesViewController: NSViewController {
     private let autoRefreshCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let autoHighlightCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let statusBarCountCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let autoReconnectCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let automaticDownloadsCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let automaticDownloadsHint = NSTextField(wrappingLabelWithString: "")
     private let versionLabel = NSTextField(labelWithString: "")
@@ -131,6 +132,8 @@ private final class PreferencesViewController: NSViewController {
         autoHighlightCheckbox.action = #selector(toggleAutoHighlight(_:))
         statusBarCountCheckbox.target = self
         statusBarCountCheckbox.action = #selector(toggleStatusBarCount(_:))
+        autoReconnectCheckbox.target = self
+        autoReconnectCheckbox.action = #selector(toggleAutoReconnect(_:))
         automaticDownloadsCheckbox.target = self
         automaticDownloadsCheckbox.action = #selector(toggleAutomaticDownloads(_:))
         checkNowButton.target = self
@@ -148,6 +151,7 @@ private final class PreferencesViewController: NSViewController {
             indentedRow(content: languageHintLabel),
             autoRefreshCheckbox,
             autoHighlightCheckbox,
+            autoReconnectCheckbox,
             statusBarCountCheckbox
         ])
         generalContentStack.orientation = .vertical
@@ -215,6 +219,13 @@ private final class PreferencesViewController: NSViewController {
             }
             .store(in: &cancellables)
 
+        settings.$autoReconnectEnabled
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.syncControlsFromSettings()
+            }
+            .store(in: &cancellables)
+
         AppLocalization.shared.$language
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
@@ -236,6 +247,7 @@ private final class PreferencesViewController: NSViewController {
         autoRefreshCheckbox.title = L10n.preferencesAutoRefresh
         autoHighlightCheckbox.title = L10n.preferencesAutoHighlight
         statusBarCountCheckbox.title = L10n.preferencesStatusCount
+        autoReconnectCheckbox.title = L10n.preferencesAutoReconnect
         automaticDownloadsCheckbox.title = L10n.preferencesAutoDownloads
         checkNowButton.title = L10n.preferencesCheckForUpdates
         openGitHubButton.title = L10n.preferencesOpenGitHub
@@ -253,6 +265,7 @@ private final class PreferencesViewController: NSViewController {
         autoRefreshCheckbox.state = settings.autoRefreshEnabled ? .on : .off
         autoHighlightCheckbox.state = settings.autoHighlightSelection ? .on : .off
         statusBarCountCheckbox.state = settings.showConnectedCountInStatusBar ? .on : .off
+        autoReconnectCheckbox.state = settings.autoReconnectEnabled ? .on : .off
         automaticDownloadsCheckbox.state = updateManager.automaticallyDownloadsUpdates ? .on : .off
         automaticDownloadsCheckbox.isEnabled = updateManager.supportsAutomaticUpdateDownloads
         automaticDownloadsHint.stringValue = updateManager.supportsAutomaticUpdateDownloads
@@ -358,6 +371,10 @@ private final class PreferencesViewController: NSViewController {
 
     @objc private func toggleAutoHighlight(_ sender: NSButton) {
         settings.autoHighlightSelection = sender.state == .on
+    }
+
+    @objc private func toggleAutoReconnect(_ sender: NSButton) {
+        settings.autoReconnectEnabled = sender.state == .on
     }
 
     @objc private func toggleStatusBarCount(_ sender: NSButton) {

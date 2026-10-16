@@ -15,7 +15,8 @@ final class CaptureFileService {
         let openPanel = NSOpenPanel()
         openPanel.canChooseFiles = true
         openPanel.canChooseDirectories = false
-        openPanel.allowsMultipleSelection = true
+        // 工作区一次只能展示一份采集，因此只允许选择一个文件
+        openPanel.allowsMultipleSelection = false
         openPanel.allowedContentTypes = [.viewScopeCapture]
 
         guard openPanel.runModal() == .OK else { return }
@@ -23,15 +24,16 @@ final class CaptureFileService {
     }
 
     func importFiles(at urls: [URL], didImport: @escaping () -> Void, onError: @escaping (Error) -> Void) {
-        guard urls.isEmpty == false else { return }
+        // 系统“打开方式”可能一次传入多个文件；工作区只能展示一份，只导入第一个
+        guard let url = urls.first else {
+            return
+        }
 
-        for url in urls {
-            do {
-                try store.loadPreviewExport(from: url)
-                didImport()
-            } catch {
-                onError(error)
-            }
+        do {
+            try store.loadPreviewExport(from: url)
+            didImport()
+        } catch {
+            onError(error)
         }
     }
 

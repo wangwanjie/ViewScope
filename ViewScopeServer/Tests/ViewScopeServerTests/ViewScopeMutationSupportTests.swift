@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import XCTest
 @testable import ViewScopeServer
@@ -547,3 +548,4 @@ private func hexString(for color: CGColor?) -> String? {
         Int(round(rgb.alphaComponent * 255))
     )
 }
+#endif

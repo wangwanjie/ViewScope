@@ -1,6 +1,6 @@
 import Foundation
 
-enum ViewScopeInterfaceLanguage: String {
+enum ViewScopeInterfaceLanguage: String, Hashable, CaseIterable {
     case english = "en"
     case simplifiedChinese = "zh-Hans"
     case traditionalChinese = "zh-Hant"
@@ -30,9 +30,19 @@ enum ViewScopeInterfaceLanguage: String {
     }
 
     func text(_ key: String, arguments: [CVarArg]) -> String {
-        let format = Self.table[self]?[key] ?? Self.table[.english]?[key] ?? key
-        guard arguments.isEmpty == false else { return format }
+        let format = Self.lookup(key, in: self) ?? Self.lookup(key, in: .english) ?? key
+        guard arguments.isEmpty == false else {
+            return format
+        }
         return String(format: format, locale: locale, arguments: arguments)
+    }
+
+    /// 先查平台专属表（`platformTable`，由 AppKit / UIKit 目录各自提供），再查通用表。
+    private static func lookup(_ key: String, in language: ViewScopeInterfaceLanguage) -> String? {
+        if let value = platformTable[language]?[key] {
+            return value
+        }
+        return table[language]?[key]
     }
 
     private static let table: [ViewScopeInterfaceLanguage: [String: String]] = [
@@ -99,6 +109,27 @@ enum ViewScopeInterfaceLanguage: String {
             "server.value.image": "Image",
             "server.subtitle.arranged": "%d arranged",
             "server.value.scrollable": "Scrollable",
+            "server.item.bounds_x": "Bounds X",
+            "server.item.bounds_y": "Bounds Y",
+            "server.item.bounds_width": "Bounds Width",
+            "server.item.bounds_height": "Bounds Height",
+            "server.item.ambiguous_layout": "Ambiguous Layout",
+            "server.item.opaque": "Opaque",
+            "server.error.not_authenticated": "Complete the handshake before sending this request.",
+            "server.error.handshake_rejected": "Handshake rejected: invalid token or unsupported protocol version.",
+            "server.error.unsupported_request": "This request is not supported by the host.",
+            "server.error.invalid_request": "The request is missing required data.",
+            "server.error.malformed_message": "The message could not be decoded.",
+            "server.error.not_ready": "The inspection server is not ready yet.",
+            "server.error.message_too_large": "The message is too large.",
+            "server.console.target_not_found": "Target object not found. Refresh the capture and try again.",
+            "server.console.parse_error": "Syntax error: %@",
+            "server.console.denied_selector": "'%@' is not allowed in the console.",
+            "server.console.does_not_respond": "%1$@ does not respond to '%2$@'.",
+            "server.console.keypath_failed": "Key path segment '%@' did not return an object.",
+            "server.console.unknown_object": "Unknown object reference @%@.",
+            "server.console.invocation_failed": "Invocation failed: %@",
+            "server.console.unavailable": "The console invoker is unavailable in this host.",
         ],
         .simplifiedChinese: [
             "server.error.selected_node_gone": "选中的节点已不存在，请刷新采集后重试。",
@@ -163,6 +194,27 @@ enum ViewScopeInterfaceLanguage: String {
             "server.value.image": "图像",
             "server.subtitle.arranged": "%d 个 arranged 子视图",
             "server.value.scrollable": "可滚动",
+            "server.item.bounds_x": "Bounds X",
+            "server.item.bounds_y": "Bounds Y",
+            "server.item.bounds_width": "Bounds 宽度",
+            "server.item.bounds_height": "Bounds 高度",
+            "server.item.ambiguous_layout": "布局歧义",
+            "server.item.opaque": "不透明",
+            "server.error.not_authenticated": "请先完成握手认证再发送该请求。",
+            "server.error.handshake_rejected": "握手被拒绝：令牌无效或协议版本不受支持。",
+            "server.error.unsupported_request": "宿主不支持该请求。",
+            "server.error.invalid_request": "请求缺少必要的数据。",
+            "server.error.malformed_message": "无法解析该消息。",
+            "server.error.not_ready": "检查服务尚未就绪。",
+            "server.error.message_too_large": "消息过大。",
+            "server.console.target_not_found": "找不到目标对象，请刷新采集后重试。",
+            "server.console.parse_error": "语法错误：%@",
+            "server.console.denied_selector": "控制台不允许调用 '%@'。",
+            "server.console.does_not_respond": "%1$@ 不响应 '%2$@'。",
+            "server.console.keypath_failed": "Key path 片段 '%@' 没有返回对象。",
+            "server.console.unknown_object": "未知的对象引用 @%@。",
+            "server.console.invocation_failed": "调用失败：%@",
+            "server.console.unavailable": "宿主中的控制台调用组件不可用。",
         ],
         .traditionalChinese: [
             "server.error.selected_node_gone": "選取的節點已不存在，請重新整理擷取後再試一次。",
@@ -227,6 +279,27 @@ enum ViewScopeInterfaceLanguage: String {
             "server.value.image": "影像",
             "server.subtitle.arranged": "%d 個 arranged 子視圖",
             "server.value.scrollable": "可捲動",
+            "server.item.bounds_x": "Bounds X",
+            "server.item.bounds_y": "Bounds Y",
+            "server.item.bounds_width": "Bounds 寬度",
+            "server.item.bounds_height": "Bounds 高度",
+            "server.item.ambiguous_layout": "版面歧義",
+            "server.item.opaque": "不透明",
+            "server.error.not_authenticated": "請先完成握手驗證再傳送該請求。",
+            "server.error.handshake_rejected": "握手遭拒：權杖無效或不支援的協定版本。",
+            "server.error.unsupported_request": "宿主不支援該請求。",
+            "server.error.invalid_request": "請求缺少必要的資料。",
+            "server.error.malformed_message": "無法解析該訊息。",
+            "server.error.not_ready": "檢查服務尚未就緒。",
+            "server.error.message_too_large": "訊息過大。",
+            "server.console.target_not_found": "找不到目標物件，請重新整理擷取後再試一次。",
+            "server.console.parse_error": "語法錯誤：%@",
+            "server.console.denied_selector": "主控台不允許呼叫「%@」。",
+            "server.console.does_not_respond": "%1$@ 不回應「%2$@」。",
+            "server.console.keypath_failed": "Key path 片段「%@」沒有傳回物件。",
+            "server.console.unknown_object": "未知的物件參照 @%@。",
+            "server.console.invocation_failed": "呼叫失敗：%@",
+            "server.console.unavailable": "宿主中的主控台呼叫元件不可用。",
         ],
     ]
 }

@@ -5,16 +5,20 @@ import SnapKit
 final class PreviewLayerSettingsPopoverController: NSViewController {
     private let spacingSlider = NSSlider(value: 22, minValue: 10, maxValue: 150, target: nil, action: nil)
     private let spacingValueLabel = NSTextField(labelWithString: "")
+    private let spacingHintLabel = NSTextField(labelWithString: "")
     private let borderToggle = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let isLayeredMode: Bool
     private let onLayerSpacingChange: (CGFloat) -> Void
     private let onShowsLayerBordersChange: (Bool) -> Void
 
     init(
         layerSpacing: CGFloat,
         showsLayerBorders: Bool,
+        isLayeredMode: Bool = true,
         onLayerSpacingChange: @escaping (CGFloat) -> Void,
         onShowsLayerBordersChange: @escaping (Bool) -> Void
     ) {
+        self.isLayeredMode = isLayeredMode
         self.onLayerSpacingChange = onLayerSpacingChange
         self.onShowsLayerBordersChange = onShowsLayerBordersChange
         super.init(nibName: nil, bundle: nil)
@@ -38,6 +42,12 @@ final class PreviewLayerSettingsPopoverController: NSViewController {
 
         spacingSlider.target = self
         spacingSlider.action = #selector(handleSpacingSlider(_:))
+        // 平面预览下层间距没有效果：禁用滑块并给出提示，避免用户以为功能失效。
+        spacingSlider.isEnabled = isLayeredMode
+        spacingHintLabel.stringValue = L10n.previewToolsFlatSpacingHint
+        spacingHintLabel.font = NSFont.systemFont(ofSize: 10.5)
+        spacingHintLabel.textColor = .secondaryLabelColor
+        spacingHintLabel.isHidden = isLayeredMode
 
         borderToggle.title = L10n.previewLayerBorders
         borderToggle.target = self
@@ -46,6 +56,7 @@ final class PreviewLayerSettingsPopoverController: NSViewController {
         container.addSubview(spacingTitleLabel)
         container.addSubview(spacingValueLabel)
         container.addSubview(spacingSlider)
+        container.addSubview(spacingHintLabel)
         container.addSubview(borderToggle)
 
         spacingTitleLabel.snp.makeConstraints { make in
@@ -60,13 +71,17 @@ final class PreviewLayerSettingsPopoverController: NSViewController {
             make.top.equalTo(spacingTitleLabel.snp.bottom).offset(8)
             make.leading.trailing.equalToSuperview().inset(12)
         }
+        spacingHintLabel.snp.makeConstraints { make in
+            make.top.equalTo(spacingSlider.snp.bottom).offset(4)
+            make.leading.trailing.equalToSuperview().inset(12)
+        }
         borderToggle.snp.makeConstraints { make in
-            make.top.equalTo(spacingSlider.snp.bottom).offset(10)
+            make.top.equalTo(isLayeredMode ? spacingSlider.snp.bottom : spacingHintLabel.snp.bottom).offset(10)
             make.leading.trailing.bottom.equalToSuperview().inset(12)
         }
 
         updateSpacingValueLabel()
-        preferredContentSize = NSSize(width: 260, height: 104)
+        preferredContentSize = NSSize(width: 260, height: isLayeredMode ? 104 : 124)
     }
 
     @objc private func handleSpacingSlider(_ sender: NSSlider) {

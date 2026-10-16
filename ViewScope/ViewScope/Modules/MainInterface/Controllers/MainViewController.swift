@@ -34,6 +34,7 @@ final class MainViewController: NSViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         buildUI()
+        // 发现服务由 AppDelegate 在启动时开启，这里只做幂等兜底，不再依赖视图生命周期
         store.start()
     }
 

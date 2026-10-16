@@ -19,6 +19,12 @@ struct WorkspaceConsoleTargetUpdate {
     let isLoadingTarget: Bool
 }
 
+struct WorkspaceConsoleRebaseState {
+    let currentTarget: ViewScopeConsoleTargetDescriptor?
+    let candidateTargets: [ViewScopeConsoleTargetDescriptor]
+    let recentTargets: [ViewScopeConsoleTargetDescriptor]
+}
+
 struct WorkspaceConsoleAutoSyncUpdate {
     let currentTarget: ViewScopeConsoleTargetDescriptor?
 }
@@ -27,7 +33,7 @@ struct WorkspaceConsoleAutoSyncUpdate {
 final class WorkspaceConsoleController {
     private let maximumRecentTargets: Int
 
-    init(maximumRecentTargets: Int = 5) {
+    init(maximumRecentTargets: Int = 10) {
         self.maximumRecentTargets = maximumRecentTargets
     }
 
@@ -68,6 +74,47 @@ final class WorkspaceConsoleController {
             recentTargets: nextRecentTargets,
             isLoadingTarget: autoSyncEnabled ? selectedNodeID != nil : false
         )
+    }
+
+    /// v3 宿主节点 ID 跨抓取稳定：把仍然存在的目标改写到最新 captureID，
+    /// 这样自动刷新不会让控制台目标失效（返回对象由服务端缓存，也一并保留）。
+    func rebaseForLatestCapture(
+        capture: ViewScopeCapturePayload,
+        currentTarget: ViewScopeConsoleTargetDescriptor?,
+        candidateTargets: [ViewScopeConsoleTargetDescriptor],
+        recentTargets: [ViewScopeConsoleTargetDescriptor],
+        autoSyncEnabled: Bool
+    ) -> WorkspaceConsoleRebaseState {
+        let nextCandidates = candidateTargets.compactMap { rebased($0, to: capture) }
+        let nextRecents = recentTargets.compactMap { rebased($0, to: capture) }
+        var nextCurrent = currentTarget.flatMap { rebased($0, to: capture) }
+        if nextCurrent == nil, autoSyncEnabled {
+            nextCurrent = ConsoleModelBuilder.preferredTarget(from: nextCandidates)
+        }
+        return WorkspaceConsoleRebaseState(
+            currentTarget: nextCurrent,
+            candidateTargets: nextCandidates,
+            recentTargets: nextRecents
+        )
+    }
+
+    func rebased(
+        _ descriptor: ViewScopeConsoleTargetDescriptor,
+        to capture: ViewScopeCapturePayload
+    ) -> ViewScopeConsoleTargetDescriptor? {
+        if descriptor.reference.captureID == capture.captureID {
+            return descriptor
+        }
+        if descriptor.reference.kind != .returnedObject {
+            // 节点类目标要求源节点在新抓取中仍然存在
+            guard let sourceNodeID = descriptor.reference.sourceNodeID,
+                  capture.nodes[sourceNodeID] != nil else {
+                return nil
+            }
+        }
+        var next = descriptor
+        next.reference.captureID = capture.captureID
+        return next
     }
 
     func updateTargets(

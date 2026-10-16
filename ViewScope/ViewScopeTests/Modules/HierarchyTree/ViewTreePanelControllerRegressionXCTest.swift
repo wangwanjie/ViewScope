@@ -40,9 +40,13 @@ final class ViewTreePanelControllerRegressionXCTest: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        // 代码创建的 NSWindow 默认 isReleasedWhenClosed = true，close() 会额外 release 一次，导致后续自动释放池过度释放崩溃。
+        window.isReleasedWhenClosed = false
         window.contentViewController = controller
         window.orderFront(nil)
-        defer { window.close() }
+        defer {
+            window.close()
+        }
 
         _ = controller.view
         controller.view.layoutSubtreeIfNeeded()

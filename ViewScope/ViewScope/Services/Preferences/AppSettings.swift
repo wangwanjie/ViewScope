@@ -48,6 +48,10 @@ final class AppSettings: ObservableObject {
     @Published var updateCheckStrategy: UpdateCheckStrategy {
         didSet { defaults.set(updateCheckStrategy.rawValue, forKey: Keys.updateCheckStrategy) }
     }
+    /// 宿主意外断开后，同一设备上的同一 App 重新出现时是否自动重连。
+    @Published var autoReconnectEnabled: Bool {
+        didSet { defaults.set(autoReconnectEnabled, forKey: Keys.autoReconnectEnabled) }
+    }
     @Published var showsSystemWrapperViews: Bool {
         didSet { defaults.set(showsSystemWrapperViews, forKey: Keys.showsSystemWrapperViews) }
     }
@@ -70,6 +74,7 @@ final class AppSettings: ObservableObject {
         self.showConnectedCountInStatusBar = defaults.object(forKey: Keys.showConnectedCountInStatusBar) as? Bool ?? true
         self.showsSessionSidebar = defaults.object(forKey: Keys.showsSessionSidebar) as? Bool ?? true
         self.showsInspector = defaults.object(forKey: Keys.showsInspector) as? Bool ?? true
+        self.autoReconnectEnabled = defaults.object(forKey: Keys.autoReconnectEnabled) as? Bool ?? true
         self.showsSystemWrapperViews = defaults.object(forKey: Keys.showsSystemWrapperViews) as? Bool ?? false
         self.previewLayerSpacing = defaults.object(forKey: Keys.previewLayerSpacing) as? Double ?? 22
         self.previewShowsLayerBorders = defaults.object(forKey: Keys.previewShowsLayerBorders) as? Bool ?? true
@@ -90,6 +95,7 @@ final class AppSettings: ObservableObject {
         static let showsSessionSidebar = "ViewScope.showsSessionSidebar"
         static let showsInspector = "ViewScope.showsInspector"
         static let updateCheckStrategy = "ViewScope.updateCheckStrategy"
+        static let autoReconnectEnabled = "ViewScope.autoReconnectEnabled"
         static let showsSystemWrapperViews = "ViewScope.showsSystemWrapperViews"
         static let previewLayerSpacing = "ViewScope.previewLayerSpacing"
         static let previewShowsLayerBorders = "ViewScope.previewShowsLayerBorders"

@@ -109,6 +109,74 @@ struct InspectorPanelModelBuilderTests {
         #expect(containsNumberRow(withKey: "layer.borderWidth", in: model))
     }
 
+    @Test func builderIgnoresDetailThatBelongsToAnotherNode() async throws {
+        let capture = SampleFixture.capture()
+        let node = try #require(capture.nodes["window-0-view-1-2"])
+        let staleDetail = makeDetail(
+            nodeID: "some-other-node",
+            host: capture.host,
+            sections: [
+                ViewScopePropertySection(title: "Rendering", items: [
+                    ViewScopePropertyItem(title: "Alpha", value: "0.80", editable: .number(key: "alpha", value: 0.8))
+                ])
+            ]
+        )
+
+        let model = InspectorPanelModelBuilder().makeModel(capture: capture, node: node, detail: staleDetail)
+
+        // 不能把另一个节点的可编辑属性展示在当前节点上
+        #expect(containsNumberRow(withKey: "alpha", in: model) == false)
+        #expect(model.editableNodeID == nil)
+
+        let matchingDetail = makeDetail(nodeID: node.id, host: capture.host, sections: staleDetail.sections)
+        let matchingModel = InspectorPanelModelBuilder().makeModel(capture: capture, node: node, detail: matchingDetail)
+        #expect(containsNumberRow(withKey: "alpha", in: matchingModel))
+        #expect(matchingModel.editableNodeID == node.id)
+    }
+
+    @Test func builderUsesPopupForEnumerationsAndGroupsNewInsetFamilies() async throws {
+        let capture = SampleFixture.capture()
+        let node = try #require(capture.nodes["window-0-view-1-2"])
+        let options = [
+            ViewScopeEditableOption(title: "Leading", value: 0),
+            ViewScopeEditableOption(title: "Center", value: 1)
+        ]
+        var items: [ViewScopePropertyItem] = [
+            ViewScopePropertyItem(title: "Alignment", value: "Center", editable: .enumeration(key: "stack.alignment", value: 1, options: options))
+        ]
+        let families = ["contentInset", "layoutMargins", "stack.edgeInsets", "textContainerInset", "sectionInset", "contentEdgeInsets"]
+        for family in families {
+            for side in ["top", "left", "bottom", "right"] {
+                items.append(ViewScopePropertyItem(title: "\(family) \(side)", value: "1", editable: .number(key: "\(family).\(side)", value: 1)))
+            }
+        }
+        items.append(ViewScopePropertyItem(title: "Offset X", value: "0", editable: .number(key: "contentOffset.x", value: 0)))
+        items.append(ViewScopePropertyItem(title: "Offset Y", value: "0", editable: .number(key: "contentOffset.y", value: 0)))
+        items.append(ViewScopePropertyItem(title: "Size W", value: "0", editable: .number(key: "contentSize.width", value: 0)))
+        items.append(ViewScopePropertyItem(title: "Size H", value: "0", editable: .number(key: "contentSize.height", value: 0)))
+        let detail = makeDetail(nodeID: node.id, host: capture.host, sections: [ViewScopePropertySection(title: "Layout", items: items)])
+
+        let model = InspectorPanelModelBuilder().makeModel(capture: capture, node: node, detail: detail)
+
+        let enumModel = try #require(model.sections.flatMap(\.rows).compactMap { row -> InspectorEditableEnumModel? in
+            if case .enumeration(let enumModel) = row {
+                return enumModel
+            }
+            return nil
+        }.first)
+        #expect(enumModel.selectedIndex == 1)
+        #expect(containsNumberRow(withKey: "stack.alignment", in: model) == false)
+
+        for family in families {
+            #expect(containsQuadRow(withKeys: ["top", "left", "bottom", "right"].map { "\(family).\($0)" }, in: model))
+        }
+        #expect(containsQuadRow(withKeys: ["contentOffset.x", "contentOffset.y"], in: model))
+        #expect(containsQuadRow(withKeys: ["contentSize.width", "contentSize.height"], in: model))
+        // 分组行替换了所有分量，不再单独显示数字行
+        #expect(containsNumberRow(withKey: "layoutMargins.top", in: model) == false)
+        #expect(InspectorPanelModelBuilder.humanized("edgeInsets") == "Edge Insets")
+    }
+
     private func makeDetail(
         nodeID: String,
         host: ViewScopeHostInfo,

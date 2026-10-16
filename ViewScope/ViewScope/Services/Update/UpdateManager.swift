@@ -102,6 +102,8 @@ final class UpdateManager: NSObject {
         #if canImport(Sparkle)
         if let sparkleUpdaterController {
             sparkleUpdaterController.updater.checkForUpdatesInBackground()
+            // Sparkle 分支同样记录检查时间，否则“每天检查”策略每次启动都会重新检查
+            UserDefaults.standard.set(Date(), forKey: lastUpdateCheckKey)
             return
         }
         #endif

@@ -4,7 +4,8 @@ import PackageDescription
 let package = Package(
     name: "ViewScopeServer",
     platforms: [
-        .macOS(.v11)
+        .macOS(.v11),
+        .iOS(.v13)
     ],
     products: [
         .library(
@@ -18,7 +19,7 @@ let package = Package(
             dependencies: ["ViewScopeServerBootstrap"],
             path: "Sources/ViewScopeServer",
             linkerSettings: [
-                .unsafeFlags(["-Xlinker", "-u", "-Xlinker", "_ViewScopeServerBootstrapAnchor"], .when(platforms: [.macOS]))
+                .unsafeFlags(["-Xlinker", "-u", "-Xlinker", "_ViewScopeServerBootstrapAnchor"], .when(platforms: [.macOS, .iOS]))
             ]
         ),
         .target(

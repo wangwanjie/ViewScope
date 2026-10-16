@@ -38,7 +38,10 @@ final class AppLocalization: ObservableObject {
     }
 
     nonisolated static func backgroundString(_ key: String, arguments: [CVarArg], table: String = "Localizable") -> String {
-        let rawLanguage = UserDefaults.standard.string(forKey: "ViewScope.appLanguage")
+        // 与 AppSettings 的解析顺序保持一致：环境变量 VIEWSCOPE_LANGUAGE 优先，其次是用户设置
+        let environmentLanguage = ProcessInfo.processInfo.environment["VIEWSCOPE_LANGUAGE"]
+            .flatMap { $0.isEmpty ? nil : $0 }
+        let rawLanguage = environmentLanguage ?? UserDefaults.standard.string(forKey: "ViewScope.appLanguage")
         let resolvedLanguage: String = {
             let preferred = rawLanguage ?? Locale.preferredLanguages.first ?? "en"
             let normalized = preferred.lowercased()

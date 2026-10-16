@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import XCTest
 @testable import ViewScopeServer
@@ -255,11 +256,11 @@ final class ViewScopeServerTests: XCTestCase {
         let rootNode = try XCTUnwrap(capture.nodes[rootNodeID])
         let capturedRootViewID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
             guard case .view(let capturedView) = reference else { return false }
-            return capturedView === rootView
+            return capturedView.object === rootView
         })?.key)
         let capturedContentViewID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
             guard case .view(let capturedView) = reference else { return false }
-            return capturedView === contentView
+            return capturedView.object === contentView
         })?.key)
 
         XCTAssertEqual(rootNodeID, capturedRootViewID)
@@ -358,11 +359,11 @@ final class ViewScopeServerTests: XCTestCase {
         let rootNodeID = try XCTUnwrap(windowNode.childIDs.first)
         let layerBackedNodeID = try XCTUnwrap(context.nodeReferences.first(where: { entry in
             guard case .layer(let capturedLayer) = entry.value else { return false }
-            return capturedLayer === layerBackedView.layer
+            return capturedLayer.object === layerBackedView.layer
         })?.key)
         let plainViewNodeID = try XCTUnwrap(context.nodeReferences.first(where: { entry in
             guard case .view(let capturedView) = entry.value else { return false }
-            return capturedView === plainView
+            return capturedView.object === plainView
         })?.key)
 
         let rootNode = try XCTUnwrap(capture.nodes[rootNodeID])
@@ -427,7 +428,7 @@ final class ViewScopeServerTests: XCTestCase {
         let (capture, context) = builder.makeCapture()
         let layerNodeID = try XCTUnwrap(context.nodeReferences.first(where: { entry in
             guard case .layer(let capturedLayer) = entry.value else { return false }
-            return capturedLayer === controller.layerBackedView.layer
+            return capturedLayer.object === controller.layerBackedView.layer
         })?.key)
         let node = try XCTUnwrap(capture.nodes[layerNodeID])
         let ivarNames = Set(node.ivarTraces.map { $0.ivarName })
@@ -547,11 +548,11 @@ final class ViewScopeServerTests: XCTestCase {
         let (capture, context) = builder.makeCapture()
         let controllerRootID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
             guard case .view(let capturedView) = reference else { return false }
-            return capturedView === controller.view
+            return capturedView.object === controller.view
         })?.key)
         let descendantID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
             guard case .view(let capturedView) = reference else { return false }
-            return capturedView === controller.contentLabel
+            return capturedView.object === controller.contentLabel
         })?.key)
         let node = try XCTUnwrap(capture.nodes[controllerRootID])
         let descendantNode = try XCTUnwrap(capture.nodes[descendantID])
@@ -609,7 +610,7 @@ final class ViewScopeServerTests: XCTestCase {
 
         let controllerRootNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
             guard case .view(let capturedView) = reference else { return false }
-            return capturedView === controller.view
+            return capturedView.object === controller.view
         })?.key)
         let controllerRootNode = try XCTUnwrap(capture.nodes[controllerRootNodeID])
         XCTAssertEqual(controllerRootNode.rootViewControllerClassName, NSStringFromClass(ParentViewController.self))
@@ -644,11 +645,11 @@ final class ViewScopeServerTests: XCTestCase {
         let (capture, context) = builder.makeCapture()
         let controllerRootID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
             guard case .view(let capturedView) = reference else { return false }
-            return capturedView === controller.view
+            return capturedView.object === controller.view
         })?.key)
         let windowRootID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
             guard case .view(let capturedView) = reference else { return false }
-            return capturedView === window.contentView?.superview
+            return capturedView.object === window.contentView?.superview
         })?.key)
 
         XCTAssertFalse(capture.captureID.isEmpty)
@@ -701,8 +702,8 @@ final class ViewScopeServerTests: XCTestCase {
         let (capture, context) = builder.makeCapture()
         let containerNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
             switch reference {
-            case .layer(let layer): return layer.viewScopeHostView === container
-            case .view(let v): return v === container
+            case .layer(let layer): return layer.object?.viewScopeHostView === container
+            case .view(let v): return v.object === container
             default: return false
             }
         })?.key)
@@ -789,8 +790,8 @@ final class ViewScopeServerTests: XCTestCase {
         let (capture, context) = builder.makeCapture()
         let stackNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
             switch reference {
-            case .layer(let layer): return layer.viewScopeHostView === stack
-            case .view(let v): return v === stack
+            case .layer(let layer): return layer.object?.viewScopeHostView === stack
+            case .view(let v): return v.object === stack
             default: return false
             }
         })?.key)
@@ -847,8 +848,8 @@ final class ViewScopeServerTests: XCTestCase {
         let (capture, context) = builder.makeCapture()
         let containerNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
             switch reference {
-            case .layer(let layer): return layer.viewScopeHostView === container
-            case .view(let v): return v === container
+            case .layer(let layer): return layer.object?.viewScopeHostView === container
+            case .view(let v): return v.object === container
             default: return false
             }
         })?.key)
@@ -905,8 +906,8 @@ final class ViewScopeServerTests: XCTestCase {
         let (capture, context) = builder.makeCapture()
         let containerNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
             switch reference {
-            case .layer(let layer): return layer.viewScopeHostView === container
-            case .view(let v): return v === container
+            case .layer(let layer): return layer.object?.viewScopeHostView === container
+            case .view(let v): return v.object === container
             default: return false
             }
         })?.key)
@@ -975,15 +976,15 @@ final class ViewScopeServerTests: XCTestCase {
         let (_, context) = builder.makeCapture()
         let sidebarNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
             switch reference {
-            case .layer(let layer): return layer.viewScopeHostView === sidebarController.sidebarRoot
-            case .view(let v): return v === sidebarController.sidebarRoot
+            case .layer(let layer): return layer.object?.viewScopeHostView === sidebarController.sidebarRoot
+            case .view(let v): return v.object === sidebarController.sidebarRoot
             default: return false
             }
         })?.key)
         let contentRootNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
             switch reference {
-            case .layer(let layer): return layer.viewScopeHostView === window.contentView?.superview
-            case .view(let v): return v === window.contentView?.superview
+            case .layer(let layer): return layer.object?.viewScopeHostView === window.contentView?.superview
+            case .view(let v): return v.object === window.contentView?.superview
             default: return false
             }
         })?.key)
@@ -1064,15 +1065,15 @@ final class ViewScopeServerTests: XCTestCase {
         let (_, context) = builder.makeCapture()
         let contentRootNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
             switch reference {
-            case .layer(let layer): return layer.viewScopeHostView === window.contentView?.superview
-            case .view(let v): return v === window.contentView?.superview
+            case .layer(let layer): return layer.object?.viewScopeHostView === window.contentView?.superview
+            case .view(let v): return v.object === window.contentView?.superview
             default: return false
             }
         })?.key)
         let detailSubviewNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
             switch reference {
-            case .layer(let layer): return layer.viewScopeHostView === detailController.detailSubview
-            case .view(let v): return v === detailController.detailSubview
+            case .layer(let layer): return layer.object?.viewScopeHostView === detailController.detailSubview
+            case .view(let v): return v.object === detailController.detailSubview
             default: return false
             }
         })?.key)
@@ -1155,8 +1156,8 @@ final class ViewScopeServerTests: XCTestCase {
         let (_, context) = builder.makeCapture()
         let markerNodeID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
             switch reference {
-            case .layer(let layer): return layer.viewScopeHostView === sidebarController.marker
-            case .view(let v): return v === sidebarController.marker
+            case .layer(let layer): return layer.object?.viewScopeHostView === sidebarController.marker
+            case .view(let v): return v.object === sidebarController.marker
             default: return false
             }
         })?.key)
@@ -1284,7 +1285,7 @@ final class ViewScopeServerTests: XCTestCase {
         let (_, context) = builder.makeCapture()
         let buttonID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
             guard case .view(let capturedView) = reference else { return false }
-            return capturedView === button
+            return capturedView.object === button
         })?.key)
         let detail = try XCTUnwrap(builder.makeDetail(for: buttonID, in: context))
 
@@ -1338,7 +1339,7 @@ final class ViewScopeServerTests: XCTestCase {
         let (capture, context) = builder.makeCapture()
         let buttonID = try XCTUnwrap(context.nodeReferences.first(where: { _, reference in
             guard case .view(let capturedView) = reference else { return false }
-            return capturedView === button
+            return capturedView.object === button
         })?.key)
         let node = try XCTUnwrap(capture.nodes[buttonID])
         let handlers = try XCTUnwrap(node.eventHandlers)
@@ -1579,7 +1580,7 @@ final class ViewScopeServerTests: XCTestCase {
         let (_, context) = builder.makeCapture()
         guard let childID = context.nodeReferences.first(where: { _, reference in
             guard case .view(let capturedView) = reference else { return false }
-            return capturedView == child
+            return capturedView.object === child
         })?.key else {
             return XCTFail("Expected to capture the child view")
         }
@@ -1623,7 +1624,7 @@ final class ViewScopeServerTests: XCTestCase {
         let (capture, context) = builder.makeCapture()
         guard let childID = context.nodeReferences.first(where: { _, reference in
             guard case .view(let capturedView) = reference else { return false }
-            return capturedView == child
+            return capturedView.object === child
         })?.key else {
             return XCTFail("Expected to capture the child view")
         }
@@ -1718,7 +1719,7 @@ final class ViewScopeServerTests: XCTestCase {
         let (_, context) = builder.makeCapture()
         guard let childID = context.nodeReferences.first(where: { _, reference in
             guard case .view(let capturedView) = reference else { return false }
-            return capturedView == child
+            return capturedView.object === child
         })?.key else {
             return XCTFail("Expected to capture the mixed-flip child view")
         }
@@ -1767,26 +1768,26 @@ final class ViewScopeServerTests: XCTestCase {
         let (_, context) = builder.makeCapture()
         let rootNodeID = try! XCTUnwrap(context.nodeReferences.first(where: { _, reference in
             switch reference {
-            case .layer(let layer): return layer.viewScopeHostView === root
-            case .view(let v): return v === root
+            case .layer(let layer): return layer.object?.viewScopeHostView === root
+            case .view(let v): return v.object === root
             default: return false
             }
         })?.key)
         let detail = try! XCTUnwrap(builder.makeDetail(for: rootNodeID, in: context))
         let screenshot = try! XCTUnwrap(decodedImage(fromBase64PNG: detail.screenshotPNGBase64))
 
+        // 用“左上角原点、单位 point”的显示坐标取样：
+        // colorAt(x:y:) 本身就是左上角原点，且截图可能是 @2x，不能直接把 point 当像素或再翻转 y。
         let topPixel = try! XCTUnwrap(
             rgbaPixel(
                 in: screenshot,
-                x: 16,
-                y: Int(screenshot.size.height) - 16
+                atDisplayPoint: CGPoint(x: 16, y: 16)
             )
         )
         let bottomPixel = try! XCTUnwrap(
             rgbaPixel(
                 in: screenshot,
-                x: 16,
-                y: 16
+                atDisplayPoint: CGPoint(x: 16, y: screenshot.size.height - 16)
             )
         )
 
@@ -1825,26 +1826,26 @@ final class ViewScopeServerTests: XCTestCase {
         let (_, context) = builder.makeCapture()
         let rootNodeID = try! XCTUnwrap(context.nodeReferences.first(where: { _, reference in
             switch reference {
-            case .layer(let layer): return layer.viewScopeHostView === root
-            case .view(let v): return v === root
+            case .layer(let layer): return layer.object?.viewScopeHostView === root
+            case .view(let v): return v.object === root
             default: return false
             }
         })?.key)
         let detail = try! XCTUnwrap(builder.makeDetail(for: rootNodeID, in: context))
         let screenshot = try! XCTUnwrap(decodedImage(fromBase64PNG: detail.screenshotPNGBase64))
 
+        // 用“左上角原点、单位 point”的显示坐标取样：
+        // colorAt(x:y:) 本身就是左上角原点，且截图可能是 @2x，不能直接把 point 当像素或再翻转 y。
         let topPixel = try! XCTUnwrap(
             rgbaPixel(
                 in: screenshot,
-                x: 16,
-                y: Int(screenshot.size.height) - 16
+                atDisplayPoint: CGPoint(x: 16, y: 16)
             )
         )
         let bottomPixel = try! XCTUnwrap(
             rgbaPixel(
                 in: screenshot,
-                x: 16,
-                y: 16
+                atDisplayPoint: CGPoint(x: 16, y: screenshot.size.height - 16)
             )
         )
 
@@ -1936,3 +1937,4 @@ private final class FlippedFixtureView: NSView {
         true
     }
 }
+#endif

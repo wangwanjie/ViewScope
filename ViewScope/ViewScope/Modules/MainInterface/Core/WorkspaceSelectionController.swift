@@ -66,14 +66,14 @@ final class WorkspaceSelectionController {
             expandedNodeIDs: nextExpandedNodeIDs,
             showsSystemWrapperViews: showsSystemWrapperViews
         )
-        // 收起节点导致选中节点不可见时，直接清除选中
-        // focusedNodeID 则回退到最近可见祖节点，保持子树聚焦连续性。
-        let resolvedSelectedNodeID: String? = if let selectedNodeID,
-            visibleNodeIDs.contains(selectedNodeID) {
-            selectedNodeID
-        } else {
-            nil
-        }
+        // 收起节点导致选中节点不可见时，选中回退到最近的可见祖先（通常就是被收起的节点），
+        // 与 Xcode / Lookin 的行为一致，避免一次折叠就丢失选中；focusedNodeID 同样回退到最近可见祖先。
+        let resolvedSelectedNodeID = resolvedVisibleSelectionTarget(
+            from: selectedNodeID,
+            capture: capture,
+            visibleNodeIDs: visibleNodeIDs,
+            showsSystemWrapperViews: showsSystemWrapperViews
+        )
         return WorkspaceExpansionUpdate(
             expandedNodeIDs: nextExpandedNodeIDs,
             selectedNodeID: resolvedSelectedNodeID,
@@ -112,7 +112,8 @@ final class WorkspaceSelectionController {
         selectedNodeDetailNodeID: String?,
         expandedNodeIDs: Set<String>,
         showsSystemWrapperViews: Bool,
-        forceReloadDetail: Bool
+        forceReloadDetail: Bool,
+        allowsDefaultRootSelection: Bool = true
     ) -> WorkspaceSelectionNormalizationResult {
         guard let capture else {
             return WorkspaceSelectionNormalizationResult(
@@ -159,6 +160,9 @@ final class WorkspaceSelectionController {
             showsSystemWrapperViews: showsSystemWrapperViews
         )
 
+        // 只有在“首次抓取”等允许默认选中的场景才回退到根节点；
+        // 用户主动清空选中后的自动刷新不应再把根节点选回来。
+        let fallbackNodeID = allowsDefaultRootSelection ? capture.rootNodeIDs.first : nil
         let targetNodeID: String?
         if let preferredNodeID {
             targetNodeID = resolvedVisibleSelectionTarget(
@@ -166,16 +170,16 @@ final class WorkspaceSelectionController {
                 capture: capture,
                 visibleNodeIDs: visibleNodeIDs,
                 showsSystemWrapperViews: showsSystemWrapperViews
-            ) ?? capture.rootNodeIDs.first
+            ) ?? fallbackNodeID
         } else if let nextSelectedNodeID {
             targetNodeID = resolvedVisibleSelectionTarget(
                 from: nextSelectedNodeID,
                 capture: capture,
                 visibleNodeIDs: visibleNodeIDs,
                 showsSystemWrapperViews: showsSystemWrapperViews
-            ) ?? capture.rootNodeIDs.first
+            ) ?? fallbackNodeID
         } else {
-            targetNodeID = capture.rootNodeIDs.first
+            targetNodeID = fallbackNodeID
         }
 
         if let targetNodeID {

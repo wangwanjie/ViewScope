@@ -2,7 +2,7 @@ import Foundation
 import GRDB
 import ViewScopeServer
 
-struct RecentHostRecord: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatable {
+nonisolated struct RecentHostRecord: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatable {
     static let databaseTableName = "recent_hosts"
 
     var bundleIdentifier: String
@@ -16,7 +16,7 @@ struct RecentHostRecord: Codable, FetchableRecord, PersistableRecord, Identifiab
     var id: String { bundleIdentifier }
 }
 
-struct CaptureHistoryRecord: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatable {
+nonisolated struct CaptureHistoryRecord: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatable {
     static let databaseTableName = "capture_history"
 
     var id: Int64?
@@ -28,13 +28,19 @@ struct CaptureHistoryRecord: Codable, FetchableRecord, PersistableRecord, Identi
 }
 
 /// Stores recent host connections and lightweight capture history for the workspace.
-final class AppDatabase {
+///
+/// GRDB 的 `DatabaseQueue` 自身是线程安全的串行队列，因此这里声明为非主线程隔离，
+/// 允许 Store 把写入放到后台任务执行，避免阻塞主线程。
+nonisolated final class AppDatabase: @unchecked Sendable {
     private let dbQueue: DatabaseQueue
 
     init(databaseURL: URL) throws {
         var configuration = Configuration()
         configuration.foreignKeysEnabled = true
         configuration.readonly = false
+        // 写入已移到后台任务；同一文件可能被多个连接短暂占用（例如测试中先后创建的 Store），
+        // 遇到锁时等待而不是立即报错
+        configuration.busyMode = .timeout(3)
         dbQueue = try DatabaseQueue(path: databaseURL.path, configuration: configuration)
         try migrator.migrate(dbQueue)
     }

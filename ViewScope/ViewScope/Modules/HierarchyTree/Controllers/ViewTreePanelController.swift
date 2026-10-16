@@ -6,20 +6,47 @@ import ViewScopeServer
 
 @MainActor
 final class ViewTreePanelController: NSViewController {
+    /// 搜索输入防抖时长（秒）。
+    private static let searchDebounceInterval: TimeInterval = 0.15
+    /// 方向键切换选中时，节点详情请求的防抖时长（秒）。
+    private static let keyboardSelectionDebounceInterval: TimeInterval = 0.12
+
     private let store: WorkspaceStore
     private let presentationBuilder = ViewTreePresentationBuilder()
     private let selectionSynchronizer = ViewTreeSelectionSynchronizer()
     private let panelView = WorkspacePanelContainerView()
     private let searchField = NSSearchField(frame: .zero)
+    private let searchMatchLabel = NSTextField(labelWithString: "")
+    private let previousMatchButton = NSButton()
+    private let nextMatchButton = NSButton()
     private let wrapperToggle = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let issuesOnlyToggle = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let scrollView = NSScrollView()
-    private let outlineView = NSOutlineView()
+    private let outlineView = ViewTreeOutlineView()
     private let emptyStateView = WorkspaceEmptyStateView()
     private var cancellables = Set<AnyCancellable>()
     private var rootItems: [ViewTreeNodeItem] = []
+    private var itemsByNodeID: [String: ViewTreeNodeItem] = [:]
     private var currentQuery = ""
+    /// 当前搜索命中的节点（先序顺序），用于“上一个 / 下一个”。
+    private var searchMatchNodeIDs: [String] = []
+    private var currentMatchIndex: Int?
+    private var searchDebounceTimer: Timer?
+    private var keyboardSelectionTimer: Timer?
+    private var isExpansionSyncScheduled = false
+    private var lastFocusedNodeID: String?
+    private var diagnosticsReport = LayoutDiagnosticsReport.empty
     /// rebuild 期间置 true，忽略 NSOutlineView 回调避免级联循环。
     private var isBatchUpdating = false
+
+    /// 是否处于过滤模式（搜索或只看问题节点）：此时展开状态由过滤结果决定，不与 store 同步。
+    private var isFiltering: Bool {
+        normalizedQuery.isEmpty == false || store.inspectionTools.showsOnlyIssueNodes
+    }
+
+    private var normalizedQuery: String {
+        currentQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
 
     init(store: WorkspaceStore) {
         self.store = store
@@ -50,11 +77,25 @@ final class ViewTreePanelController: NSViewController {
 
         searchField.placeholderString = L10n.searchPlaceholder
         searchField.delegate = self
+        searchField.sendsSearchStringImmediately = true
+
+        searchMatchLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .medium)
+        searchMatchLabel.textColor = .secondaryLabelColor
+        searchMatchLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        configureMatchButton(previousMatchButton, symbolName: "chevron.up", toolTip: L10n.previewToolsSearchPrevious, action: #selector(selectPreviousMatch(_:)))
+        configureMatchButton(nextMatchButton, symbolName: "chevron.down", toolTip: L10n.previewToolsSearchNext, action: #selector(selectNextMatch(_:)))
+
         wrapperToggle.title = L10n.hierarchyShowSystemWrappers
         wrapperToggle.state = store.showsSystemWrapperViews ? .on : .off
         wrapperToggle.target = self
         wrapperToggle.action = #selector(handleWrapperToggle(_:))
         wrapperToggle.font = NSFont.systemFont(ofSize: 11)
+
+        issuesOnlyToggle.title = L10n.previewToolsTreeOnlyIssues
+        issuesOnlyToggle.state = store.inspectionTools.showsOnlyIssueNodes ? .on : .off
+        issuesOnlyToggle.target = self
+        issuesOnlyToggle.action = #selector(handleIssuesOnlyToggle(_:))
+        issuesOnlyToggle.font = NSFont.systemFont(ofSize: 11)
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("ViewTreeColumn"))
         outlineView.addTableColumn(column)
@@ -67,31 +108,71 @@ final class ViewTreePanelController: NSViewController {
         outlineView.delegate = self
         outlineView.dataSource = self
         outlineView.menu = makeContextMenu()
+        outlineView.onHoverRowChanged = { [weak self] row in
+            self?.handleHoverRowChanged(row)
+        }
+        outlineView.onFindRequested = { [weak self] in
+            self?.focusSearchField()
+        }
 
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
         scrollView.hasVerticalScroller = true
         scrollView.documentView = outlineView
 
+        let togglesStack = NSStackView(views: [wrapperToggle, issuesOnlyToggle])
+        togglesStack.orientation = .horizontal
+        togglesStack.spacing = 12
+        togglesStack.alignment = .centerY
+
         panelView.contentView.addSubview(searchField)
-        panelView.contentView.addSubview(wrapperToggle)
+        panelView.contentView.addSubview(searchMatchLabel)
+        panelView.contentView.addSubview(previousMatchButton)
+        panelView.contentView.addSubview(nextMatchButton)
+        panelView.contentView.addSubview(togglesStack)
         panelView.contentView.addSubview(scrollView)
         panelView.contentView.addSubview(emptyStateView)
         searchField.snp.makeConstraints { make in
-            make.top.leading.trailing.equalToSuperview().inset(12)
+            make.top.leading.equalToSuperview().inset(12)
         }
-        wrapperToggle.snp.makeConstraints { make in
+        searchMatchLabel.snp.makeConstraints { make in
+            make.centerY.equalTo(searchField)
+            make.leading.equalTo(searchField.snp.trailing).offset(6)
+        }
+        previousMatchButton.snp.makeConstraints { make in
+            make.centerY.equalTo(searchField)
+            make.leading.equalTo(searchMatchLabel.snp.trailing).offset(4)
+            make.width.height.equalTo(20)
+        }
+        nextMatchButton.snp.makeConstraints { make in
+            make.centerY.equalTo(searchField)
+            make.leading.equalTo(previousMatchButton.snp.trailing).offset(2)
+            make.trailing.equalToSuperview().inset(12)
+            make.width.height.equalTo(20)
+        }
+        togglesStack.snp.makeConstraints { make in
             make.top.equalTo(searchField.snp.bottom).offset(6)
             make.leading.equalToSuperview().inset(12)
             make.trailing.lessThanOrEqualToSuperview().inset(12)
         }
         scrollView.snp.makeConstraints { make in
-            make.top.equalTo(wrapperToggle.snp.bottom).offset(8)
+            make.top.equalTo(togglesStack.snp.bottom).offset(8)
             make.leading.trailing.bottom.equalToSuperview()
         }
         emptyStateView.snp.makeConstraints { make in
             make.edges.equalToSuperview()
         }
+        updateSearchMatchControls()
+    }
+
+    private func configureMatchButton(_ button: NSButton, symbolName: String, toolTip: String, action: Selector) {
+        button.bezelStyle = .texturedRounded
+        button.isBordered = false
+        button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: toolTip)
+        button.imagePosition = .imageOnly
+        button.toolTip = toolTip
+        button.target = self
+        button.action = action
     }
 
     private func bindStore() {
@@ -107,39 +188,152 @@ final class ViewTreePanelController: NSViewController {
         store.$selectedNodeID
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                guard let self, !self.isBatchUpdating else { return }
+                guard let self, !self.isBatchUpdating else {
+                    return
+                }
                 self.syncSelectionFromStore()
+            }
+            .store(in: &cancellables)
+
+        // 展开状态由 store 统一维护（包括折叠时清除的后代展开态），树只负责跟随。
+        store.$expandedNodeIDs
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.scheduleExpansionSync()
+            }
+            .store(in: &cancellables)
+
+        let tools = store.inspectionTools
+        tools.$hoveredNodeID
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] nodeID in
+                self?.applyHoverHighlight(nodeID)
+            }
+            .store(in: &cancellables)
+
+        tools.$showsOnlyIssueNodes
+            .dropFirst()
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] showsOnlyIssueNodes in
+                self?.issuesOnlyToggle.state = showsOnlyIssueNodes ? .on : .off
+                self?.rebuildTree()
+            }
+            .store(in: &cancellables)
+
+        tools.$showsDiagnostics
+            .dropFirst()
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.reloadVisibleCells()
+            }
+            .store(in: &cancellables)
+
+        tools.searchFocusRequests
+            .receive(on: RunLoop.main)
+            .sink { [weak self] in
+                self?.focusSearchField()
             }
             .store(in: &cancellables)
     }
 
+    // MARK: - 重建
+
     private func rebuildTree() {
         isBatchUpdating = true
-        defer { isBatchUpdating = false }
+        defer {
+            isBatchUpdating = false
+        }
 
         panelView.setTitle(L10n.hierarchy, subtitle: store.focusedNode?.title)
         wrapperToggle.state = store.showsSystemWrapperViews ? .on : .off
+        diagnosticsReport = store.inspectionTools.diagnosticsReport(for: store.capture)
+        ensureFocusedRootExpandedInStore()
+
+        let query = normalizedQuery
+        let showsOnlyIssues = store.inspectionTools.showsOnlyIssueNodes
+        let report = diagnosticsReport
+        let nodeFilter: ((ViewScopeHierarchyNode) -> Bool)?
+        if showsOnlyIssues {
+            nodeFilter = { node in
+                report.issuesByNodeID[node.id]?.isEmpty == false
+            }
+        } else {
+            nodeFilter = nil
+        }
         rootItems = presentationBuilder.buildRoots(
             capture: store.capture,
             focusedNodeID: store.focusedNodeID,
             showsSystemWrappers: store.showsSystemWrapperViews,
-            query: currentQuery
+            query: query,
+            nodeFilter: nodeFilter
         )
+        rebuildItemIndex()
         updateEmptyState()
+
+        // 保留滚动位置：刷新 capture（稳定节点 ID）后用户不会被跳回顶部。
+        let savedScrollOrigin = scrollView.contentView.bounds.origin
+        outlineView.resetHoverTracking()
         selectionSynchronizer.withProgrammaticSelection {
             outlineView.reloadData()
-            restoreExpansionState(items: rootItems)
+            if isFiltering {
+                expandFilterPaths(items: rootItems)
+            } else {
+                restoreExpansionState(items: rootItems)
+            }
         }
+        scrollView.contentView.scroll(to: savedScrollOrigin)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+
+        searchMatchNodeIDs = query.isEmpty ? [] : collectMatchNodeIDs(items: rootItems)
+        if let currentMatchIndex, currentMatchIndex >= searchMatchNodeIDs.count {
+            self.currentMatchIndex = nil
+        }
+        updateSearchMatchControls()
         syncSelectionFromStore()
+        applyHoverHighlight(store.inspectionTools.hoveredNodeID)
+    }
+
+    private func rebuildItemIndex() {
+        var index: [String: ViewTreeNodeItem] = [:]
+        var stack = rootItems
+        while let item = stack.popLast() {
+            index[item.node.id] = item
+            stack.append(contentsOf: item.children)
+        }
+        itemsByNodeID = index
+    }
+
+    /// 聚焦子树时树根被强制展开；同步告诉 store，让预览里的子节点也分层显示。
+    private func ensureFocusedRootExpandedInStore() {
+        let focusedNodeID = store.focusedNodeID
+        defer {
+            lastFocusedNodeID = focusedNodeID
+        }
+        guard let focusedNodeID,
+              focusedNodeID != lastFocusedNodeID,
+              store.isNodeExpanded(focusedNodeID) == false,
+              store.node(withID: focusedNodeID)?.childIDs.isEmpty == false else {
+            return
+        }
+        store.setNodeExpanded(focusedNodeID, isExpanded: true)
     }
 
     private func updateEmptyState() {
         let isDisconnected = store.capture == nil
         emptyStateView.isHidden = !isDisconnected
         searchField.isHidden = isDisconnected
+        searchMatchLabel.isHidden = isDisconnected
+        previousMatchButton.isHidden = isDisconnected
+        nextMatchButton.isHidden = isDisconnected
         wrapperToggle.isHidden = isDisconnected
+        issuesOnlyToggle.isHidden = isDisconnected
         scrollView.isHidden = isDisconnected
-        guard isDisconnected else { return }
+        guard isDisconnected else {
+            return
+        }
 
         emptyStateView.configure(
             .init(
@@ -161,24 +355,213 @@ final class ViewTreePanelController: NSViewController {
         }
     }
 
-    private func syncSelectionFromStore() {
-        selectionSynchronizer.syncSelection(
-            selectedNodeID: store.selectedNodeID,
-            rootItems: rootItems,
-            outlineView: outlineView
-        ) { [weak self] item in
-            self?.expandAncestors(of: item)
+    /// 过滤模式下展开所有“通往命中节点”的路径，命中节点本身保持折叠（其完整子树仍可手动展开）。
+    private func expandFilterPaths(items: [ViewTreeNodeItem]) {
+        for item in items where item.isOnFilterPath {
+            outlineView.expandItem(item)
+            expandFilterPaths(items: item.children)
         }
     }
 
-    private func expandAncestors(of item: ViewTreeNodeItem) {
-        var currentItem = item.parent
-        while let current = currentItem {
-            store.setNodeExpanded(current.node.id, isExpanded: true)
-            outlineView.expandItem(current)
-            currentItem = current.parent
+    private func collectMatchNodeIDs(items: [ViewTreeNodeItem]) -> [String] {
+        var result: [String] = []
+        var stack = Array(items.reversed())
+        while let item = stack.popLast() {
+            if item.isFilterMatch {
+                result.append(item.node.id)
+            }
+            stack.append(contentsOf: item.children.reversed())
+        }
+        return result
+    }
+
+    // MARK: - 展开状态同步
+
+    private func scheduleExpansionSync() {
+        guard isExpansionSyncScheduled == false else {
+            return
+        }
+        isExpansionSyncScheduled = true
+        MainRunLoopScheduler.perform { [weak self] in
+            guard let self else {
+                return
+            }
+            self.isExpansionSyncScheduled = false
+            self.syncExpansionFromStore()
         }
     }
+
+    /// 让 NSOutlineView 的展开态与 store 完全一致：折叠时连同后代一起折叠，避免再次展开时孙节点“自动复原”。
+    private func syncExpansionFromStore() {
+        guard isFiltering == false, rootItems.isEmpty == false else {
+            return
+        }
+        isBatchUpdating = true
+        defer {
+            isBatchUpdating = false
+        }
+        selectionSynchronizer.withProgrammaticSelection {
+            var stack = rootItems
+            while let item = stack.popLast() {
+                let shouldExpand = item.parent == nil || store.isNodeExpanded(item.node.id)
+                let isExpanded = outlineView.isItemExpanded(item)
+                if shouldExpand {
+                    if isExpanded == false {
+                        outlineView.expandItem(item)
+                    }
+                    stack.append(contentsOf: item.children)
+                } else if isExpanded {
+                    outlineView.collapseItem(item, collapseChildren: true)
+                }
+            }
+        }
+        syncSelectionFromStore()
+    }
+
+    // MARK: - 选中同步
+
+    private func syncSelectionFromStore() {
+        selectionSynchronizer.syncSelection(
+            selectedNodeID: store.selectedNodeID,
+            item: store.selectedNodeID.flatMap { itemsByNodeID[$0] },
+            outlineView: outlineView
+        ) { [weak self] item in
+            self?.revealItem(item)
+        }
+    }
+
+    /// 让某个节点在树中可见：store 原子地展开全部祖先，界面上逐级展开（不再回写 store）。
+    private func revealItem(_ item: ViewTreeNodeItem) {
+        var ancestors: [ViewTreeNodeItem] = []
+        var currentItem = item.parent
+        while let current = currentItem {
+            ancestors.append(current)
+            currentItem = current.parent
+        }
+        // 只有确实存在未展开的祖先时才写 store，避免无意义地重复发布 expandedNodeIDs。
+        let hasCollapsedAncestor = ancestors.contains { $0.parent != nil && store.isNodeExpanded($0.node.id) == false }
+        if isFiltering == false, hasCollapsedAncestor {
+            store.expandAncestors(of: item.node.id)
+        }
+        let wasBatchUpdating = isBatchUpdating
+        isBatchUpdating = true
+        for ancestor in ancestors.reversed() where outlineView.isItemExpanded(ancestor) == false {
+            outlineView.expandItem(ancestor)
+        }
+        isBatchUpdating = wasBatchUpdating
+    }
+
+    // MARK: - 悬停
+
+    private func handleHoverRowChanged(_ row: Int) {
+        guard row >= 0, let item = outlineView.item(atRow: row) as? ViewTreeNodeItem else {
+            store.inspectionTools.clearHover()
+            return
+        }
+        store.inspectionTools.setHoveredNodeIDCoalesced(item.node.id)
+    }
+
+    private func applyHoverHighlight(_ hoveredNodeID: String?) {
+        outlineView.enumerateAvailableRowViews { rowView, row in
+            guard let rowView = rowView as? ViewTreeRowView else {
+                return
+            }
+            let item = self.outlineView.item(atRow: row) as? ViewTreeNodeItem
+            rowView.isHovered = hoveredNodeID != nil && item?.node.id == hoveredNodeID
+        }
+    }
+
+    private func reloadVisibleCells() {
+        let visibleRows = outlineView.rows(in: outlineView.visibleRect)
+        guard visibleRows.length > 0 else {
+            return
+        }
+        outlineView.reloadData(
+            forRowIndexes: IndexSet(integersIn: visibleRows.location..<(visibleRows.location + visibleRows.length)),
+            columnIndexes: IndexSet(integer: 0)
+        )
+    }
+
+    // MARK: - 搜索
+
+    private func focusSearchField() {
+        guard searchField.isHidden == false else {
+            return
+        }
+        view.window?.makeFirstResponder(searchField)
+    }
+
+    private func scheduleSearch(_ query: String) {
+        searchDebounceTimer?.invalidate()
+        searchDebounceTimer = MainRunLoopScheduler.schedule(after: Self.searchDebounceInterval) { [weak self] in
+            self?.applySearch(query)
+        }
+    }
+
+    private func applySearch(_ query: String) {
+        guard query != currentQuery else {
+            return
+        }
+        currentQuery = query
+        currentMatchIndex = nil
+        rebuildTree()
+        // 搜索结果第一条自动滚动到可见区域，但不改变选中。
+        if let firstMatch = searchMatchNodeIDs.first,
+           let item = itemsByNodeID[firstMatch] {
+            let row = outlineView.row(forItem: item)
+            if row >= 0 {
+                outlineView.scrollRowToVisible(row)
+            }
+        }
+    }
+
+    private func updateSearchMatchControls() {
+        let hasQuery = normalizedQuery.isEmpty == false
+        searchMatchLabel.isHidden = hasQuery == false || store.capture == nil
+        previousMatchButton.isEnabled = searchMatchNodeIDs.isEmpty == false
+        nextMatchButton.isEnabled = searchMatchNodeIDs.isEmpty == false
+        guard hasQuery else {
+            searchMatchLabel.stringValue = ""
+            return
+        }
+        if searchMatchNodeIDs.isEmpty {
+            searchMatchLabel.stringValue = L10n.previewToolsSearchNoMatch
+        } else {
+            searchMatchLabel.stringValue = L10n.previewToolsSearchMatchCount(
+                current: (currentMatchIndex ?? -1) + 1,
+                total: searchMatchNodeIDs.count
+            )
+        }
+    }
+
+    @objc private func selectNextMatch(_ sender: Any?) {
+        moveToMatch(offset: 1)
+    }
+
+    @objc private func selectPreviousMatch(_ sender: Any?) {
+        moveToMatch(offset: -1)
+    }
+
+    private func moveToMatch(offset: Int) {
+        guard searchMatchNodeIDs.isEmpty == false else {
+            return
+        }
+        let count = searchMatchNodeIDs.count
+        let nextIndex: Int
+        if let currentMatchIndex {
+            nextIndex = ((currentMatchIndex + offset) % count + count) % count
+        } else {
+            nextIndex = offset >= 0 ? 0 : count - 1
+        }
+        currentMatchIndex = nextIndex
+        updateSearchMatchControls()
+        let nodeID = searchMatchNodeIDs[nextIndex]
+        Task { @MainActor [weak self] in
+            await self?.store.selectNode(withID: nodeID)
+        }
+    }
+
+    // MARK: - 右键菜单
 
     private func makeContextMenu() -> NSMenu {
         let menu = NSMenu()
@@ -186,104 +569,182 @@ final class ViewTreePanelController: NSViewController {
         return menu
     }
 
-    @objc private func focusSelectedNode(_ sender: Any?) {
-        store.focusSelectedNode()
+    /// 菜单作用的节点：右键点中的行优先，否则为当前选中行。所有菜单项都作用于同一个节点。
+    private var menuTargetItem: ViewTreeNodeItem? {
+        let row = outlineView.clickedRow >= 0 ? outlineView.clickedRow : outlineView.selectedRow
+        guard row >= 0 else {
+            return nil
+        }
+        return outlineView.item(atRow: row) as? ViewTreeNodeItem
+    }
+
+    @objc private func focusMenuTargetNode(_ sender: Any?) {
+        guard let nodeID = menuTargetItem?.node.id else {
+            return
+        }
+        store.setFocusedNode(nodeID)
     }
 
     @objc private func clearFocus(_ sender: Any?) {
         store.clearFocus()
     }
 
-    @objc private func toggleSelectedNodeVisibility(_ sender: Any?) {
-        guard let nodeID = selectedMenuItemNodeID else { return }
-        Task { await store.toggleVisibility(for: nodeID) }
+    @objc private func toggleMenuTargetVisibility(_ sender: Any?) {
+        guard let nodeID = menuTargetItem?.node.id else {
+            return
+        }
+        Task {
+            await store.toggleVisibility(for: nodeID)
+        }
     }
 
-    @objc private func highlightSelectedNode(_ sender: Any?) {
-        Task { await store.highlightCurrentSelection() }
+    /// 高亮右键点中的节点：先选中它（不重复闪烁），再在宿主中高亮。
+    @objc private func highlightMenuTargetNode(_ sender: Any?) {
+        guard let nodeID = menuTargetItem?.node.id else {
+            return
+        }
+        Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+            if self.store.selectedNodeID != nodeID {
+                await self.store.selectNode(withID: nodeID, highlightInHost: false)
+            }
+            await self.store.highlightCurrentSelection()
+        }
     }
 
+    /// 手动刷新保留展开状态与滚动位置（节点 ID 跨抓取稳定）。
     @objc private func refreshCapture(_ sender: Any?) {
-        Task { await store.refreshCapture(forceReloadSelectionDetail: true, clearingVisibleState: true) }
+        Task {
+            await store.refreshCapture(forceReloadSelectionDetail: true, clearingVisibleState: false)
+        }
     }
 
     @objc private func handleWrapperToggle(_ sender: Any?) {
         store.setShowsSystemWrapperViews(wrapperToggle.state == .on)
     }
 
+    @objc private func handleIssuesOnlyToggle(_ sender: Any?) {
+        store.inspectionTools.showsOnlyIssueNodes = issuesOnlyToggle.state == .on
+    }
+
     @objc private func copySelectedNodeTitle(_ sender: Any?) {
-        copyToPasteboard(selectedMenuItem?.node.title)
+        copyToPasteboard(menuTargetItem?.node.title)
     }
 
     @objc private func copySelectedNodeClassName(_ sender: Any?) {
-        copyToPasteboard(selectedMenuItem.map { ViewScopeClassNameFormatter.displayName(for: $0.node.className) })
+        copyToPasteboard(menuTargetItem.map { ViewScopeClassNameFormatter.displayName(for: $0.node.className) })
     }
 
     @objc private func copySelectedNodeControllerClassName(_ sender: Any?) {
-        copyToPasteboard(selectedMenuItem.flatMap { ViewTreeNodePresentation.controllerClassNameText(for: $0.node) })
+        copyToPasteboard(menuTargetItem.flatMap { ViewTreeNodePresentation.controllerClassNameText(for: $0.node) })
     }
 
     @objc private func copySelectedNodeIvarNames(_ sender: Any?) {
-        copyToPasteboard(selectedMenuItem.flatMap { ViewTreeNodePresentation.ivarText(for: $0.node) })
+        copyToPasteboard(menuTargetItem.flatMap { ViewTreeNodePresentation.ivarText(for: $0.node) })
     }
 
     @objc private func copySelectedNodeIdentifier(_ sender: Any?) {
-        copyToPasteboard(selectedMenuItem?.node.identifier)
+        copyToPasteboard(menuTargetItem?.node.identifier)
     }
 
     @objc private func copySelectedNodeAddress(_ sender: Any?) {
-        copyToPasteboard(selectedMenuItem?.node.address)
+        copyToPasteboard(menuTargetItem?.node.address)
     }
 
     @objc private func copySelectedNodeID(_ sender: Any?) {
-        copyToPasteboard(selectedMenuItem?.node.id)
+        copyToPasteboard(menuTargetItem?.node.id)
     }
 
-    @objc private func expandSelectedNodeChildren(_ sender: Any?) {
-        guard let item = selectedMenuItem else { return }
+    @objc private func expandMenuTargetChildren(_ sender: Any?) {
+        guard let item = menuTargetItem else {
+            return
+        }
         expandRecursively(item)
     }
 
-    @objc private func collapseSelectedNodeChildren(_ sender: Any?) {
-        guard let item = selectedMenuItem else { return }
+    @objc private func collapseMenuTargetChildren(_ sender: Any?) {
+        guard let item = menuTargetItem else {
+            return
+        }
         collapseDescendants(of: item)
     }
 
-    private var selectedMenuItemNodeID: String? {
-        selectedMenuItem?.node.id
-    }
-
-    private var selectedMenuItem: ViewTreeNodeItem? {
-        let row = outlineView.clickedRow >= 0 ? outlineView.clickedRow : outlineView.selectedRow
-        guard row >= 0 else { return nil }
-        return outlineView.item(atRow: row) as? ViewTreeNodeItem
-    }
-
     private func copyToPasteboard(_ value: String?) {
-        guard let value, !value.isEmpty else { return }
+        guard let value, !value.isEmpty else {
+            return
+        }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(value, forType: .string)
     }
 
+    /// 递归展开：界面上一次性展开整棵子树；store 只对子树的叶子调用原子的 `expandAncestors`，
+    /// 叶子的祖先链覆盖了子树里所有需要展开的节点，总代价 O(叶子数 × 深度)。
     private func expandRecursively(_ item: ViewTreeNodeItem) {
-        outlineView.expandItem(item)
-        store.setNodeExpanded(item.node.id, isExpanded: true)
-        item.children.forEach { expandRecursively($0) }
+        isBatchUpdating = true
+        selectionSynchronizer.withProgrammaticSelection {
+            outlineView.expandItem(item, expandChildren: true)
+        }
+        isBatchUpdating = false
+
+        guard isFiltering == false else {
+            return
+        }
+        var stack = [item]
+        var leafNodeIDs: [String] = []
+        while let current = stack.popLast() {
+            if current.children.isEmpty {
+                leafNodeIDs.append(current.node.id)
+            } else {
+                stack.append(contentsOf: current.children)
+            }
+        }
+        if leafNodeIDs.isEmpty {
+            store.setNodeExpanded(item.node.id, isExpanded: true)
+            return
+        }
+        // 一次性批量展开所有叶子的祖先，只发布一次展开状态
+        store.expandNodes(leafNodeIDs.compactMap { leafNodeID in
+            store.capture?.nodes[leafNodeID]?.parentID
+        })
     }
 
+    /// 折叠所有直接子节点（store 会连同它们的后代展开态一起清除）。
     private func collapseDescendants(of item: ViewTreeNodeItem) {
-        item.children.forEach {
-            collapseDescendants(of: $0)
-            outlineView.collapseItem($0)
-            store.setNodeExpanded($0.node.id, isExpanded: false)
+        isBatchUpdating = true
+        selectionSynchronizer.withProgrammaticSelection {
+            for child in item.children where child.children.isEmpty == false {
+                outlineView.collapseItem(child, collapseChildren: true)
+            }
+        }
+        isBatchUpdating = false
+
+        guard isFiltering == false else {
+            return
+        }
+        for child in item.children where child.children.isEmpty == false {
+            store.setNodeExpanded(child.node.id, isExpanded: false)
         }
     }
 }
 
 extension ViewTreePanelController: NSSearchFieldDelegate {
     func controlTextDidChange(_ obj: Notification) {
-        currentQuery = searchField.stringValue
-        rebuildTree()
+        scheduleSearch(searchField.stringValue)
+    }
+
+    /// 回车跳到下一个匹配（Shift+回车跳到上一个）。
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard control === searchField, commandSelector == #selector(NSResponder.insertNewline(_:)) else {
+            return false
+        }
+        // 先立即应用尚在防抖中的查询，保证跳转基于最新结果。
+        searchDebounceTimer?.invalidate()
+        applySearch(searchField.stringValue)
+        let isShiftPressed = NSApp.currentEvent?.modifierFlags.contains(.shift) == true
+        moveToMatch(offset: isShiftPressed ? -1 : 1)
+        return true
     }
 }
 
@@ -300,17 +761,36 @@ extension ViewTreePanelController: NSOutlineViewDataSource, NSOutlineViewDelegat
         (item as? ViewTreeNodeItem)?.children[index] ?? rootItems[index]
     }
 
+    func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
+        let rowView = ViewTreeRowView()
+        if let item = item as? ViewTreeNodeItem {
+            rowView.isHovered = item.node.id == store.inspectionTools.hoveredNodeID
+        }
+        return rowView
+    }
+
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
-        guard let item = item as? ViewTreeNodeItem else { return nil }
+        guard let item = item as? ViewTreeNodeItem else {
+            return nil
+        }
         let identifier = NSUserInterfaceItemIdentifier("ViewTreeCell")
         let cell = outlineView.makeView(withIdentifier: identifier, owner: self) as? ViewTreeNodeCellView ?? ViewTreeNodeCellView(frame: .zero)
         cell.identifier = identifier
-        cell.configure(node: item.node, isEffectivelyHidden: item.isEffectivelyHidden)
+        let showsDiagnostics = store.inspectionTools.showsDiagnostics
+        cell.configure(
+            node: item.node,
+            isEffectivelyHidden: item.isEffectivelyHidden,
+            issueSeverity: showsDiagnostics ? diagnosticsReport.maximumSeverity(for: item.node.id) : nil,
+            issueToolTip: showsDiagnostics ? diagnosticsReport.tooltip(for: item.node.id) : nil,
+            isSearchMatch: item.isFilterMatch && normalizedQuery.isEmpty == false
+        )
         return cell
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
-        guard !isBatchUpdating else { return }
+        guard !isBatchUpdating else {
+            return
+        }
         switch selectionSynchronizer.userSelectionChange(
             selectedRow: outlineView.selectedRow,
             itemAtRow: { row in
@@ -320,13 +800,32 @@ extension ViewTreePanelController: NSOutlineViewDataSource, NSOutlineViewDelegat
         case .ignored:
             return
         case .update(let nodeID):
-            Task { await store.selectNode(withID: nodeID) }
+            keyboardSelectionTimer?.invalidate()
+            // 方向键连续切换时防抖，只为最终停留的节点请求详情并在宿主中高亮。
+            if NSApp.currentEvent?.type == .keyDown {
+                keyboardSelectionTimer = MainRunLoopScheduler.schedule(after: Self.keyboardSelectionDebounceInterval) { [weak self] in
+                    guard let self else {
+                        return
+                    }
+                    Task {
+                        await self.store.selectNode(withID: nodeID)
+                    }
+                }
+            } else {
+                Task {
+                    await store.selectNode(withID: nodeID)
+                }
+            }
         }
     }
 
     func outlineViewItemDidExpand(_ notification: Notification) {
-        guard !isBatchUpdating else { return }
-        guard let item = notification.userInfo?["NSObject"] as? ViewTreeNodeItem else { return }
+        guard !isBatchUpdating, isFiltering == false else {
+            return
+        }
+        guard let item = notification.userInfo?["NSObject"] as? ViewTreeNodeItem else {
+            return
+        }
         store.setNodeExpanded(item.node.id, isExpanded: true)
     }
 
@@ -339,7 +838,12 @@ extension ViewTreePanelController: NSOutlineViewDataSource, NSOutlineViewDelegat
 
     func outlineViewItemDidCollapse(_ notification: Notification) {
         selectionSynchronizer.endProgrammaticSelection()
-        guard let item = notification.userInfo?["NSObject"] as? ViewTreeNodeItem else { return }
+        guard !isBatchUpdating, isFiltering == false else {
+            return
+        }
+        guard let item = notification.userInfo?["NSObject"] as? ViewTreeNodeItem else {
+            return
+        }
         store.setNodeExpanded(item.node.id, isExpanded: false)
     }
 }
@@ -347,18 +851,18 @@ extension ViewTreePanelController: NSOutlineViewDataSource, NSOutlineViewDelegat
 extension ViewTreePanelController: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        guard let nodeID = selectedMenuItemNodeID,
-              let node = store.node(withID: nodeID) else {
+        guard let targetItem = menuTargetItem else {
             return
         }
+        let node = targetItem.node
 
         let toggleTitle = node.isHidden ? L10n.hierarchyMenuShowView : L10n.hierarchyMenuHideView
-        let toggleItem = NSMenuItem(title: toggleTitle, action: #selector(toggleSelectedNodeVisibility(_:)), keyEquivalent: "")
+        let toggleItem = NSMenuItem(title: toggleTitle, action: #selector(toggleMenuTargetVisibility(_:)), keyEquivalent: "")
         toggleItem.target = self
         toggleItem.isEnabled = node.kind != .window
         menu.addItem(toggleItem)
 
-        let focusItem = NSMenuItem(title: L10n.hierarchyMenuFocusSubtree, action: #selector(focusSelectedNode(_:)), keyEquivalent: "")
+        let focusItem = NSMenuItem(title: L10n.hierarchyMenuFocusSubtree, action: #selector(focusMenuTargetNode(_:)), keyEquivalent: "")
         focusItem.target = self
         focusItem.isEnabled = true
         menu.addItem(focusItem)
@@ -368,9 +872,9 @@ extension ViewTreePanelController: NSMenuDelegate {
         clearFocusItem.isEnabled = store.focusedNodeID != nil
         menu.addItem(clearFocusItem)
 
-        let highlightItem = NSMenuItem(title: L10n.hierarchyMenuHighlight, action: #selector(highlightSelectedNode(_:)), keyEquivalent: "")
+        let highlightItem = NSMenuItem(title: L10n.hierarchyMenuHighlight, action: #selector(highlightMenuTargetNode(_:)), keyEquivalent: "")
         highlightItem.target = self
-        highlightItem.isEnabled = store.selectedNodeID != nil
+        highlightItem.isEnabled = true
         menu.addItem(highlightItem)
 
         let refreshItem = NSMenuItem(title: L10n.hierarchyMenuRefresh, action: #selector(refreshCapture(_:)), keyEquivalent: "")
@@ -427,14 +931,15 @@ extension ViewTreePanelController: NSMenuDelegate {
             copyItems.forEach(menu.addItem)
         }
 
-        if !node.childIDs.isEmpty {
+        // 是否有子项以“展示层级”为准（wrapper 被折叠后原始 childIDs 可能不为空但界面上没有子项）。
+        if targetItem.children.isEmpty == false {
             menu.addItem(.separator())
 
-            let expandChildrenItem = NSMenuItem(title: L10n.hierarchyMenuExpandChildren, action: #selector(expandSelectedNodeChildren(_:)), keyEquivalent: "")
+            let expandChildrenItem = NSMenuItem(title: L10n.hierarchyMenuExpandChildren, action: #selector(expandMenuTargetChildren(_:)), keyEquivalent: "")
             expandChildrenItem.target = self
             menu.addItem(expandChildrenItem)
 
-            let collapseChildrenItem = NSMenuItem(title: L10n.hierarchyMenuCollapseChildren, action: #selector(collapseSelectedNodeChildren(_:)), keyEquivalent: "")
+            let collapseChildrenItem = NSMenuItem(title: L10n.hierarchyMenuCollapseChildren, action: #selector(collapseMenuTargetChildren(_:)), keyEquivalent: "")
             collapseChildrenItem.target = self
             menu.addItem(collapseChildrenItem)
         }
@@ -682,6 +1187,8 @@ enum ViewTreeNodePresentation {
             classText(for: node),
             node.rootViewControllerClassName ?? "",
             controllerText(for: node) ?? "",
+            // 树上显示的是 “XxxViewController.view”，按显示文本搜索也要能命中。
+            controllerAnnotationText(for: node) ?? "",
             ivarNames,
             node.ivarName ?? "",
             node.controlActionName ?? "",
@@ -903,6 +1410,8 @@ private final class ViewTreeNodeCellView: NSTableCellView {
     private let titleLabel = NSTextField(labelWithString: "")
     private let controllerLabel = NSTextField(labelWithString: "")
     private let ivarLabel = NSTextField(labelWithString: "")
+    /// 布局问题徽标：颜色表示最高严重程度，tooltip 列出全部问题。
+    private let diagnosticsBadgeView = NSImageView()
     private var handlersButtonWidthConstraint: Constraint?
     private var handlersButtonHeightConstraint: Constraint?
     private var nodeID: String?
@@ -910,6 +1419,8 @@ private final class ViewTreeNodeCellView: NSTableCellView {
     private var eventHandlers: [ViewScopeEventHandler] = []
     private var handlersPopover: NSPopover?
     private var isEffectivelyHidden = false
+    private var issueSeverity: LayoutDiagnosticIssue.Severity?
+    private var isSearchMatch = false
 
     override var backgroundStyle: NSView.BackgroundStyle {
         didSet {
@@ -960,10 +1471,20 @@ private final class ViewTreeNodeCellView: NSTableCellView {
         leadingLabelsStackView.addArrangedSubview(titleLabel)
         leadingLabelsStackView.addArrangedSubview(controllerLabel)
 
+        diagnosticsBadgeView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
+        diagnosticsBadgeView.image = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: nil)
+        diagnosticsBadgeView.isHidden = true
+        diagnosticsBadgeView.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        // 搜索命中时给标题加淡黄色底，便于在长列表中定位。
+        leadingLabelsStackView.wantsLayer = true
+        leadingLabelsStackView.layer?.cornerRadius = 3
+
         addSubview(handlersButton)
         addSubview(iconView)
         addSubview(leadingLabelsStackView)
         addSubview(ivarLabel)
+        addSubview(diagnosticsBadgeView)
 
         handlersButton.snp.makeConstraints { make in
             make.leading.equalToSuperview().offset(2)
@@ -985,7 +1506,12 @@ private final class ViewTreeNodeCellView: NSTableCellView {
         ivarLabel.snp.makeConstraints { make in
             make.leading.greaterThanOrEqualTo(leadingLabelsStackView.snp.trailing).offset(8)
             make.centerY.equalToSuperview()
-            make.trailing.lessThanOrEqualToSuperview().inset(ViewTreeLayoutMetrics.trailingSpacing)
+            make.trailing.lessThanOrEqualTo(diagnosticsBadgeView.snp.leading).offset(-4)
+        }
+        diagnosticsBadgeView.snp.makeConstraints { make in
+            make.centerY.equalToSuperview()
+            make.trailing.equalToSuperview().inset(ViewTreeLayoutMetrics.trailingSpacing)
+            make.width.height.equalTo(12)
         }
 
         updateHandlersButtonAppearance()
@@ -996,10 +1522,20 @@ private final class ViewTreeNodeCellView: NSTableCellView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func configure(node: ViewScopeHierarchyNode, isEffectivelyHidden: Bool) {
+    func configure(
+        node: ViewScopeHierarchyNode,
+        isEffectivelyHidden: Bool,
+        issueSeverity: LayoutDiagnosticIssue.Severity? = nil,
+        issueToolTip: String? = nil,
+        isSearchMatch: Bool = false
+    ) {
         self.node = node
         nodeID = node.id
         self.isEffectivelyHidden = isEffectivelyHidden
+        self.issueSeverity = issueSeverity
+        self.isSearchMatch = isSearchMatch
+        diagnosticsBadgeView.isHidden = issueSeverity == nil
+        diagnosticsBadgeView.toolTip = issueToolTip
         eventHandlers = ViewTreeNodePresentation.eventHandlers(for: node)
         iconView.image = ViewTreeNodePresentation.iconImage(for: node)
         titleLabel.stringValue = ViewTreeNodePresentation.classText(for: node)
@@ -1097,6 +1633,10 @@ private final class ViewTreeNodeCellView: NSTableCellView {
         controllerLabel.textColor = secondaryColor
         ivarLabel.textColor = secondaryColor
         iconView.contentTintColor = accessoryColor
+        diagnosticsBadgeView.contentTintColor = isSelected ? NSColor.white : issueSeverity?.color
+        leadingLabelsStackView.layer?.backgroundColor = isSearchMatch && isSelected == false
+            ? NSColor.systemYellow.withAlphaComponent(0.35).cgColor
+            : NSColor.clear.cgColor
         updateHandlersButtonAppearance()
     }
 }
@@ -1320,6 +1860,11 @@ final class ViewTreeNodeItem: NSObject {
     let node: ViewScopeHierarchyNode
     weak var parent: ViewTreeNodeItem?
     let children: [ViewTreeNodeItem]
+    /// 过滤（搜索 / 只看问题节点）时，节点自身满足条件。
+    private(set) var isFilterMatch = false
+    /// 过滤时，节点的后代中存在命中节点，需要展开以显示命中结果。
+    private(set) var isOnFilterPath = false
+
     var isEffectivelyHidden: Bool {
         node.isHidden || parent?.isEffectivelyHidden == true
     }
@@ -1336,7 +1881,9 @@ final class ViewTreeNodeItem: NSObject {
         nodes: [String: ViewScopeHierarchyNode],
         showsSystemWrappers: Bool = false
     ) -> ViewTreeNodeItem? {
-        guard let node = nodes[nodeID] else { return nil }
+        guard let node = nodes[nodeID] else {
+            return nil
+        }
         let childNodeIDs = ViewHierarchyPresentation.presentedChildNodeIDs(
             of: nodeID,
             nodes: nodes,
@@ -1348,15 +1895,46 @@ final class ViewTreeNodeItem: NSObject {
         return ViewTreeNodeItem(node: node, children: children)
     }
 
+    /// 按搜索关键字过滤。
     func filtered(matching query: String) -> ViewTreeNodeItem? {
-        let filteredChildren = children.compactMap { $0.filtered(matching: query) }
-        if matches(query) || !filteredChildren.isEmpty {
-            return ViewTreeNodeItem(node: node, children: filteredChildren)
-        }
-        return nil
+        filtered { ViewTreeNodePresentation.matches(node: $0, query: query) }
     }
 
-    private func matches(_ query: String) -> Bool {
-        ViewTreeNodePresentation.matches(node: node, query: query)
+    /// 按条件过滤：
+    /// - 命中节点保留完整子树（便于继续查看它的子节点），默认折叠；
+    /// - 未命中但后代有命中的节点只保留通往命中节点的路径，并标记为需要展开。
+    func filtered(where predicate: (ViewScopeHierarchyNode) -> Bool) -> ViewTreeNodeItem? {
+        if predicate(node) {
+            let copiedChildren = children.map { $0.copySubtree() }
+            let item = ViewTreeNodeItem(node: node, children: copiedChildren)
+            item.isFilterMatch = true
+            // 命中节点的后代中如果还有命中项，也要能展开看到它们。
+            let filteredDescendants = children.compactMap { $0.filtered(where: predicate) }
+            if filteredDescendants.isEmpty == false {
+                let pathItem = ViewTreeNodeItem(node: node, children: mergedChildren(original: copiedChildren, filtered: filteredDescendants))
+                pathItem.isFilterMatch = true
+                pathItem.isOnFilterPath = true
+                return pathItem
+            }
+            return item
+        }
+        let filteredChildren = children.compactMap { $0.filtered(where: predicate) }
+        guard filteredChildren.isEmpty == false else {
+            return nil
+        }
+        let item = ViewTreeNodeItem(node: node, children: filteredChildren)
+        item.isOnFilterPath = true
+        return item
+    }
+
+    /// 复制整棵子树（item 的 parent 是弱引用且只能有一个，因此不能在两棵树之间共享子节点）。
+    private func copySubtree() -> ViewTreeNodeItem {
+        ViewTreeNodeItem(node: node, children: children.map { $0.copySubtree() })
+    }
+
+    /// 命中节点同时也是路径节点时：保留全部子节点，但用过滤结果替换其中包含命中项的子树。
+    private func mergedChildren(original: [ViewTreeNodeItem], filtered: [ViewTreeNodeItem]) -> [ViewTreeNodeItem] {
+        let filteredByNodeID = Dictionary(filtered.map { ($0.node.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return original.map { filteredByNodeID[$0.node.id] ?? $0 }
     }
 }

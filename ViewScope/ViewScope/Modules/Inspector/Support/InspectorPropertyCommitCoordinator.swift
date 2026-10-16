@@ -2,9 +2,20 @@ import AppKit
 import Foundation
 import ViewScopeServer
 
+/// Inspector 发起的一次属性修改。
+struct InspectorMutationRequest: Equatable {
+    let nodeID: String
+    /// 新值（只含值，不含 options）。
+    let property: ViewScopeEditableProperty
+    /// 编辑时行上的可编辑属性（旧值），用于修改记录、还原与撤销。
+    let previousProperty: ViewScopeEditableProperty?
+    /// 属性展示标题。
+    let title: String
+}
+
 @MainActor
 final class InspectorPropertyCommitCoordinator {
-    typealias MutationApplier = @MainActor (String, ViewScopeEditableProperty) async -> Bool
+    typealias MutationApplier = @MainActor (InspectorMutationRequest) async -> Bool
 
     private let localeProvider: @MainActor () -> Locale
     private let beep: @MainActor () -> Void
@@ -13,9 +24,16 @@ final class InspectorPropertyCommitCoordinator {
 
     convenience init(store: WorkspaceStore) {
         self.init(
-            applyMutation: { [weak store] nodeID, property in
-                guard let store else { return false }
-                return await store.applyMutation(nodeID: nodeID, property: property)
+            applyMutation: { [weak store] request in
+                guard let store else {
+                    return false
+                }
+                return await store.applyMutation(
+                    nodeID: request.nodeID,
+                    property: request.property,
+                    previousProperty: request.previousProperty,
+                    title: request.title
+                )
             }
         )
     }
@@ -36,49 +54,83 @@ final class InspectorPropertyCommitCoordinator {
         _ value: String,
         property: ViewScopeEditableProperty,
         rowView: InspectorCommitCapable,
-        nodeID: String?
+        nodeID: String?,
+        title: String? = nil
     ) async {
-        await commitProperty(.text(key: property.key, value: value), rowView: rowView, nodeID: nodeID)
+        // 值未变化（例如只是失焦）不发送修改
+        guard value != property.textValue else {
+            return
+        }
+        await commitProperty(.text(key: property.key, value: value), previous: property, title: title, rowView: rowView, nodeID: nodeID)
     }
 
     func commitToggle(
         _ isOn: Bool,
         property: ViewScopeEditableProperty,
         rowView: InspectorCommitCapable,
-        nodeID: String?
+        nodeID: String?,
+        title: String? = nil
     ) async {
-        await commitProperty(.toggle(key: property.key, value: isOn), rowView: rowView, nodeID: nodeID)
+        guard isOn != property.boolValue else {
+            return
+        }
+        await commitProperty(.toggle(key: property.key, value: isOn), previous: property, title: title, rowView: rowView, nodeID: nodeID)
     }
 
     func commitNumber(
         _ value: String,
         property: ViewScopeEditableProperty,
         rowView: InspectorCommitCapable,
-        nodeID: String?
+        nodeID: String?,
+        title: String? = nil
     ) async {
-        guard let number = parseNumber(value) else {
+        guard let number = parseNumber(value), number.isFinite else {
             beep()
             rowView.resetDisplayedValue()
             return
         }
+        guard number != property.numberValue else {
+            return
+        }
 
-        await commitProperty(.number(key: property.key, value: number), rowView: rowView, nodeID: nodeID)
+        await commitProperty(.number(key: property.key, value: number), previous: property, title: title, rowView: rowView, nodeID: nodeID)
+    }
+
+    /// 枚举下拉框选择了新值。
+    func commitEnumeration(
+        _ value: Double,
+        property: ViewScopeEditableProperty,
+        rowView: InspectorCommitCapable,
+        nodeID: String?,
+        title: String? = nil
+    ) async {
+        guard value != property.numberValue else {
+            return
+        }
+        await commitProperty(.number(key: property.key, value: value), previous: property, title: title, rowView: rowView, nodeID: nodeID)
     }
 
     func commitColor(
         _ value: String,
         property: ViewScopeEditableProperty,
         rowView: InspectorCommitCapable,
-        nodeID: String?
+        nodeID: String?,
+        title: String? = nil
     ) async {
         guard colorParser(value) != nil else {
             beep()
             rowView.resetDisplayedValue()
             return
         }
+        let normalized = value.uppercased()
+        guard normalized != property.textValue?.uppercased() else {
+            return
+        }
 
         await commitProperty(
-            .text(key: property.key, value: value.uppercased()),
+            .text(key: property.key, value: normalized),
+            previous: property,
+            title: title,
             rowView: rowView,
             nodeID: nodeID
         )
@@ -86,13 +138,23 @@ final class InspectorPropertyCommitCoordinator {
 
     private func commitProperty(
         _ property: ViewScopeEditableProperty,
+        previous: ViewScopeEditableProperty,
+        title: String?,
         rowView: InspectorCommitCapable,
         nodeID: String?
     ) async {
-        guard let nodeID else { return }
+        guard let nodeID else {
+            return
+        }
 
         rowView.setEditingEnabled(false)
-        let success = await applyMutation(nodeID, property)
+        let request = InspectorMutationRequest(
+            nodeID: nodeID,
+            property: property,
+            previousProperty: previous,
+            title: title ?? property.key
+        )
+        let success = await applyMutation(request)
         rowView.setEditingEnabled(true)
         if success == false {
             rowView.resetDisplayedValue()
@@ -105,7 +167,9 @@ final class InspectorPropertyCommitCoordinator {
         formatter.numberStyle = .decimal
 
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.isEmpty == false else { return nil }
+        guard trimmed.isEmpty == false else {
+            return nil
+        }
         if let number = formatter.number(from: trimmed) {
             return number.doubleValue
         }

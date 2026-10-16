@@ -5,8 +5,9 @@ import ViewScopeServer
 /// 决定当前预览图应该来自 capture bitmap 还是 detail screenshot。
 ///
 /// 原则：
-/// - 优先使用与当前 preview root 匹配的 capture 级截图。
-/// - 如果 capture 没有对应 bitmap，再回退到 detail 里的截图。
+/// - 优先使用与当前 preview root 匹配的 capture 级截图；
+/// - 其次使用根节点与 preview root 一致的 detail 截图（避免回退到别的窗口）；
+/// - 最后才回退到任意一张 capture 截图或 detail 截图。
 struct PreviewImageResolver {
     struct Resolution: Equatable {
         let cacheKey: String
@@ -31,6 +32,14 @@ struct PreviewImageResolver {
             )
         }
 
+        // detail 截图明确属于 preview root 时，优先于“随便取第一张窗口截图”。
+        if let preferredRootNodeID,
+           let detail,
+           detail.screenshotRootNodeID == preferredRootNodeID,
+           let resolution = detailResolution(capture: capture, preferredRootNodeID: preferredRootNodeID, detail: detail) {
+            return resolution
+        }
+
         if let capture,
            let bitmap = capture.previewBitmaps.first {
             return Resolution(
@@ -41,12 +50,21 @@ struct PreviewImageResolver {
             )
         }
 
-        guard let detail,
-              let base64PNG = detail.screenshotPNGBase64,
+        guard let detail else {
+            return nil
+        }
+        return detailResolution(capture: capture, preferredRootNodeID: preferredRootNodeID, detail: detail)
+    }
+
+    private static func detailResolution(
+        capture: ViewScopeCapturePayload?,
+        preferredRootNodeID: String?,
+        detail: ViewScopeNodeDetailPayload
+    ) -> Resolution? {
+        guard let base64PNG = detail.screenshotPNGBase64,
               base64PNG.isEmpty == false else {
             return nil
         }
-
         let rootNodeID = detail.screenshotRootNodeID ?? preferredRootNodeID ?? detail.nodeID
         let captureKey = capture?.captureID ?? "detail-only"
         return Resolution(
@@ -133,7 +151,7 @@ struct PreviewRenderContextBuilder {
             geometry: geometry,
             cache: &nextCache
         )
-        let selectionRect = resolvedSelectionRect(
+        var selectionRect = resolvedSelectionRect(
             capture: capture,
             selectedNodeID: selectedNodeID,
             detail: detail,
@@ -142,6 +160,14 @@ struct PreviewRenderContextBuilder {
             geometry: geometry,
             cache: &nextCache
         )
+        // 截图回退到了别的窗口时，选中节点不在当前预览根下，不能把选中框画到无关的画面上。
+        if let selectedNodeID,
+           let previewRootNodeID,
+           capture.nodes[selectedNodeID] != nil,
+           capture.nodes[previewRootNodeID] != nil,
+           isSelection(selectedNodeID, inside: previewRootNodeID, capture: capture, geometry: geometry) == false {
+            selectionRect = nil
+        }
 
         return (
             PreviewRenderContext(
@@ -156,6 +182,24 @@ struct PreviewRenderContextBuilder {
             ),
             nextCache
         )
+    }
+
+    /// 选中节点与预览根同属一个窗口（预览根是它的祖先，或预览根是它所在窗口）。
+    private func isSelection(
+        _ selectedNodeID: String,
+        inside previewRootNodeID: String,
+        capture: ViewScopeCapturePayload,
+        geometry: ViewHierarchyGeometry
+    ) -> Bool {
+        if geometry.isNode(selectedNodeID, descendantOf: previewRootNodeID, in: capture) {
+            return true
+        }
+        // 选中的是窗口节点本身，或预览根是窗口下的根视图：按窗口归属判断。
+        if let previewRootParentID = capture.nodes[previewRootNodeID]?.parentID,
+           capture.nodes[previewRootParentID]?.kind == .window {
+            return geometry.isNode(selectedNodeID, descendantOf: previewRootParentID, in: capture)
+        }
+        return false
     }
 
     private func resolvedCanvasSize(

@@ -7,37 +7,67 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		40A8420B3E6EDFE712093576 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 87409C648FE00350397FE216 /* Foundation.framework */; };
-		5D207AFECCA808167C39B2D5 /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 17B0C4570FF15BDDEC0C2B43 /* AppKit.framework */; };
-		7A2B6C2501B631EBA031C0D1 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E040321C39205EE1DC62C4FB /* Cocoa.framework */; };
-		7D538425D8B1C8188623F193 /* ViewScopeOverlayController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCCAF489C762B940DAB9250A /* ViewScopeOverlayController.swift */; };
-		89DD46EC8FA95BD53DA54C67 /* ViewScopeImageEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D92056C8E8D77D4C74AB75E /* ViewScopeImageEncoder.swift */; };
-		8EDFF273B141E89E18316988 /* ViewScopeSnapshotBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9264CEDC0BE79C4024537B1E /* ViewScopeSnapshotBuilder.swift */; };
+		15C128C5542C6D69CB873224 /* ViewScopeMutationError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0695905CE62F02FB2555F3DE /* ViewScopeMutationError.swift */; };
+		168017D0E8016D4C12F89EAC /* ViewScopeSnapshotSections+AppKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11AAF694B317B79BFC1EB29A /* ViewScopeSnapshotSections+AppKit.swift */; };
+		246C164C325EBF3FC7BF4AB3 /* ViewScopeConsoleTargetResolver+AppKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = D386BCD4140B2FBD9CBDDE58 /* ViewScopeConsoleTargetResolver+AppKit.swift */; };
+		282BFD604DFBE90B0E01D2CB /* ViewScopeTracing+UIKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE258C97D0BA2ECA1FF97573 /* ViewScopeTracing+UIKit.swift */; };
+		33D603F501CF22FDC520668A /* ViewScopeDetailSections+UIKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5A4569EA2CF20DFC867FD10 /* ViewScopeDetailSections+UIKit.swift */; };
+		3BE754AA658390D3D1FA5F44 /* ViewScopeHighlightOverlay+UIKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0ADC417B32C2A1687D10BA9 /* ViewScopeHighlightOverlay+UIKit.swift */; };
+		3F079F0358560AD1A31DDB28 /* ViewScopeMutationApplier+UIKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB836DC7607017D1BE4C89FE /* ViewScopeMutationApplier+UIKit.swift */; };
+		450162DBA4A8A5DAE1965EDB /* ViewScopeImageEncoder+AppKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6A49D47C85B242D6CCF9C98 /* ViewScopeImageEncoder+AppKit.swift */; };
+		59A989F918CA2AD84D378201 /* ViewScopeSnapshotBuilder+UIKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9909EC8FB5431846D3202EC /* ViewScopeSnapshotBuilder+UIKit.swift */; };
+		6C8DAD9BCB538CA1AA0FCB69 /* ViewScopeTracing+AppKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B96A6C006B8534EFC672606 /* ViewScopeTracing+AppKit.swift */; };
+		7352F6AE141ABE2510FF87C3 /* ViewScopeImageEncoder+UIKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = F596530988AF9A76D76BF553 /* ViewScopeImageEncoder+UIKit.swift */; };
+		872BC6A19D292F2F5CE59296 /* ViewScopeInterfaceLanguage+UIKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D3FA4943F8EABDA76CC2CC6 /* ViewScopeInterfaceLanguage+UIKit.swift */; };
 		8FD1234567890ABCDEFFEDCB /* ViewScopeClassNameFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FD1234567890ABCDEFFEDCA /* ViewScopeClassNameFormatter.swift */; };
 		90A1B2C3D4E5F60718293A4B /* ViewScopeAutoBootstrap.m in Sources */ = {isa = PBXBuildFile; fileRef = 90A1B2C3D4E5F60718293A4A /* ViewScopeAutoBootstrap.m */; };
 		97D5A2E0BC14C8018ACC5FD6 /* ViewScopeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2752205479184B07954C339F /* ViewScopeBridge.swift */; };
+		A1342B559C6336AA9E47DE69 /* ViewScopeConsoleInvoker.m in Sources */ = {isa = PBXBuildFile; fileRef = B54F2F5C472129B1CD045051 /* ViewScopeConsoleInvoker.m */; };
+		A198028207790D7DBB9707AF /* ViewScopeNodeIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7EC7B8B31D451B735EA06E5 /* ViewScopeNodeIdentity.swift */; };
+		A303061A18278490A968F640 /* ViewScopeConsoleTargetResolver+UIKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E6248D35C1EE59E5AE025E9 /* ViewScopeConsoleTargetResolver+UIKit.swift */; };
+		A75ABE1274F3BBBBCD865449 /* ViewScopeHighlightOverlay+AppKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EAC5F7FC75D210B290E8E78 /* ViewScopeHighlightOverlay+AppKit.swift */; };
 		A80631511584830D7AAF3922 /* ViewScopeInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8B22980F2B8D619D5EB947B /* ViewScopeInspector.swift */; };
+		B65644A6DCEF4E27D14DC841 /* ViewScopeMutationApplier+AppKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C823094969A25479823660A /* ViewScopeMutationApplier+AppKit.swift */; };
 		B90A1B2C3D4E5F60718293A4 /* ViewScopeInterfaceLanguage.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90A1B2C3D4E5F60718293A3 /* ViewScopeInterfaceLanguage.swift */; };
+		BE2F6C590304AA2EA47BAFB7 /* ViewScopeConsoleEvaluator.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED426B836963D665BDB41D09 /* ViewScopeConsoleEvaluator.swift */; };
+		C1AD9E2BEB6D101C26C7B2F3 /* ViewScopePlatformRuntime+AppKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14CAB5B1D4CA361EECBA9055 /* ViewScopePlatformRuntime+AppKit.swift */; };
 		CB2227ED4DE2C0EAFA6EE658 /* ViewScopeConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A7DD03239C86E2343AF8E2C /* ViewScopeConnection.swift */; };
-		DE4B12D84A36A70F9051F957 /* Network.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 179CC96D1CF8C60A7A246E00 /* Network.framework */; };
+		D2804F9156F09664F88D4AF8 /* ViewScopeInterfaceLanguage+AppKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 325DA96C53069EA6ACA62323 /* ViewScopeInterfaceLanguage+AppKit.swift */; };
+		DD10C80FB5505F67B5708608 /* ViewScopeSnapshotBuilder+AppKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 681D35A3FBA64D41783A439C /* ViewScopeSnapshotBuilder+AppKit.swift */; };
+		EEA6C75056BA91BE9B1E3598 /* ViewScopePlatformRuntime+UIKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADC81B5D330A8667D6B6DFFF /* ViewScopePlatformRuntime+UIKit.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		0695905CE62F02FB2555F3DE /* ViewScopeMutationError.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopeMutationError.swift"; path = "Sources/ViewScopeServer/ViewScopeMutationError.swift"; sourceTree = "<group>"; };
 		09B3E7696384A5FF1DF841A0 /* ViewScopeServer.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; name = ViewScopeServer.framework; path = ViewScopeServer.framework; sourceTree = BUILT_PRODUCTS_DIR; };
-		179CC96D1CF8C60A7A246E00 /* Network.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Network.framework; path = System/Library/Frameworks/Network.framework; sourceTree = SDKROOT; };
-		17B0C4570FF15BDDEC0C2B43 /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = System/Library/Frameworks/AppKit.framework; sourceTree = SDKROOT; };
-		2752205479184B07954C339F /* ViewScopeBridge.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ViewScopeBridge.swift; path = Sources/ViewScopeServer/ViewScopeBridge.swift; sourceTree = "<group>"; };
-		4A7DD03239C86E2343AF8E2C /* ViewScopeConnection.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ViewScopeConnection.swift; path = Sources/ViewScopeServer/ViewScopeConnection.swift; sourceTree = "<group>"; };
-		87409C648FE00350397FE216 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
-		9264CEDC0BE79C4024537B1E /* ViewScopeSnapshotBuilder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ViewScopeSnapshotBuilder.swift; path = Sources/ViewScopeServer/ViewScopeSnapshotBuilder.swift; sourceTree = "<group>"; };
-		8FD1234567890ABCDEFFEDCA /* ViewScopeClassNameFormatter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ViewScopeClassNameFormatter.swift; path = Sources/ViewScopeServer/ViewScopeClassNameFormatter.swift; sourceTree = "<group>"; };
-		90A1B2C3D4E5F60718293A4A /* ViewScopeAutoBootstrap.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; name = ViewScopeAutoBootstrap.m; path = Sources/ViewScopeServerBootstrap/ViewScopeAutoBootstrap.m; sourceTree = "<group>"; };
-		9D92056C8E8D77D4C74AB75E /* ViewScopeImageEncoder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ViewScopeImageEncoder.swift; path = Sources/ViewScopeServer/ViewScopeImageEncoder.swift; sourceTree = "<group>"; };
-		B90A1B2C3D4E5F60718293A3 /* ViewScopeInterfaceLanguage.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ViewScopeInterfaceLanguage.swift; path = Sources/ViewScopeServer/ViewScopeInterfaceLanguage.swift; sourceTree = "<group>"; };
-		B8B22980F2B8D619D5EB947B /* ViewScopeInspector.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ViewScopeInspector.swift; path = Sources/ViewScopeServer/ViewScopeInspector.swift; sourceTree = "<group>"; };
-		BA0A1B2C3D4E5F60718293A4 /* ViewScopeServerBootstrap.h */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.h; name = ViewScopeServerBootstrap.h; path = Sources/ViewScopeServerBootstrap/ViewScopeServerBootstrap.h; sourceTree = "<group>"; };
-		E040321C39205EE1DC62C4FB /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
-		FCCAF489C762B940DAB9250A /* ViewScopeOverlayController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ViewScopeOverlayController.swift; path = Sources/ViewScopeServer/ViewScopeOverlayController.swift; sourceTree = "<group>"; };
+		11AAF694B317B79BFC1EB29A /* ViewScopeSnapshotSections+AppKit.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopeSnapshotSections+AppKit.swift"; path = "Sources/ViewScopeServer/AppKit/ViewScopeSnapshotSections+AppKit.swift"; sourceTree = "<group>"; };
+		14CAB5B1D4CA361EECBA9055 /* ViewScopePlatformRuntime+AppKit.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopePlatformRuntime+AppKit.swift"; path = "Sources/ViewScopeServer/AppKit/ViewScopePlatformRuntime+AppKit.swift"; sourceTree = "<group>"; };
+		2752205479184B07954C339F /* ViewScopeBridge.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopeBridge.swift"; path = "Sources/ViewScopeServer/ViewScopeBridge.swift"; sourceTree = "<group>"; };
+		325DA96C53069EA6ACA62323 /* ViewScopeInterfaceLanguage+AppKit.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopeInterfaceLanguage+AppKit.swift"; path = "Sources/ViewScopeServer/AppKit/ViewScopeInterfaceLanguage+AppKit.swift"; sourceTree = "<group>"; };
+		3EAC5F7FC75D210B290E8E78 /* ViewScopeHighlightOverlay+AppKit.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopeHighlightOverlay+AppKit.swift"; path = "Sources/ViewScopeServer/AppKit/ViewScopeHighlightOverlay+AppKit.swift"; sourceTree = "<group>"; };
+		4A7DD03239C86E2343AF8E2C /* ViewScopeConnection.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopeConnection.swift"; path = "Sources/ViewScopeServer/ViewScopeConnection.swift"; sourceTree = "<group>"; };
+		681D35A3FBA64D41783A439C /* ViewScopeSnapshotBuilder+AppKit.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopeSnapshotBuilder+AppKit.swift"; path = "Sources/ViewScopeServer/AppKit/ViewScopeSnapshotBuilder+AppKit.swift"; sourceTree = "<group>"; };
+		7E6248D35C1EE59E5AE025E9 /* ViewScopeConsoleTargetResolver+UIKit.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopeConsoleTargetResolver+UIKit.swift"; path = "Sources/ViewScopeServer/UIKit/ViewScopeConsoleTargetResolver+UIKit.swift"; sourceTree = "<group>"; };
+		8B96A6C006B8534EFC672606 /* ViewScopeTracing+AppKit.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopeTracing+AppKit.swift"; path = "Sources/ViewScopeServer/AppKit/ViewScopeTracing+AppKit.swift"; sourceTree = "<group>"; };
+		8FD1234567890ABCDEFFEDCA /* ViewScopeClassNameFormatter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopeClassNameFormatter.swift"; path = "Sources/ViewScopeServer/ViewScopeClassNameFormatter.swift"; sourceTree = "<group>"; };
+		90A1B2C3D4E5F60718293A4A /* ViewScopeAutoBootstrap.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; name = "ViewScopeAutoBootstrap.m"; path = "Sources/ViewScopeServerBootstrap/ViewScopeAutoBootstrap.m"; sourceTree = "<group>"; };
+		9C823094969A25479823660A /* ViewScopeMutationApplier+AppKit.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopeMutationApplier+AppKit.swift"; path = "Sources/ViewScopeServer/AppKit/ViewScopeMutationApplier+AppKit.swift"; sourceTree = "<group>"; };
+		9D3FA4943F8EABDA76CC2CC6 /* ViewScopeInterfaceLanguage+UIKit.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopeInterfaceLanguage+UIKit.swift"; path = "Sources/ViewScopeServer/UIKit/ViewScopeInterfaceLanguage+UIKit.swift"; sourceTree = "<group>"; };
+		A5A4569EA2CF20DFC867FD10 /* ViewScopeDetailSections+UIKit.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopeDetailSections+UIKit.swift"; path = "Sources/ViewScopeServer/UIKit/ViewScopeDetailSections+UIKit.swift"; sourceTree = "<group>"; };
+		AB836DC7607017D1BE4C89FE /* ViewScopeMutationApplier+UIKit.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopeMutationApplier+UIKit.swift"; path = "Sources/ViewScopeServer/UIKit/ViewScopeMutationApplier+UIKit.swift"; sourceTree = "<group>"; };
+		ADC81B5D330A8667D6B6DFFF /* ViewScopePlatformRuntime+UIKit.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopePlatformRuntime+UIKit.swift"; path = "Sources/ViewScopeServer/UIKit/ViewScopePlatformRuntime+UIKit.swift"; sourceTree = "<group>"; };
+		B54F2F5C472129B1CD045051 /* ViewScopeConsoleInvoker.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; name = "ViewScopeConsoleInvoker.m"; path = "Sources/ViewScopeServerBootstrap/ViewScopeConsoleInvoker.m"; sourceTree = "<group>"; };
+		B8B22980F2B8D619D5EB947B /* ViewScopeInspector.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopeInspector.swift"; path = "Sources/ViewScopeServer/ViewScopeInspector.swift"; sourceTree = "<group>"; };
+		B90A1B2C3D4E5F60718293A3 /* ViewScopeInterfaceLanguage.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopeInterfaceLanguage.swift"; path = "Sources/ViewScopeServer/ViewScopeInterfaceLanguage.swift"; sourceTree = "<group>"; };
+		BA0A1B2C3D4E5F60718293A4 /* ViewScopeServerBootstrap.h */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.h; name = "ViewScopeServerBootstrap.h"; path = "Sources/ViewScopeServerBootstrap/ViewScopeServerBootstrap.h"; sourceTree = "<group>"; };
+		D386BCD4140B2FBD9CBDDE58 /* ViewScopeConsoleTargetResolver+AppKit.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopeConsoleTargetResolver+AppKit.swift"; path = "Sources/ViewScopeServer/AppKit/ViewScopeConsoleTargetResolver+AppKit.swift"; sourceTree = "<group>"; };
+		D6A49D47C85B242D6CCF9C98 /* ViewScopeImageEncoder+AppKit.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopeImageEncoder+AppKit.swift"; path = "Sources/ViewScopeServer/AppKit/ViewScopeImageEncoder+AppKit.swift"; sourceTree = "<group>"; };
+		D7EC7B8B31D451B735EA06E5 /* ViewScopeNodeIdentity.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopeNodeIdentity.swift"; path = "Sources/ViewScopeServer/ViewScopeNodeIdentity.swift"; sourceTree = "<group>"; };
+		ED426B836963D665BDB41D09 /* ViewScopeConsoleEvaluator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopeConsoleEvaluator.swift"; path = "Sources/ViewScopeServer/ViewScopeConsoleEvaluator.swift"; sourceTree = "<group>"; };
+		EE258C97D0BA2ECA1FF97573 /* ViewScopeTracing+UIKit.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopeTracing+UIKit.swift"; path = "Sources/ViewScopeServer/UIKit/ViewScopeTracing+UIKit.swift"; sourceTree = "<group>"; };
+		F0ADC417B32C2A1687D10BA9 /* ViewScopeHighlightOverlay+UIKit.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopeHighlightOverlay+UIKit.swift"; path = "Sources/ViewScopeServer/UIKit/ViewScopeHighlightOverlay+UIKit.swift"; sourceTree = "<group>"; };
+		F596530988AF9A76D76BF553 /* ViewScopeImageEncoder+UIKit.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopeImageEncoder+UIKit.swift"; path = "Sources/ViewScopeServer/UIKit/ViewScopeImageEncoder+UIKit.swift"; sourceTree = "<group>"; };
+		F9909EC8FB5431846D3202EC /* ViewScopeSnapshotBuilder+UIKit.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ViewScopeSnapshotBuilder+UIKit.swift"; path = "Sources/ViewScopeServer/UIKit/ViewScopeSnapshotBuilder+UIKit.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -45,10 +75,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				7A2B6C2501B631EBA031C0D1 /* Cocoa.framework in Frameworks */,
-				5D207AFECCA808167C39B2D5 /* AppKit.framework in Frameworks */,
-				40A8420B3E6EDFE712093576 /* Foundation.framework in Frameworks */,
-				DE4B12D84A36A70F9051F957 /* Network.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -58,37 +84,68 @@
 		585062E4D60992F43C191D07 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				93AEF528121BD190A3860D95 /* OS X */,
-				17B0C4570FF15BDDEC0C2B43 /* AppKit.framework */,
-				87409C648FE00350397FE216 /* Foundation.framework */,
-				179CC96D1CF8C60A7A246E00 /* Network.framework */,
 			);
 			name = Frameworks;
-			sourceTree = "<group>";
-		};
-		93AEF528121BD190A3860D95 /* OS X */ = {
-			isa = PBXGroup;
-			children = (
-				E040321C39205EE1DC62C4FB /* Cocoa.framework */,
-			);
-			name = "OS X";
 			sourceTree = "<group>";
 		};
 		9B0A0A1D7720BCA06749D396 /* ViewScopeServer */ = {
 			isa = PBXGroup;
 			children = (
 				2752205479184B07954C339F /* ViewScopeBridge.swift */,
-				4A7DD03239C86E2343AF8E2C /* ViewScopeConnection.swift */,
 				8FD1234567890ABCDEFFEDCA /* ViewScopeClassNameFormatter.swift */,
-				9D92056C8E8D77D4C74AB75E /* ViewScopeImageEncoder.swift */,
+				4A7DD03239C86E2343AF8E2C /* ViewScopeConnection.swift */,
+				ED426B836963D665BDB41D09 /* ViewScopeConsoleEvaluator.swift */,
 				B8B22980F2B8D619D5EB947B /* ViewScopeInspector.swift */,
 				B90A1B2C3D4E5F60718293A3 /* ViewScopeInterfaceLanguage.swift */,
-				FCCAF489C762B940DAB9250A /* ViewScopeOverlayController.swift */,
-				9264CEDC0BE79C4024537B1E /* ViewScopeSnapshotBuilder.swift */,
-				90A1B2C3D4E5F60718293A4A /* ViewScopeAutoBootstrap.m */,
-				BA0A1B2C3D4E5F60718293A4 /* ViewScopeServerBootstrap.h */,
+				0695905CE62F02FB2555F3DE /* ViewScopeMutationError.swift */,
+				D7EC7B8B31D451B735EA06E5 /* ViewScopeNodeIdentity.swift */,
+				4C01E962A43B664CE7482708 /* AppKit */,
+				C58438E4417BBCC56420AA13 /* UIKit */,
+				85EB5E1C6043D3349021F7CB /* ViewScopeServerBootstrap */,
 			);
 			name = ViewScopeServer;
+			sourceTree = "<group>";
+		};
+		4C01E962A43B664CE7482708 /* AppKit */ = {
+			isa = PBXGroup;
+			children = (
+				D386BCD4140B2FBD9CBDDE58 /* ViewScopeConsoleTargetResolver+AppKit.swift */,
+				3EAC5F7FC75D210B290E8E78 /* ViewScopeHighlightOverlay+AppKit.swift */,
+				D6A49D47C85B242D6CCF9C98 /* ViewScopeImageEncoder+AppKit.swift */,
+				325DA96C53069EA6ACA62323 /* ViewScopeInterfaceLanguage+AppKit.swift */,
+				9C823094969A25479823660A /* ViewScopeMutationApplier+AppKit.swift */,
+				14CAB5B1D4CA361EECBA9055 /* ViewScopePlatformRuntime+AppKit.swift */,
+				681D35A3FBA64D41783A439C /* ViewScopeSnapshotBuilder+AppKit.swift */,
+				11AAF694B317B79BFC1EB29A /* ViewScopeSnapshotSections+AppKit.swift */,
+				8B96A6C006B8534EFC672606 /* ViewScopeTracing+AppKit.swift */,
+			);
+			name = AppKit;
+			sourceTree = "<group>";
+		};
+		C58438E4417BBCC56420AA13 /* UIKit */ = {
+			isa = PBXGroup;
+			children = (
+				7E6248D35C1EE59E5AE025E9 /* ViewScopeConsoleTargetResolver+UIKit.swift */,
+				A5A4569EA2CF20DFC867FD10 /* ViewScopeDetailSections+UIKit.swift */,
+				F0ADC417B32C2A1687D10BA9 /* ViewScopeHighlightOverlay+UIKit.swift */,
+				F596530988AF9A76D76BF553 /* ViewScopeImageEncoder+UIKit.swift */,
+				9D3FA4943F8EABDA76CC2CC6 /* ViewScopeInterfaceLanguage+UIKit.swift */,
+				AB836DC7607017D1BE4C89FE /* ViewScopeMutationApplier+UIKit.swift */,
+				ADC81B5D330A8667D6B6DFFF /* ViewScopePlatformRuntime+UIKit.swift */,
+				F9909EC8FB5431846D3202EC /* ViewScopeSnapshotBuilder+UIKit.swift */,
+				EE258C97D0BA2ECA1FF97573 /* ViewScopeTracing+UIKit.swift */,
+			);
+			name = UIKit;
+			sourceTree = "<group>";
+		};
+		85EB5E1C6043D3349021F7CB /* ViewScopeServerBootstrap */ = {
+			isa = PBXGroup;
+			children = (
+				90A1B2C3D4E5F60718293A4A /* ViewScopeAutoBootstrap.m */,
+				B54F2F5C472129B1CD045051 /* ViewScopeConsoleInvoker.m */,
+				BA0A1B2C3D4E5F60718293A4 /* ViewScopeServerBootstrap.h */,
+			);
+			name = ViewScopeServerBootstrap;
 			sourceTree = "<group>";
 		};
 		B985FB01360CE7CFF3033676 /* Sources */ = {
@@ -192,14 +249,33 @@
 			buildActionMask = 2147483647;
 			files = (
 				97D5A2E0BC14C8018ACC5FD6 /* ViewScopeBridge.swift in Sources */,
-				CB2227ED4DE2C0EAFA6EE658 /* ViewScopeConnection.swift in Sources */,
 				8FD1234567890ABCDEFFEDCB /* ViewScopeClassNameFormatter.swift in Sources */,
-				89DD46EC8FA95BD53DA54C67 /* ViewScopeImageEncoder.swift in Sources */,
+				CB2227ED4DE2C0EAFA6EE658 /* ViewScopeConnection.swift in Sources */,
+				BE2F6C590304AA2EA47BAFB7 /* ViewScopeConsoleEvaluator.swift in Sources */,
 				A80631511584830D7AAF3922 /* ViewScopeInspector.swift in Sources */,
 				B90A1B2C3D4E5F60718293A4 /* ViewScopeInterfaceLanguage.swift in Sources */,
-				7D538425D8B1C8188623F193 /* ViewScopeOverlayController.swift in Sources */,
-				8EDFF273B141E89E18316988 /* ViewScopeSnapshotBuilder.swift in Sources */,
+				15C128C5542C6D69CB873224 /* ViewScopeMutationError.swift in Sources */,
+				A198028207790D7DBB9707AF /* ViewScopeNodeIdentity.swift in Sources */,
+				246C164C325EBF3FC7BF4AB3 /* ViewScopeConsoleTargetResolver+AppKit.swift in Sources */,
+				A75ABE1274F3BBBBCD865449 /* ViewScopeHighlightOverlay+AppKit.swift in Sources */,
+				450162DBA4A8A5DAE1965EDB /* ViewScopeImageEncoder+AppKit.swift in Sources */,
+				D2804F9156F09664F88D4AF8 /* ViewScopeInterfaceLanguage+AppKit.swift in Sources */,
+				B65644A6DCEF4E27D14DC841 /* ViewScopeMutationApplier+AppKit.swift in Sources */,
+				C1AD9E2BEB6D101C26C7B2F3 /* ViewScopePlatformRuntime+AppKit.swift in Sources */,
+				DD10C80FB5505F67B5708608 /* ViewScopeSnapshotBuilder+AppKit.swift in Sources */,
+				168017D0E8016D4C12F89EAC /* ViewScopeSnapshotSections+AppKit.swift in Sources */,
+				6C8DAD9BCB538CA1AA0FCB69 /* ViewScopeTracing+AppKit.swift in Sources */,
+				A303061A18278490A968F640 /* ViewScopeConsoleTargetResolver+UIKit.swift in Sources */,
+				33D603F501CF22FDC520668A /* ViewScopeDetailSections+UIKit.swift in Sources */,
+				3BE754AA658390D3D1FA5F44 /* ViewScopeHighlightOverlay+UIKit.swift in Sources */,
+				7352F6AE141ABE2510FF87C3 /* ViewScopeImageEncoder+UIKit.swift in Sources */,
+				872BC6A19D292F2F5CE59296 /* ViewScopeInterfaceLanguage+UIKit.swift in Sources */,
+				3F079F0358560AD1A31DDB28 /* ViewScopeMutationApplier+UIKit.swift in Sources */,
+				EEA6C75056BA91BE9B1E3598 /* ViewScopePlatformRuntime+UIKit.swift in Sources */,
+				59A989F918CA2AD84D378201 /* ViewScopeSnapshotBuilder+UIKit.swift in Sources */,
+				282BFD604DFBE90B0E01D2CB /* ViewScopeTracing+UIKit.swift in Sources */,
 				90A1B2C3D4E5F60718293A4B /* ViewScopeAutoBootstrap.m in Sources */,
+				A1342B559C6336AA9E47DE69 /* ViewScopeConsoleInvoker.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -255,12 +331,15 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				MACOSX_DEPLOYMENT_TARGET = 12.0;
 				MARKETING_VERSION = 1.2.2;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = macosx;
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "macosx iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 6.0;
@@ -322,13 +401,16 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				MACOSX_DEPLOYMENT_TARGET = 12.0;
 				MARKETING_VERSION = 1.2.2;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = macosx;
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "macosx iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 6.0;
@@ -353,12 +435,17 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = ViewScopeServer;
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @loader_path/Frameworks @executable_path/../Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "$(inherited) @loader_path/Frameworks @executable_path/../Frameworks";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				MACOSX_DEPLOYMENT_TARGET = 12.0;
 				MARKETING_VERSION = 1.2.2;
 				PRODUCT_BUNDLE_IDENTIFIER = cn.vanjay.ViewScopeServer;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = macosx;
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "macosx iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
 				SKIP_INSTALL = YES;
 				SWIFT_COMPILATION_MODE = singlefile;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -386,12 +473,17 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = ViewScopeServer;
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @loader_path/Frameworks @executable_path/../Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "$(inherited) @loader_path/Frameworks @executable_path/../Frameworks";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				MACOSX_DEPLOYMENT_TARGET = 12.0;
 				MARKETING_VERSION = 1.2.2;
 				PRODUCT_BUNDLE_IDENTIFIER = cn.vanjay.ViewScopeServer;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = macosx;
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "macosx iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
 				SKIP_INSTALL = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";

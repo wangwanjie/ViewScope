@@ -879,6 +879,8 @@ struct ViewScopeTests {
             backing: .buffered,
             defer: false
         )
+        // 代码创建的 NSWindow 默认 isReleasedWhenClosed = true，close() 会额外 release 一次，导致后续自动释放池过度释放崩溃。
+        window.isReleasedWhenClosed = false
         defer {
             window.orderOut(nil)
             window.close()
@@ -924,10 +926,11 @@ struct ViewScopeTests {
         let previewContainerView = try #require(Mirror(reflecting: controller).descendant("previewContainerView") as? NSView)
         let layeredSceneView = try #require(Mirror(reflecting: controller).descendant("layeredSceneView") as? PreviewLayeredSceneView)
 
-        #expect(abs(layeredSceneView.frame.minX - 10) < 0.5)
-        #expect(abs(layeredSceneView.frame.minY - 10) < 0.5)
-        #expect(abs(previewContainerView.bounds.maxX - layeredSceneView.frame.maxX - 10) < 0.5)
-        #expect(abs(previewContainerView.bounds.maxY - layeredSceneView.frame.maxY - 10) < 0.5)
+        // d3cb8c3 起预览画布铺满容器，边缘留白由场景内部的内容内边距负责
+        #expect(abs(layeredSceneView.frame.minX) < 0.5)
+        #expect(abs(layeredSceneView.frame.minY) < 0.5)
+        #expect(abs(previewContainerView.bounds.maxX - layeredSceneView.frame.maxX) < 0.5)
+        #expect(abs(previewContainerView.bounds.maxY - layeredSceneView.frame.maxY) < 0.5)
     }
 
     @Test func previewPanelApplies3DRotationWithoutUsingResponderChain() async throws {
@@ -1032,10 +1035,13 @@ struct ViewScopeTests {
         sceneView.previewExpandedNodeIDs = ["window-0-view-1"]
         sceneView.layoutSubtreeIfNeeded()
 
+        // 1.3 起移除了空的 content-plane 标记节点：每一代平面由计划描述，平面节点只为独立显示的 item 创建。
         let stageNode = try #require(sceneView.scene?.rootNode.childNode(withName: "stage", recursively: false))
-        let contentPlaneNames = stageNode.childNodes.compactMap(\.name).filter { $0.hasPrefix("content-plane-") }.sorted()
-
-        #expect(contentPlaneNames == ["content-plane-0", "content-plane-1", "content-plane-2"])
+        let plan = try #require(sceneView.plan)
+        #expect(plan.planes.map(\.depth) == [0, 1, 2])
+        for nodeID in plan.planes.flatMap(\.nodeIDs) {
+            #expect(stageNode.childNode(withName: "display-\(nodeID)", recursively: false) != nil)
+        }
     }
 
     @Test func layeredScenePunchesExpandedChildRectsOutOfParentTexture() async throws {
@@ -1295,16 +1301,20 @@ struct ViewScopeTests {
     @Test func layeredSceneEntering3DUsesLookinMinimumYaw() async throws {
         let updated = PreviewLayeredSceneInteraction.rotationWhenEnteringLayered(from: .zero)
 
-        #expect(abs(updated.x - ((-10 * .pi) / 180)) < 0.001)
-        #expect(abs(updated.y - ((15 * .pi) / 180)) < 0.001)
+        // 默认姿态以 PreviewLayeredSceneConstants 为准（aeb6830 起 yaw 调整为约 34°）
+        #expect(abs(updated.x - PreviewLayeredSceneConstants.defaultPitch) < 0.001)
+        #expect(abs(updated.y - PreviewLayeredSceneConstants.defaultYaw) < 0.001)
     }
 
     @Test func layeredSceneDefaultsTo3DEntryPose() async throws {
         let sceneView = PreviewLayeredSceneView(frame: NSRect(x: 0, y: 0, width: 1320, height: 900))
         let stageNode = try #require(sceneView.scene?.rootNode.childNode(withName: "stage", recursively: false))
+        // 预览默认是 flat 模式（舞台不旋转），切到 layered 后才使用 3D 入场姿态
+        #expect(abs(CGFloat(stageNode.eulerAngles.y)) < 0.001)
+        sceneView.displayMode = .layered
 
-        #expect(abs(CGFloat(stageNode.eulerAngles.x) - ((-10 * .pi) / 180)) < 0.001)
-        #expect(abs(CGFloat(stageNode.eulerAngles.y) - ((15 * .pi) / 180)) < 0.001)
+        #expect(abs(CGFloat(stageNode.eulerAngles.x) - PreviewLayeredSceneConstants.defaultPitch) < 0.001)
+        #expect(abs(CGFloat(stageNode.eulerAngles.y) - PreviewLayeredSceneConstants.defaultYaw) < 0.001)
     }
 
     @Test func layeredPreviewReentering3DPreservesUserRotation() async throws {
@@ -1469,11 +1479,14 @@ struct ViewScopeTests {
 
         let stageNode = try #require(sceneView.scene?.rootNode.childNode(withName: "stage", recursively: false))
         let selectionNode = try #require(stageNode.childNode(withName: "selection-overlay", recursively: false))
-        let renderedNode = try #require(stageNode.childNode(withName: "display-button", recursively: false))
+        // 1.3 起折叠节点不再单独建平面（审计 2），改为校验覆盖层与计划中的节点几何一致。
+        let buttonRect = try #require(sceneView.plan?.item(for: "button")?.visibleRect)
+        let expectedX = (buttonRect.midX - 160) * PreviewLayeredSceneConstants.unitScale
+        let expectedY = (60 - buttonRect.midY) * PreviewLayeredSceneConstants.unitScale
 
-        #expect(abs(CGFloat(selectionNode.position.x) - CGFloat(renderedNode.position.x)) < 0.001)
-        #expect(abs(CGFloat(selectionNode.position.y) - CGFloat(renderedNode.position.y)) < 0.001)
-        #expect(abs(CGFloat(renderedNode.position.y) - -0.48) < 0.001)
+        #expect(abs(CGFloat(selectionNode.position.x) - expectedX) < 0.001)
+        #expect(abs(CGFloat(selectionNode.position.y) - expectedY) < 0.001)
+        #expect(abs(expectedY - -0.48) < 0.001)
     }
 
     @Test func layeredSceneMixedFlippedHierarchyKeepsBottomButtonTextureAsSingleSlice() async throws {
@@ -1547,6 +1560,8 @@ struct ViewScopeTests {
         sceneView.capture = capture
         sceneView.image = image
         sceneView.canvasSize = CGSize(width: 320, height: 120)
+        // 1.3 起只有独立显示的节点才有自己的平面（审计 2），展开父节点让按钮独立成层。
+        sceneView.previewExpandedNodeIDs = ["stack"]
         sceneView.displayMode = .layered
         sceneView.layoutSubtreeIfNeeded()
 
@@ -2082,10 +2097,12 @@ struct ViewScopeTests {
         let topPixel = color(in: itemImage, atImagePoint: CGPoint(x: 100, y: 24))
         let bottomPixel = color(in: itemImage, atImagePoint: CGPoint(x: 100, y: 96))
 
-        #expect((topPixel?.blueComponent ?? 0) > 0.7)
-        #expect((topPixel?.redComponent ?? 1) < 0.35)
-        #expect((bottomPixel?.redComponent ?? 0) > 0.7)
-        #expect((bottomPixel?.blueComponent ?? 1) < 0.35)
+        // 1.3 起纹理按左上角原点“正向”保存（SceneKit 平面直接正向贴图，不再预翻转）；
+        // 最终渲染结果的方向由 layeredSceneSubrectSnapshotKeepsTopLeftOrientation 校验。
+        #expect((topPixel?.redComponent ?? 0) > 0.7)
+        #expect((topPixel?.blueComponent ?? 1) < 0.35)
+        #expect((bottomPixel?.blueComponent ?? 0) > 0.7)
+        #expect((bottomPixel?.redComponent ?? 1) < 0.35)
     }
 
     @Test func layeredSceneSubrectTextureIsPreparedForSceneKitWithoutAdditionalUVFlip() async throws {
@@ -2154,10 +2171,12 @@ struct ViewScopeTests {
         let topPixel = color(in: itemImage, atImagePoint: CGPoint(x: childRect.width * 0.5, y: 8))
         let bottomPixel = color(in: itemImage, atImagePoint: CGPoint(x: childRect.width * 0.5, y: childRect.height - 8))
 
-        #expect((topPixel?.blueComponent ?? 0) > 0.7)
-        #expect((topPixel?.redComponent ?? 1) < 0.35)
-        #expect((bottomPixel?.redComponent ?? 0) > 0.7)
-        #expect((bottomPixel?.blueComponent ?? 1) < 0.35)
+        // 1.3 起纹理按左上角原点“正向”保存（SceneKit 平面直接正向贴图，不再预翻转）；
+        // 最终渲染结果的方向由 layeredSceneSubrectSnapshotKeepsTopLeftOrientation 校验。
+        #expect((topPixel?.redComponent ?? 0) > 0.7)
+        #expect((topPixel?.blueComponent ?? 1) < 0.35)
+        #expect((bottomPixel?.blueComponent ?? 0) > 0.7)
+        #expect((bottomPixel?.redComponent ?? 1) < 0.35)
     }
 
     @Test func layeredSceneSubrectTextureUsesCorrectRegionFromDecodedPNGPreview() async throws {
@@ -2232,10 +2251,12 @@ struct ViewScopeTests {
         let topPixel = color(in: itemImage, atImagePoint: CGPoint(x: childRect.width * 0.5, y: 8))
         let bottomPixel = color(in: itemImage, atImagePoint: CGPoint(x: childRect.width * 0.5, y: childRect.height - 8))
 
-        #expect((topPixel?.blueComponent ?? 0) > 0.7)
-        #expect((topPixel?.redComponent ?? 1) < 0.35)
-        #expect((bottomPixel?.redComponent ?? 0) > 0.7)
-        #expect((bottomPixel?.blueComponent ?? 1) < 0.35)
+        // 1.3 起纹理按左上角原点“正向”保存（SceneKit 平面直接正向贴图，不再预翻转）；
+        // 最终渲染结果的方向由 layeredSceneSubrectSnapshotKeepsTopLeftOrientation 校验。
+        #expect((topPixel?.redComponent ?? 0) > 0.7)
+        #expect((topPixel?.blueComponent ?? 1) < 0.35)
+        #expect((bottomPixel?.blueComponent ?? 0) > 0.7)
+        #expect((bottomPixel?.redComponent ?? 1) < 0.35)
     }
 
     @Test func layeredSceneSubrectSnapshotKeepsTopLeftOrientation() async throws {
@@ -2701,8 +2722,10 @@ struct ViewScopeTests {
     @Test func integrationGuideEntriesUseCurrentReleaseVersion() async throws {
         let entries = IntegrationGuideContent.entries(releaseVersion: "1.2.2")
 
-        #expect(entries.count == 3)
+        // SwiftPM / CocoaPods / Carthage + iOS
+        #expect(entries.count == 4)
         #expect(entries.allSatisfy { $0.snippet.contains("1.2.2") || $0.snippet.contains("~> 1.2") })
+        #expect(entries.allSatisfy { $0.snippet.contains("或者") == false || AppLocalization.shared.language != .english })
     }
 
     @Test func treePanelShowsEmptyStateWhenDisconnected() async throws {
@@ -2743,7 +2766,8 @@ struct ViewScopeTests {
         let hostPopUpButton = try #require(Mirror(reflecting: controller).descendant("hostPopUpButton") as? NSPopUpButton)
         #expect(hostPopUpButton.titleOfSelectedItem == L10n.hostPickerPlaceholder)
         #expect(hostPopUpButton.selectedItem?.representedObject == nil)
-        #expect(hostPopUpButton.numberOfItems == 2)
+        // 宿主按设备分组：占位项 + 设备分组标题 + 宿主条目，只有宿主条目可选
+        #expect(hostPopUpButton.itemArray.filter { $0.representedObject != nil }.count == 1)
     }
 
     @Test func toolbarSelectionStateKeepsPendingHostIdentifierWhileConnecting() async throws {
@@ -2790,10 +2814,11 @@ struct ViewScopeTests {
         #expect(guideView.visibleEntryTitles == [
             L10n.integrationSwiftPackageManager,
             L10n.integrationCocoaPods,
-            L10n.integrationCarthage
+            L10n.integrationCarthage,
+            L10n.integrationIOSTitle
         ])
-        #expect(guideView.visibleSnippets.count == 3)
-        #expect(guideView.visibleSnippets.joined(separator: "\n").contains("1.2.2"))
+        #expect(guideView.visibleSnippets.count == 4)
+        #expect(guideView.visibleSnippets.joined(separator: "\n").contains(IntegrationGuideContent.currentReleaseVersion))
         #expect(guideView.helpButtonTitle == L10n.menuGitHub)
         #expect(guideView.helpButtonPlacement == .bottom)
     }
@@ -2967,6 +2992,7 @@ struct ViewScopeTests {
 
         store.setNodeExpanded("window-0-view-1", isExpanded: false)
 
+        // 收起祖先导致选中节点不可见时，选中回退到被收起的节点
         #expect(store.selectedNodeID == "window-0-view-1")
         #expect(store.selectedNodeDetail?.nodeID == "window-0-view-1")
     }
@@ -2994,6 +3020,7 @@ struct ViewScopeTests {
 
         importedStore.setNodeExpanded("window-0-view-1", isExpanded: false)
 
+        // 选中节点被收起后回退到被收起的节点
         #expect(importedStore.selectedNodeID == "window-0-view-1")
         #expect(importedStore.selectedNodeDetail == nil)
     }
@@ -3489,7 +3516,9 @@ struct ViewScopeTests {
                 wantsLayer: true,
                 isFlipped: false,
                 clippingEnabled: false,
-                depth: 3
+                depth: 3,
+                // v3 宿主会告知该节点是透明的（非不透明、无背景色），预览据此挖掉透出的下层平面像素
+                traits: ViewScopeNodeTraits(isOpaque: false, backgroundAlpha: nil)
             )
         }
 
@@ -3590,6 +3619,8 @@ struct ViewScopeTests {
             defer: false
         )
         window.title = "Preview Orientation Fixture"
+        // 代码创建的 NSWindow 默认 isReleasedWhenClosed = true，close() 会额外 release 一次，导致后续自动释放池过度释放崩溃。
+        window.isReleasedWhenClosed = false
         defer {
             window.orderOut(nil)
             window.close()
@@ -3612,9 +3643,10 @@ struct ViewScopeTests {
             )
         )
         let (_, context) = builder.makeCapture()
+        // 1.3 起引用为弱引用包装；layer-backed 的根视图以其 backing layer 节点出现
         guard let rootNodeID = context.nodeReferences.first(where: { _, reference in
-            guard case .view(let capturedView) = reference else { return false }
-            return capturedView === rootView
+            let object = reference.resolvedObject
+            return object === rootView || object === rootView.layer
         })?.key,
         let detail = builder.makeDetail(for: rootNodeID, in: context) else {
             return nil
@@ -3668,20 +3700,28 @@ struct ViewScopeTests {
         return bitmap.colorAt(x: pixelX, y: pixelY)
     }
 
+    /// 按“左上角原点、单位 point”的图片坐标取色。
+    ///
+    /// - 纹理会保留宿主像素密度（@2x / @3x），因此先把 point 换算成像素；
+    /// - `NSBitmapImageRep.colorAt(x:y:)` 本身就是左上角原点，不能再翻转 y；
+    /// - 统一转到 sRGB 再比较分量，避免显示器色彩空间干扰阈值判断。
     private func color(in image: NSImage, atImagePoint point: CGPoint) -> NSColor? {
         guard let tiff = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiff) else {
+              let bitmap = NSBitmapImageRep(data: tiff),
+              image.size.width > 0,
+              image.size.height > 0 else {
             return nil
         }
 
-        let pixelX = Int(point.x.rounded(.towardZero))
-        let pixelY = Int(point.y.rounded(.towardZero))
-        let bitmapY = bitmap.pixelsHigh - 1 - pixelY
+        let scaleX = CGFloat(bitmap.pixelsWide) / image.size.width
+        let scaleY = CGFloat(bitmap.pixelsHigh) / image.size.height
+        let pixelX = Int((point.x * scaleX).rounded(.towardZero))
+        let pixelY = Int((point.y * scaleY).rounded(.towardZero))
         guard pixelX >= 0, pixelX < bitmap.pixelsWide,
-              bitmapY >= 0, bitmapY < bitmap.pixelsHigh else {
+              pixelY >= 0, pixelY < bitmap.pixelsHigh else {
             return nil
         }
-        return bitmap.colorAt(x: pixelX, y: bitmapY)
+        return bitmap.colorAt(x: pixelX, y: pixelY)?.usingColorSpace(.sRGB)
     }
 
     private func projectedSnapshotPoint(

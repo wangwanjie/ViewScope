@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import SnapKit
+import ViewScopeServer
 
 struct IntegrationGuideContent {
     struct Entry {
@@ -8,33 +9,52 @@ struct IntegrationGuideContent {
         let snippet: String
     }
 
-    static let currentReleaseVersion = "1.2.2"
+    /// 集成指引里展示的版本号：取 App 自身版本（客户端与 ViewScopeServer 同步发版），
+    /// 读取失败时退回服务端运行时版本。
+    static var currentReleaseVersion: String {
+        let bundleVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        guard let bundleVersion, bundleVersion.isEmpty == false else {
+            return viewScopeServerRuntimeVersion
+        }
+        return bundleVersion
+    }
 
     static func entries(releaseVersion: String) -> [Entry] {
         let minorVersion = releaseVersion
             .split(separator: ".")
             .prefix(2)
             .joined(separator: ".")
-        
+
         let podBase = "pod 'ViewScopeServer', :git => 'https://github.com/wangwanjie/ViewScope.git'"
         let debugConfig = ", :configurations => ['Debug']"
-        
+
         return [
             Entry(
                 title: L10n.integrationSwiftPackageManager,
-                snippet: ".package(url: \"https://github.com/wangwanjie/ViewScope.git\", from: \"\(releaseVersion)\")\nimport ViewScopeServer\n// Auto-starts after launch by default"
+                snippet: ".package(url: \"https://github.com/wangwanjie/ViewScope.git\", from: \"\(releaseVersion)\")\nimport ViewScopeServer\n// \(L10n.integrationAutoStartComment)"
             ),
             Entry(
                 title: L10n.integrationCocoaPods,
                 snippet: """
                 \(podBase), :tag => 'v\(releaseVersion)'\(debugConfig)
-                或者
+                \(L10n.integrationOr)
                 \(podBase), :branch => 'main'\(debugConfig)
                 """
             ),
             Entry(
                 title: L10n.integrationCarthage,
                 snippet: "github \"wangwanjie/ViewScope\" ~> \(minorVersion)"
+            ),
+            Entry(
+                title: L10n.integrationIOSTitle,
+                snippet: """
+                // Swift Package Manager（iOS target）
+                .package(url: "https://github.com/wangwanjie/ViewScope.git", from: "\(releaseVersion)")
+                // CocoaPods（iOS target）
+                \(podBase), :tag => 'v\(releaseVersion)'\(debugConfig)
+                // \(L10n.integrationIOSSimulatorNote)
+                // \(L10n.integrationIOSDeviceNote)
+                """
             )
         ]
     }

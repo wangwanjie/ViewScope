@@ -3,8 +3,54 @@ import Foundation
 public let viewScopeDiscoveryAnnouncementNotification = Notification.Name("cn.vanjay.ViewScopeServer.announcement")
 public let viewScopeDiscoveryTerminationNotification = Notification.Name("cn.vanjay.ViewScopeServer.termination")
 public let viewScopeDiscoveryRequestNotification = Notification.Name("cn.vanjay.ViewScopeServer.discovery-request")
-public let viewScopeCurrentProtocolVersion = 2
-public let viewScopeServerRuntimeVersion = "1.2.2"
+/// 当前协议版本。v3 新增：端口扫描发现、iOS 宿主信息、节点 traits、可枚举编辑项、console 补全与 ping。
+public let viewScopeCurrentProtocolVersion = 3
+/// 服务端仍可接受的最低客户端协议版本，客户端连接旧宿主时也按此降级。
+public let viewScopeMinimumSupportedProtocolVersion = 2
+public let viewScopeServerRuntimeVersion = "1.3.0"
+/// 宿主监听端口段。
+///
+/// - iOS 模拟器与 Mac 共享 loopback，客户端直接扫描 `127.0.0.1` 上的这些端口；
+/// - iOS 真机通过 usbmuxd 把同一段端口转发到设备的 loopback；
+/// - macOS 宿主也优先占用这段端口，使开启 App Sandbox（带 network.server 权限）的宿主也能被扫描发现。
+public let viewScopeHostPortRange: ClosedRange<UInt16> = 47300...47339
+
+/// 宿主运行平台。
+public enum ViewScopePlatform: String, Codable, Sendable, Hashable {
+    case macOS
+    case iOS
+    case iPadOS
+    case macCatalyst
+    case tvOS
+    case visionOS
+}
+
+/// 客户端如何到达宿主。由客户端在发现阶段填写，服务端不需要关心。
+public struct ViewScopeHostTransport: Codable, Sendable, Hashable {
+    public enum Kind: String, Codable, Sendable {
+        /// 直接连接 `127.0.0.1:port`（macOS 宿主、iOS 模拟器）。
+        case loopback
+        /// 通过 usbmuxd 隧道连接真机上的 `port`。
+        case usbmux
+    }
+
+    public var kind: Kind
+    /// usbmuxd 分配的 DeviceID，仅 `.usbmux` 使用。
+    public var deviceID: Int?
+    /// 设备 UDID / SerialNumber，仅 `.usbmux` 使用。
+    public var deviceSerial: String?
+    /// usbmuxd 报告的连接类型（USB / Network）。
+    public var connectionType: String?
+
+    public init(kind: Kind, deviceID: Int? = nil, deviceSerial: String? = nil, connectionType: String? = nil) {
+        self.kind = kind
+        self.deviceID = deviceID
+        self.deviceSerial = deviceSerial
+        self.connectionType = connectionType
+    }
+
+    public static let loopback = ViewScopeHostTransport(kind: .loopback)
+}
 
 /// Advertises a locally running debug host that can be inspected by the ViewScope app.
 public struct ViewScopeHostAnnouncement: Codable, Sendable, Hashable {
@@ -20,6 +66,20 @@ public struct ViewScopeHostAnnouncement: Codable, Sendable, Hashable {
     public var supportsHighlighting: Bool
     public var protocolVersion: Int
     public var runtimeVersion: String
+    /// v3：宿主平台；旧宿主为 nil，按 macOS 处理。
+    public var platform: ViewScopePlatform?
+    /// v3：系统版本，例如 "17.5"。
+    public var osVersion: String?
+    /// v3：设备名（iOS 为 UIDevice.name，macOS 为主机名）。
+    public var deviceName: String?
+    /// v3：设备型号标识，例如 "iPhone15,2"、"MacBookPro18,3"。
+    public var deviceModel: String?
+    /// v3：是否运行在 iOS 模拟器。
+    public var isSimulator: Bool?
+    /// v3：主屏幕缩放比例。
+    public var screenScale: Double?
+    /// 客户端填写：到达该宿主的方式。nil 视为 `.loopback`。
+    public var transport: ViewScopeHostTransport?
 
     public init(
         identifier: String,
@@ -33,7 +93,14 @@ public struct ViewScopeHostAnnouncement: Codable, Sendable, Hashable {
         updatedAt: Date,
         supportsHighlighting: Bool,
         protocolVersion: Int,
-        runtimeVersion: String
+        runtimeVersion: String,
+        platform: ViewScopePlatform? = nil,
+        osVersion: String? = nil,
+        deviceName: String? = nil,
+        deviceModel: String? = nil,
+        isSimulator: Bool? = nil,
+        screenScale: Double? = nil,
+        transport: ViewScopeHostTransport? = nil
     ) {
         self.identifier = identifier
         self.authToken = authToken
@@ -47,6 +114,23 @@ public struct ViewScopeHostAnnouncement: Codable, Sendable, Hashable {
         self.supportsHighlighting = supportsHighlighting
         self.protocolVersion = protocolVersion
         self.runtimeVersion = runtimeVersion
+        self.platform = platform
+        self.osVersion = osVersion
+        self.deviceName = deviceName
+        self.deviceModel = deviceModel
+        self.isSimulator = isSimulator
+        self.screenScale = screenScale
+        self.transport = transport
+    }
+
+    /// 旧宿主没有 platform 字段，统一按 macOS 处理。
+    public var resolvedPlatform: ViewScopePlatform {
+        platform ?? .macOS
+    }
+
+    /// 实际到达方式，旧数据视为 loopback。
+    public var resolvedTransport: ViewScopeHostTransport {
+        transport ?? .loopback
     }
 }
 
@@ -58,6 +142,15 @@ public struct ViewScopeHostInfo: Codable, Sendable, Hashable {
     public var processIdentifier: Int32
     public var runtimeVersion: String
     public var supportsHighlighting: Bool
+    /// v3：宿主平台；旧宿主为 nil，按 macOS 处理。
+    public var platform: ViewScopePlatform?
+    public var osVersion: String?
+    public var deviceName: String?
+    public var deviceModel: String?
+    public var isSimulator: Bool?
+    public var screenScale: Double?
+    /// v3：服务端实际使用的协议版本。
+    public var protocolVersion: Int?
 
     public init(
         displayName: String,
@@ -66,7 +159,14 @@ public struct ViewScopeHostInfo: Codable, Sendable, Hashable {
         build: String,
         processIdentifier: Int32,
         runtimeVersion: String,
-        supportsHighlighting: Bool
+        supportsHighlighting: Bool,
+        platform: ViewScopePlatform? = nil,
+        osVersion: String? = nil,
+        deviceName: String? = nil,
+        deviceModel: String? = nil,
+        isSimulator: Bool? = nil,
+        screenScale: Double? = nil,
+        protocolVersion: Int? = nil
     ) {
         self.displayName = displayName
         self.bundleIdentifier = bundleIdentifier
@@ -75,6 +175,17 @@ public struct ViewScopeHostInfo: Codable, Sendable, Hashable {
         self.processIdentifier = processIdentifier
         self.runtimeVersion = runtimeVersion
         self.supportsHighlighting = supportsHighlighting
+        self.platform = platform
+        self.osVersion = osVersion
+        self.deviceName = deviceName
+        self.deviceModel = deviceModel
+        self.isSimulator = isSimulator
+        self.screenScale = screenScale
+        self.protocolVersion = protocolVersion
+    }
+
+    public var resolvedPlatform: ViewScopePlatform {
+        platform ?? .macOS
     }
 }
 
@@ -161,6 +272,74 @@ public struct ViewScopeEventHandler: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
+/// v3：供客户端做布局诊断、可访问性检查的附加信息。所有字段都可缺省。
+public struct ViewScopeNodeTraits: Codable, Sendable, Hashable {
+    /// UIView.isUserInteractionEnabled；AppKit 下对应“会参与 hitTest”（未隐藏且非 ignoresMouseEvents 语义），无法判断时为 nil。
+    public var isUserInteractionEnabled: Bool?
+    /// Auto Layout 是否存在歧义（`hasAmbiguousLayout`）。
+    public var hasAmbiguousLayout: Bool?
+    public var translatesAutoresizingMaskIntoConstraints: Bool?
+    /// 视图/图层是否声明为不透明。
+    public var isOpaque: Bool?
+    /// 背景色的 alpha；没有背景色时为 nil。
+    public var backgroundAlpha: Double?
+    /// 节点在父视图坐标系中的原始 frame（未做画布归一化），单位 point。
+    public var frameInSuperview: ViewScopeRect?
+    /// 渲染缩放比例（backingScaleFactor / contentScaleFactor），用于检查像素对齐。
+    public var displayScale: Double?
+    /// 固有尺寸；没有固有尺寸时为 nil。
+    public var intrinsicContentSize: ViewScopeSize?
+    /// 与该节点相关的约束数量（自身 + 父视图中引用它的约束）。
+    public var constraintCount: Int?
+    public var accessibilityIdentifier: String?
+    public var accessibilityLabel: String?
+    public var isAccessibilityElement: Bool?
+    /// 是否为可交互控件（UIControl / NSControl / 带手势），用于点击区域检查。
+    public var isInteractiveControl: Bool?
+    /// 文本类控件的文本是否被截断（UILabel / NSTextField 等），无法判断时为 nil。
+    public var isTextTruncated: Bool?
+    /// 图片视图所显示图片的尺寸（point），用于放大模糊检查。
+    public var imageSize: ViewScopeSize?
+    /// 图片本身的 scale。
+    public var imageScale: Double?
+
+    public init(
+        isUserInteractionEnabled: Bool? = nil,
+        hasAmbiguousLayout: Bool? = nil,
+        translatesAutoresizingMaskIntoConstraints: Bool? = nil,
+        isOpaque: Bool? = nil,
+        backgroundAlpha: Double? = nil,
+        frameInSuperview: ViewScopeRect? = nil,
+        displayScale: Double? = nil,
+        intrinsicContentSize: ViewScopeSize? = nil,
+        constraintCount: Int? = nil,
+        accessibilityIdentifier: String? = nil,
+        accessibilityLabel: String? = nil,
+        isAccessibilityElement: Bool? = nil,
+        isInteractiveControl: Bool? = nil,
+        isTextTruncated: Bool? = nil,
+        imageSize: ViewScopeSize? = nil,
+        imageScale: Double? = nil
+    ) {
+        self.isUserInteractionEnabled = isUserInteractionEnabled
+        self.hasAmbiguousLayout = hasAmbiguousLayout
+        self.translatesAutoresizingMaskIntoConstraints = translatesAutoresizingMaskIntoConstraints
+        self.isOpaque = isOpaque
+        self.backgroundAlpha = backgroundAlpha
+        self.frameInSuperview = frameInSuperview
+        self.displayScale = displayScale
+        self.intrinsicContentSize = intrinsicContentSize
+        self.constraintCount = constraintCount
+        self.accessibilityIdentifier = accessibilityIdentifier
+        self.accessibilityLabel = accessibilityLabel
+        self.isAccessibilityElement = isAccessibilityElement
+        self.isInteractiveControl = isInteractiveControl
+        self.isTextTruncated = isTextTruncated
+        self.imageSize = imageSize
+        self.imageScale = imageScale
+    }
+}
+
 public struct ViewScopeHierarchyNode: Codable, Sendable, Hashable, Identifiable {
     public enum Kind: String, Codable, Sendable {
         case window
@@ -192,6 +371,8 @@ public struct ViewScopeHierarchyNode: Codable, Sendable, Hashable, Identifiable 
     public var isFlipped: Bool
     public var clippingEnabled: Bool
     public var depth: Int
+    /// v3：诊断用附加信息。
+    public var traits: ViewScopeNodeTraits?
 
     public init(
         id: String,
@@ -217,7 +398,8 @@ public struct ViewScopeHierarchyNode: Codable, Sendable, Hashable, Identifiable 
         rootViewControllerClassName: String? = nil,
         controlTargetClassName: String? = nil,
         controlActionName: String? = nil,
-        eventHandlers: [ViewScopeEventHandler]? = nil
+        eventHandlers: [ViewScopeEventHandler]? = nil,
+        traits: ViewScopeNodeTraits? = nil
     ) {
         self.id = id
         self.parentID = parentID
@@ -243,6 +425,7 @@ public struct ViewScopeHierarchyNode: Codable, Sendable, Hashable, Identifiable 
         self.controlTargetClassName = controlTargetClassName
         self.controlActionName = controlActionName
         self.eventHandlers = eventHandlers
+        self.traits = traits
     }
 }
 
@@ -427,6 +610,17 @@ public enum ViewScopeEditableValueKind: String, Codable, Sendable {
     case text
 }
 
+/// v3：数值型可编辑属性的候选值，客户端据此显示下拉框而不是裸数字输入。
+public struct ViewScopeEditableOption: Codable, Sendable, Hashable {
+    public var title: String
+    public var value: Double
+
+    public init(title: String, value: Double) {
+        self.title = title
+        self.value = value
+    }
+}
+
 /// Describes a property that can be edited live from the inspector.
 public struct ViewScopeEditableProperty: Codable, Sendable, Hashable {
     public var key: String
@@ -434,19 +628,23 @@ public struct ViewScopeEditableProperty: Codable, Sendable, Hashable {
     public var boolValue: Bool?
     public var numberValue: Double?
     public var textValue: String?
+    /// v3：枚举候选值；仅 `.number` 使用。
+    public var options: [ViewScopeEditableOption]?
 
     public init(
         key: String,
         kind: ViewScopeEditableValueKind,
         boolValue: Bool? = nil,
         numberValue: Double? = nil,
-        textValue: String? = nil
+        textValue: String? = nil,
+        options: [ViewScopeEditableOption]? = nil
     ) {
         self.key = key
         self.kind = kind
         self.boolValue = boolValue
         self.numberValue = numberValue
         self.textValue = textValue
+        self.options = options
     }
 
     public static func toggle(key: String, value: Bool) -> ViewScopeEditableProperty {
@@ -455,6 +653,16 @@ public struct ViewScopeEditableProperty: Codable, Sendable, Hashable {
 
     public static func number(key: String, value: Double) -> ViewScopeEditableProperty {
         ViewScopeEditableProperty(key: key, kind: .number, numberValue: value)
+    }
+
+    /// v3：带候选项的枚举属性，提交时仍以 `.number` 发送所选 value。
+    public static func enumeration(key: String, value: Double, options: [ViewScopeEditableOption]) -> ViewScopeEditableProperty {
+        ViewScopeEditableProperty(key: key, kind: .number, numberValue: value, options: options)
+    }
+
+    /// 返回只保留“值”的副本（去掉 options），用于发送 mutation。
+    public var valueOnly: ViewScopeEditableProperty {
+        ViewScopeEditableProperty(key: key, kind: kind, boolValue: boolValue, numberValue: numberValue, textValue: textValue)
     }
 
     public static func text(key: String, value: String) -> ViewScopeEditableProperty {
@@ -609,6 +817,46 @@ public struct ViewScopeConsoleInvokeResponsePayload: Codable, Sendable, Hashable
     }
 }
 
+/// v3：请求某个 console target 可调用的方法/属性列表，用于自动补全。
+public struct ViewScopeConsoleCompletionRequestPayload: Codable, Sendable, Hashable {
+    public var target: ViewScopeRemoteObjectReference
+    /// 可选前缀过滤；为空时返回全部（服务端会做数量上限）。
+    public var prefix: String?
+
+    public init(target: ViewScopeRemoteObjectReference, prefix: String? = nil) {
+        self.target = target
+        self.prefix = prefix
+    }
+}
+
+public struct ViewScopeConsoleCompletion: Codable, Sendable, Hashable {
+    /// 可直接插入的 selector / 属性名，例如 "setHidden:"、"frame"。
+    public var name: String
+    /// 便于阅读的签名，例如 "- (void)setHidden:(BOOL)"。
+    public var signature: String
+    /// 是否为 @property。
+    public var isProperty: Bool
+    /// 声明该方法的类。
+    public var declaringClassName: String
+
+    public init(name: String, signature: String, isProperty: Bool, declaringClassName: String) {
+        self.name = name
+        self.signature = signature
+        self.isProperty = isProperty
+        self.declaringClassName = declaringClassName
+    }
+}
+
+public struct ViewScopeConsoleCompletionResponsePayload: Codable, Sendable, Hashable {
+    public var target: ViewScopeRemoteObjectReference
+    public var completions: [ViewScopeConsoleCompletion]
+
+    public init(target: ViewScopeRemoteObjectReference, completions: [ViewScopeConsoleCompletion]) {
+        self.target = target
+        self.completions = completions
+    }
+}
+
 public struct ViewScopeErrorPayload: Codable, Sendable, Hashable {
     public var message: String
 
@@ -636,6 +884,14 @@ public struct ViewScopeMessage: Codable, Sendable, Hashable {
         case consoleInvokeResponse
         case ack
         case error
+        /// v3：无需认证，返回宿主 announcement，用于端口扫描发现。
+        case discoveryRequest
+        case discoveryResponse
+        /// v3：console 自动补全。
+        case consoleCompletionRequest
+        case consoleCompletionResponse
+        /// v3：存活探测，服务端回 ack。
+        case ping
     }
 
     public var kind: Kind
@@ -651,6 +907,10 @@ public struct ViewScopeMessage: Codable, Sendable, Hashable {
     public var consoleInvokeResponse: ViewScopeConsoleInvokeResponsePayload?
     public var ack: ViewScopeAckPayload?
     public var error: ViewScopeErrorPayload?
+    /// v3：discoveryResponse 携带的宿主信息。
+    public var announcement: ViewScopeHostAnnouncement?
+    public var consoleCompletionRequest: ViewScopeConsoleCompletionRequestPayload?
+    public var consoleCompletionResponse: ViewScopeConsoleCompletionResponsePayload?
 
     public init(
         kind: Kind,
@@ -665,7 +925,10 @@ public struct ViewScopeMessage: Codable, Sendable, Hashable {
         consoleInvokeRequest: ViewScopeConsoleInvokeRequestPayload? = nil,
         consoleInvokeResponse: ViewScopeConsoleInvokeResponsePayload? = nil,
         ack: ViewScopeAckPayload? = nil,
-        error: ViewScopeErrorPayload? = nil
+        error: ViewScopeErrorPayload? = nil,
+        announcement: ViewScopeHostAnnouncement? = nil,
+        consoleCompletionRequest: ViewScopeConsoleCompletionRequestPayload? = nil,
+        consoleCompletionResponse: ViewScopeConsoleCompletionResponsePayload? = nil
     ) {
         self.kind = kind
         self.requestID = requestID
@@ -680,5 +943,8 @@ public struct ViewScopeMessage: Codable, Sendable, Hashable {
         self.consoleInvokeResponse = consoleInvokeResponse
         self.ack = ack
         self.error = error
+        self.announcement = announcement
+        self.consoleCompletionRequest = consoleCompletionRequest
+        self.consoleCompletionResponse = consoleCompletionResponse
     }
 }

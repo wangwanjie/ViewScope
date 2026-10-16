@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 import ViewScopeServer
 
-struct CaptureHistoryInsight: Equatable {
+nonisolated struct CaptureHistoryInsight: Equatable, Sendable {
     var totalCaptures: Int
     var averageDurationMilliseconds: Int
     var mostRecentDurationMilliseconds: Int
@@ -16,6 +16,8 @@ enum WorkspaceConnectionState: Equatable {
     case connected(ViewScopeHostAnnouncement)
     case imported(String)
     case failed(String)
+    /// 已连接的宿主意外断开：保留最后一次抓取供只读查看，等待宿主重新出现后自动重连。
+    case lost(ViewScopeHostAnnouncement)
 
     var statusText: String {
         switch self {
@@ -29,7 +31,17 @@ enum WorkspaceConnectionState: Equatable {
             return L10n.loadedCaptureFile(name)
         case .failed(let message):
             return message
+        case .lost:
+            return L10n.connectedHostDisappeared
         }
+    }
+
+    /// 意外断开的宿主（只读模式）。
+    var lostHost: ViewScopeHostAnnouncement? {
+        if case .lost(let host) = self {
+            return host
+        }
+        return nil
     }
 
     var activeHost: ViewScopeHostAnnouncement? {
@@ -115,30 +127,53 @@ enum WorkspaceArchiveCodec {
     }
 
     static func decode(_ data: Data) throws -> WorkspaceRawPreviewExport {
-        guard let document = try NSKeyedUnarchiver.unarchivedObject(
-            ofClass: WorkspaceArchiveDocument.self,
-            from: data
-        ) else {
+        let document: WorkspaceArchiveDocument?
+        do {
+            document = try NSKeyedUnarchiver.unarchivedObject(
+                ofClass: WorkspaceArchiveDocument.self,
+                from: data
+            )
+        } catch {
             throw WorkspaceArchiveError.unsupportedFile
+        }
+        guard let document else {
+            throw WorkspaceArchiveError.unsupportedFile
+        }
+        // 新版本客户端写出的归档可能含有当前版本无法理解的结构，直接拒绝而不是解出半截数据
+        guard document.archiveVersion <= supportedArchiveVersion else {
+            throw WorkspaceArchiveError.unsupportedVersion
         }
 
         let decoder = PropertyListDecoder()
+        let export: WorkspaceRawPreviewExport
         do {
-            return try decoder.decode(WorkspaceRawPreviewExport.self, from: document.payloadData)
+            export = try decoder.decode(WorkspaceRawPreviewExport.self, from: document.payloadData)
         } catch {
             throw WorkspaceArchiveError.corruptedPayload(underlyingError: error)
         }
+        guard export.formatVersion <= supportedFormatVersion else {
+            throw WorkspaceArchiveError.unsupportedVersion
+        }
+        return export
     }
+
+    /// 当前客户端能读取的最高归档版本。
+    static let supportedArchiveVersion = 1
+    /// 当前客户端能读取的最高 payload 格式版本。
+    static let supportedFormatVersion = 1
 }
 
 enum WorkspaceArchiveError: LocalizedError {
     case unsupportedFile
+    case unsupportedVersion
     case corruptedPayload(underlyingError: Error)
 
     var errorDescription: String? {
         switch self {
         case .unsupportedFile:
             return AppLocalization.backgroundString("archive.error.unsupported_file")
+        case .unsupportedVersion:
+            return AppLocalization.backgroundString("app.archive.error.unsupported_version")
         case .corruptedPayload:
             return AppLocalization.backgroundString("archive.error.corrupted_file")
         }
