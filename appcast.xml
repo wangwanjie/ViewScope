@@ -3,19 +3,21 @@
     <channel>
         <title>ViewScope</title>
         <item>
-            <title>1.2.2</title>
-            <pubDate>Fri, 27 Mar 2026 21:18:57 +0800</pubDate>
-            <link>https://github.com/wangwanjie/ViewScope/releases/tag/v1.2.2</link>
-            <sparkle:version>5</sparkle:version>
-            <sparkle:shortVersionString>1.2.2</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"># ViewScope 1.2.2
+            <title>1.3.0</title>
+            <pubDate>Fri, 16 Oct 2026 13:49:27 +0800</pubDate>
+            <link>https://github.com/wangwanjie/ViewScope/releases/tag/v1.3.0</link>
+            <sparkle:version>6</sparkle:version>
+            <sparkle:shortVersionString>1.3.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>12.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"># ViewScope 1.3.0
 
-- 服务端快照与远程对象模型新增 `CALayer` 节点支持，补齐 layer 级别的截图、高亮、显隐与常见属性修改能力。
-- 层级树改为单行展示，主类名、`ViewController.view` 标记和 `ivar` 分列显示，并新增针对控制器根视图的真实控制器类名复制菜单。
-- 修复宿主切换过程中工具栏宿主下拉框丢失当前显示项的问题，同步更新集成文档、运行时版本号与发布元数据到 1.2.2。
+- 新增 iOS 宿主支持：可调试 iOS / iPadOS 模拟器中的 App，以及通过 USB（usbmuxd 隧道）连接的真机；宿主端重构为共享核心 + AppKit / UIKit 双平台实现。
+- 新增测量与取色、布局问题诊断、修改记录（⌘Z / ⇧⌘Z 撤销重做、逐条还原、导出 Swift 代码）、抓取对比，调试控制台支持带参数方法、key path、对象引用、历史与自动补全。
+- 连接协议升级到 v3：端口段发现、逐连接认证、版本协商、请求超时、断线后自动重连；宿主侧 ViewScopeServer 需同步升级到 1.3.0。
+- 全新界面与应用图标：工具栏并入标题栏，面板改为统一的圆角卡片，预览工具栏按功能分组，偏好设置改为系统设置风格。
+- 修复数值越界、私有 KVC、自动刷新覆盖选中、Inspector 写错节点、编辑中被刷新提交等多处会导致崩溃或误操作的问题。
 </description>
-            <enclosure url="https://github.com/wangwanjie/ViewScope/releases/download/v1.2.2/ViewScope_V_1.2.2.dmg" length="10239292" type="application/octet-stream" sparkle:edSignature="HXVH2R2varXJgAvuJcP7VQOeV0wUNmsI3do7XWZJNYy1Bb8ASlDk10KRTpcK+vM35RAY1rXlgqyLgUWjSYtfCg==" />
+            <enclosure url="https://github.com/wangwanjie/ViewScope/releases/download/v1.3.0/ViewScope_V_1.3.0.dmg" length="11455429" type="application/octet-stream" sparkle:edSignature="3su2rmIE9DVuohOYYqMnG6nA++yOZx6wgVml42arW6bJG82FCIjjrrIRIqEf2zdNarUgM8FEtslIAigUX89JAQ==" />
         </item>
         <link>https://github.com/wangwanjie/ViewScope</link>
         <description>ViewScope release feed.</description>
