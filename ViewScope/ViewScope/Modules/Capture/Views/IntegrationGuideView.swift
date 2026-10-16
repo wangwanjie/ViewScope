@@ -70,7 +70,7 @@ final class IntegrationGuideView: NSView {
         static let preferredContentWidth: CGFloat = 960
     }
 
-    private let titleLabel = NSTextField(labelWithString: "")
+    private let titleLabel = NSTextField(wrappingLabelWithString: "")
     private let subtitleLabel = NSTextField(wrappingLabelWithString: "")
     private let contentStackView = NSStackView()
     private let cardsStackView = NSStackView()
@@ -131,12 +131,14 @@ final class IntegrationGuideView: NSView {
     }
 
     private func buildViewHierarchy() {
-        titleLabel.font = NSFont.systemFont(ofSize: 24, weight: .semibold)
+        titleLabel.font = NSFont.systemFont(ofSize: 20, weight: .semibold)
         titleLabel.alignment = .center
+        // 标题允许换行，窄面板下不再被截断
+        titleLabel.maximumNumberOfLines = 0
 
         subtitleLabel.font = NSFont.systemFont(ofSize: 13)
         subtitleLabel.textColor = .secondaryLabelColor
-        subtitleLabel.maximumNumberOfLines = 2
+        subtitleLabel.maximumNumberOfLines = 0
         subtitleLabel.alignment = .center
 
         helpButton.bezelStyle = .rounded
@@ -158,6 +160,9 @@ final class IntegrationGuideView: NSView {
 
         addSubview(contentStackView)
 
+        titleLabel.snp.makeConstraints { make in
+            make.width.equalTo(contentStackView)
+        }
         subtitleLabel.snp.makeConstraints { make in
             make.width.equalTo(contentStackView)
         }
@@ -193,7 +198,8 @@ final class IntegrationGuideView: NSView {
     }
 
     private func applyAppearance() {
-        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        // 与所在面板卡片同色，避免出现一块颜色不同的底
+        layer?.backgroundColor = resolvedCGColor(WorkspaceTheme.panelBackground)
     }
 
     private func render(entries: [IntegrationGuideContent.Entry]) {
@@ -229,8 +235,8 @@ private final class CodeCardView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.cornerRadius = 16
-        layer?.borderWidth = 1
+        layer?.cornerCurve = .continuous
+        layer?.cornerRadius = WorkspaceTheme.Metrics.panelCornerRadius
 
         titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         titleLabel.textColor = .secondaryLabelColor
@@ -269,7 +275,6 @@ private final class CodeCardView: NSView {
     }
 
     private func applyAppearance() {
-        layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
-        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.5).cgColor
+        layer?.backgroundColor = resolvedCGColor(WorkspaceTheme.groupedFill)
     }
 }

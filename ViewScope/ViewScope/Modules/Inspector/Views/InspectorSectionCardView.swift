@@ -4,8 +4,8 @@ final class InspectorSectionCardView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.cornerRadius = 12
-        layer?.borderWidth = 1
+        layer?.cornerCurve = .continuous
+        layer?.cornerRadius = WorkspaceTheme.Metrics.sectionCornerRadius
         applyAppearance()
     }
 
@@ -20,7 +20,7 @@ final class InspectorSectionCardView: NSView {
     }
 
     private func applyAppearance() {
-        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
-        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.4).cgColor
+        // 分区只用浅色填充区分，不再描边，减少“框套框”的视觉噪音
+        layer?.backgroundColor = resolvedCGColor(WorkspaceTheme.groupedFill)
     }
 }

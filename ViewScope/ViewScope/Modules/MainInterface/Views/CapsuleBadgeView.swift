@@ -47,9 +47,18 @@ final class CapsuleBadgeView: NSView {
         }
     }
 
+    private var badgeBackgroundColor: NSColor = .clear
+
     func applyStyle(textColor: NSColor, backgroundColor: NSColor) {
         label.textColor = textColor
-        layer?.backgroundColor = backgroundColor.cgColor
+        badgeBackgroundColor = backgroundColor
+        layer?.backgroundColor = resolvedCGColor(backgroundColor)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        // 系统语义色在深浅色下取值不同，外观切换时重新解析
+        layer?.backgroundColor = resolvedCGColor(badgeBackgroundColor)
     }
 
     override var intrinsicContentSize: NSSize {

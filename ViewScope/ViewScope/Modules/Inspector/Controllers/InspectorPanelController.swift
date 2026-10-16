@@ -49,7 +49,7 @@ final class InspectorPanelController: NSViewController {
 
         stackView.orientation = .vertical
         stackView.alignment = .width
-        stackView.spacing = 14
+        stackView.spacing = 10
 
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
@@ -70,10 +70,10 @@ final class InspectorPanelController: NSViewController {
             make.top.leading.trailing.equalToSuperview()
             make.width.equalTo(scrollView.contentView)
             make.height.greaterThanOrEqualTo(scrollView.contentView)
-            make.bottom.equalTo(stackView.snp.bottom).offset(14)
+            make.bottom.equalTo(stackView.snp.bottom).offset(12)
         }
         stackView.snp.makeConstraints { make in
-            make.top.leading.trailing.equalToSuperview().inset(14)
+            make.top.leading.trailing.equalToSuperview().inset(12)
         }
     }
 
@@ -168,7 +168,8 @@ final class InspectorPanelController: NSViewController {
         container.setContentCompressionResistancePriority(.required, for: .vertical)
 
         let titleLabel = NSTextField(labelWithString: section.title)
-        titleLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        titleLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        titleLabel.textColor = .secondaryLabelColor
 
         let rowsStack = NSStackView()
         rowsStack.orientation = .vertical
@@ -178,11 +179,13 @@ final class InspectorPanelController: NSViewController {
         container.addSubview(titleLabel)
         container.addSubview(rowsStack)
         titleLabel.snp.makeConstraints { make in
-            make.top.leading.trailing.equalToSuperview().inset(12)
+            make.top.equalToSuperview().inset(10)
+            make.leading.trailing.equalToSuperview().inset(12)
         }
         rowsStack.snp.makeConstraints { make in
-            make.top.equalTo(titleLabel.snp.bottom).offset(10)
-            make.leading.trailing.bottom.equalToSuperview().inset(12)
+            make.top.equalTo(titleLabel.snp.bottom).offset(8)
+            make.leading.trailing.equalToSuperview().inset(12)
+            make.bottom.equalToSuperview().inset(12)
         }
 
         section.rows.forEach { row in

@@ -6,8 +6,8 @@ import ViewScopeServer
 @MainActor
 final class WorkspaceToolbarViewController: NSViewController {
     private enum Layout {
-        static let leadingInset: CGFloat = 12
-        static let trailingInset: CGFloat = 14
+        static let trailingInset: CGFloat = 12
+        static let hostPopUpWidth: CGFloat = 300
     }
 
     private let store: WorkspaceStore
@@ -17,12 +17,12 @@ final class WorkspaceToolbarViewController: NSViewController {
     private var pendingHostIdentifier: String?
 
     private let hostPopUpButton = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let refreshButton = NSButton(title: "", target: nil, action: nil)
-    private let disconnectButton = NSButton(title: "", target: nil, action: nil)
-    private let modificationLogButton = NSButton(title: "", target: nil, action: nil)
-    private let captureDiffButton = NSButton(title: "", target: nil, action: nil)
-    private let inspectorToggleButton = NSButton(title: "", target: nil, action: nil)
-    private let connectionBadge = CapsuleBadgeView(fontSize: 10, horizontalInset: 8, verticalInset: 3, minimumHeight: 20)
+    private let refreshButton = WorkspaceIconButton()
+    private let disconnectButton = WorkspaceIconButton()
+    private let modificationLogButton = WorkspaceIconButton()
+    private let captureDiffButton = WorkspaceIconButton()
+    private let inspectorToggleButton = WorkspaceIconButton()
+    private let connectionBadge = CapsuleBadgeView(fontSize: 10, horizontalInset: 8, verticalInset: 2, minimumHeight: 18)
     private let statusLabel = NSTextField(labelWithString: "")
 
     init(store: WorkspaceStore) {
@@ -36,7 +36,8 @@ final class WorkspaceToolbarViewController: NSViewController {
     }
 
     override func loadView() {
-        view = NSVisualEffectView()
+        // 工具栏位于透明标题栏这一行，直接透出窗口底色
+        view = NSView()
     }
 
     override func viewDidLoad() {
@@ -49,64 +50,55 @@ final class WorkspaceToolbarViewController: NSViewController {
     }
 
     private func buildUI() {
-        guard let toolbarView = view as? NSVisualEffectView else { return }
-        toolbarView.material = .titlebar
-        toolbarView.blendingMode = .withinWindow
-        toolbarView.state = .active
-        toolbarView.wantsLayer = true
-        toolbarView.layer?.borderWidth = 1
-        toolbarView.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.5).cgColor
-
         hostPopUpButton.controlSize = .regular
         hostPopUpButton.bezelStyle = .rounded
         hostPopUpButton.target = self
         hostPopUpButton.action = #selector(handleHostSelection(_:))
 
-        refreshButton.bezelStyle = .texturedRounded
-        refreshButton.target = self
-        refreshButton.action = #selector(refreshCapture(_:))
-        disconnectButton.bezelStyle = .texturedRounded
-        disconnectButton.target = self
-        disconnectButton.action = #selector(disconnectHost(_:))
-
+        configureIconButton(refreshButton, symbolName: "arrow.clockwise", action: #selector(refreshCapture(_:)))
+        configureIconButton(disconnectButton, symbolName: "eject", action: #selector(disconnectHost(_:)))
         configureIconButton(modificationLogButton, symbolName: "list.bullet.rectangle", action: #selector(showModificationLog(_:)))
         configureIconButton(captureDiffButton, symbolName: "arrow.left.arrow.right.square", action: #selector(showCaptureDiff(_:)))
         configureIconButton(inspectorToggleButton, symbolName: "sidebar.right", action: #selector(toggleInspector(_:)))
         inspectorToggleButton.setButtonType(.pushOnPushOff)
 
+        statusLabel.font = NSFont.systemFont(ofSize: 12)
         statusLabel.lineBreakMode = .byTruncatingTail
         statusLabel.textColor = .secondaryLabelColor
 
+        // 左侧：宿主选择 + 刷新/断开；中间：连接状态；右侧：面板工具
         let controls = NSStackView(views: [hostPopUpButton, refreshButton, disconnectButton])
         controls.orientation = .horizontal
         controls.alignment = .centerY
-        controls.spacing = 8
+        controls.spacing = 4
+        controls.setCustomSpacing(8, after: hostPopUpButton)
 
-        let toolControls = NSStackView(views: [modificationLogButton, captureDiffButton, inspectorToggleButton])
+        let statusStack = NSStackView(views: [connectionBadge, statusLabel])
+        statusStack.orientation = .horizontal
+        statusStack.alignment = .centerY
+        statusStack.spacing = 8
+        statusStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let toolControls = NSStackView(views: [modificationLogButton, captureDiffButton, WorkspaceToolbarDivider(), inspectorToggleButton])
         toolControls.orientation = .horizontal
         toolControls.alignment = .centerY
-        toolControls.spacing = 6
+        toolControls.spacing = 4
         toolControls.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         view.addSubview(controls)
-        view.addSubview(connectionBadge)
-        view.addSubview(statusLabel)
+        view.addSubview(statusStack)
         view.addSubview(toolControls)
 
         controls.snp.makeConstraints { make in
-            make.leading.equalToSuperview().offset(Layout.leadingInset)
+            make.leading.equalToSuperview()
             make.centerY.equalToSuperview()
         }
         hostPopUpButton.snp.makeConstraints { make in
-            make.width.equalTo(340)
+            make.width.equalTo(Layout.hostPopUpWidth)
         }
-        connectionBadge.snp.makeConstraints { make in
-            make.leading.equalTo(controls.snp.trailing).offset(12)
-            make.centerY.equalToSuperview()
-        }
-        statusLabel.snp.makeConstraints { make in
-            make.leading.equalTo(connectionBadge.snp.trailing).offset(10)
-            make.trailing.lessThanOrEqualTo(toolControls.snp.leading).offset(-10)
+        statusStack.snp.makeConstraints { make in
+            make.leading.equalTo(controls.snp.trailing).offset(16)
+            make.trailing.lessThanOrEqualTo(toolControls.snp.leading).offset(-12)
             make.centerY.equalToSuperview()
         }
         statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -162,8 +154,8 @@ final class WorkspaceToolbarViewController: NSViewController {
     }
 
     private func applyLocalization() {
-        refreshButton.title = L10n.refresh
-        disconnectButton.title = store.connectionState.importedCaptureName == nil ? L10n.disconnect : L10n.menuCloseImportedCapture
+        refreshButton.toolTip = L10n.refresh
+        disconnectButton.toolTip = store.connectionState.importedCaptureName == nil ? L10n.disconnect : L10n.menuCloseImportedCapture
         hostPopUpButton.toolTip = L10n.liveHosts
         modificationLogButton.toolTip = L10n.menuModificationLog
         captureDiffButton.toolTip = L10n.menuCaptureDiff
@@ -281,40 +273,34 @@ final class WorkspaceToolbarViewController: NSViewController {
         statusLabel.toolTip = captureInsightToolTip
         refreshButton.isEnabled = store.canRefreshCapture
         disconnectButton.isEnabled = store.canDisconnect
-        disconnectButton.title = state.importedCaptureName == nil ? L10n.disconnect : L10n.menuCloseImportedCapture
+        disconnectButton.toolTip = state.importedCaptureName == nil ? L10n.disconnect : L10n.menuCloseImportedCapture
 
         let badgeText: String
-        let textColor: NSColor
-        let backgroundColor: NSColor
+        let tint: NSColor
         switch state {
         case .idle:
             badgeText = L10n.idleBadge
-            textColor = NSColor(calibratedRed: 0.11, green: 0.43, blue: 0.63, alpha: 1)
-            backgroundColor = NSColor(calibratedRed: 0.86, green: 0.94, blue: 0.98, alpha: 1)
+            tint = .systemGray
         case .connecting:
             badgeText = L10n.linkingBadge
-            textColor = NSColor(calibratedRed: 0.61, green: 0.38, blue: 0.06, alpha: 1)
-            backgroundColor = NSColor(calibratedRed: 0.99, green: 0.94, blue: 0.84, alpha: 1)
+            tint = .systemOrange
         case .connected:
             badgeText = L10n.liveBadge
-            textColor = NSColor(calibratedRed: 0.06, green: 0.48, blue: 0.32, alpha: 1)
-            backgroundColor = NSColor(calibratedRed: 0.88, green: 0.96, blue: 0.91, alpha: 1)
+            tint = .systemGreen
         case .imported:
             badgeText = L10n.loadedBadge
-            textColor = NSColor(calibratedRed: 0.27, green: 0.25, blue: 0.53, alpha: 1)
-            backgroundColor = NSColor(calibratedRed: 0.92, green: 0.91, blue: 0.98, alpha: 1)
+            tint = .systemPurple
         case .failed:
             badgeText = L10n.errorBadge
-            textColor = NSColor(calibratedRed: 0.66, green: 0.19, blue: 0.19, alpha: 1)
-            backgroundColor = NSColor(calibratedRed: 0.99, green: 0.90, blue: 0.90, alpha: 1)
+            tint = .systemRed
         case .lost:
             badgeText = L10n.lostBadge
-            textColor = NSColor(calibratedRed: 0.55, green: 0.35, blue: 0.10, alpha: 1)
-            backgroundColor = NSColor(calibratedRed: 0.98, green: 0.93, blue: 0.86, alpha: 1)
+            tint = .systemYellow
         }
+        let colors = WorkspaceTheme.badgeColors(tint: tint)
 
         connectionBadge.text = badgeText
-        connectionBadge.applyStyle(textColor: textColor, backgroundColor: backgroundColor)
+        connectionBadge.applyStyle(textColor: colors.text, backgroundColor: colors.background)
     }
 
     @objc private func handleHostSelection(_ sender: NSPopUpButton) {
@@ -344,9 +330,7 @@ final class WorkspaceToolbarViewController: NSViewController {
     }
 
     private func configureIconButton(_ button: NSButton, symbolName: String, action: Selector) {
-        button.bezelStyle = .texturedRounded
         button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
-        button.imagePosition = .imageOnly
         button.target = self
         button.action = action
     }

@@ -103,6 +103,8 @@ final class ViewTreePanelController: NSViewController {
         outlineView.headerView = nil
         outlineView.rowHeight = ViewTreeLayoutMetrics.rowHeight
         outlineView.selectionHighlightStyle = .sourceList
+        // sourceList 样式自带灰色背景，透明后与面板卡片底色一致
+        outlineView.backgroundColor = .clear
         outlineView.focusRingType = .none
         outlineView.indentationPerLevel = 16
         outlineView.delegate = self

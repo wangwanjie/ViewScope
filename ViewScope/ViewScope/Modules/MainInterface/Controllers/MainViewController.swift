@@ -4,11 +4,10 @@ import SnapKit
 @MainActor
 final class MainViewController: NSViewController {
     private enum Layout {
-        static let toolbarHeight: CGFloat = 52
-        static let topInset: CGFloat = 10
-        static let sideInset: CGFloat = 12
-        static let bottomInset: CGFloat = 12
-        static let sectionSpacing: CGFloat = 12
+        static let toolbarHeight = WorkspaceTheme.Metrics.titlebarHeight
+        static let toolbarLeadingInset = WorkspaceTheme.Metrics.trafficLightsInset
+        static let sideInset = WorkspaceTheme.Metrics.panelGap
+        static let bottomInset = WorkspaceTheme.Metrics.panelGap
     }
 
     private let store: WorkspaceStore
@@ -45,14 +44,16 @@ final class MainViewController: NSViewController {
         view.addSubview(toolbarController.view)
         view.addSubview(workspaceController.view)
 
+        // 工具栏与红绿灯同处标题栏这一行（窗口使用 fullSizeContentView + 透明标题栏）
         toolbarController.view.snp.makeConstraints { make in
-            make.top.equalTo(view.safeAreaLayoutGuide.snp.top).offset(Layout.topInset)
-            make.leading.trailing.equalToSuperview().inset(Layout.sideInset)
+            make.top.equalToSuperview()
+            make.leading.equalToSuperview().inset(Layout.toolbarLeadingInset)
+            make.trailing.equalToSuperview()
             make.height.equalTo(Layout.toolbarHeight)
         }
 
         workspaceController.view.snp.makeConstraints { make in
-            make.top.equalTo(toolbarController.view.snp.bottom).offset(Layout.sectionSpacing)
+            make.top.equalTo(toolbarController.view.snp.bottom)
             make.leading.trailing.equalToSuperview().inset(Layout.sideInset)
             make.bottom.equalToSuperview().inset(Layout.bottomInset)
         }
@@ -77,6 +78,6 @@ private final class WorkspaceBackgroundView: NSView {
     }
 
     private func applyAppearance() {
-        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        layer?.backgroundColor = resolvedCGColor(WorkspaceTheme.canvasBackground)
     }
 }

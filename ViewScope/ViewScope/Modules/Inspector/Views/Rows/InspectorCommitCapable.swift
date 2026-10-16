@@ -9,8 +9,10 @@ protocol InspectorCommitCapable: AnyObject {
 final class InspectorRowTitleLabel: NSTextField {
     init(text: String, width: CGFloat = 88) {
         super.init(frame: .zero)
-        stringValue = text.uppercased()
-        font = NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold)
+        stringValue = text
+        font = NSFont.systemFont(ofSize: 11)
+        lineBreakMode = .byTruncatingTail
+        toolTip = text
         textColor = .secondaryLabelColor
         isBezeled = false
         isBordered = false

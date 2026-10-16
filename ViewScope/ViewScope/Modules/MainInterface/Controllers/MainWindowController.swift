@@ -20,9 +20,10 @@ final class MainWindowController: NSWindowController {
         window.subtitle = L10n.mainWindowSubtitle
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
-        if #available(macOS 11.0, *) {
-            window.toolbarStyle = .unifiedCompact
-        }
+        // 空的 unified 工具栏只用来把标题栏撑高，让红绿灯与自绘工具栏垂直居中对齐
+        window.toolbar = NSToolbar(identifier: "ViewScopeMainToolbar")
+        window.toolbar?.showsBaselineSeparator = false
+        window.toolbarStyle = .unified
         window.isRestorable = false
         window.center()
         window.minSize = NSSize(width: 1220, height: 760)

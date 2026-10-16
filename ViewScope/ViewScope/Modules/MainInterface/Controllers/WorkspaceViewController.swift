@@ -6,8 +6,9 @@ import SnapKit
 final class WorkspaceViewController: NSViewController {
     private enum Layout {
         static let inspectorWidth: CGFloat = 360
-        static let panelSpacing: CGFloat = 12
-        static let separatorWidth: CGFloat = 1
+        static let panelSpacing = WorkspaceTheme.Metrics.panelGap
+        // 面板已是独立卡片，用间距分隔即可，不再画分隔线
+        static let separatorWidth: CGFloat = 0
     }
 
     private let store: WorkspaceStore

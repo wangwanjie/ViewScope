@@ -35,24 +35,24 @@ final class PreviewPanelController: NSViewController {
     private let renderStateBuilder = PreviewPanelRenderStateBuilder()
     private var cancellables = Set<AnyCancellable>()
 
-    private let zoomOutButton = NSButton()
-    private let zoomResetButton = NSButton(title: "100%", target: nil, action: nil)
-    private let zoomInButton = NSButton()
+    private let zoomOutButton = WorkspaceIconButton()
+    private let zoomResetButton = WorkspaceIconButton()
+    private let zoomInButton = WorkspaceIconButton()
     private let displayModeControl: NSSegmentedControl = {
         let flat = NSImage(systemSymbolName: WorkspacePreviewDisplayMode.flat.symbolName, accessibilityDescription: nil) ?? NSImage()
         let layered = NSImage(systemSymbolName: WorkspacePreviewDisplayMode.layered.symbolName, accessibilityDescription: nil) ?? NSImage()
         return NSSegmentedControl(images: [flat, layered], trackingMode: .selectOne, target: nil, action: nil)
     }()
-    private let consoleToggleButton = NSButton()
-    private let previewSettingsButton = NSButton()
-    private let resetViewButton = NSButton()
-    private let measureButton = NSButton()
-    private let colorPickerButton = NSButton()
-    private let diagnosticsButton = NSButton()
-    private let focusButton = NSButton()
-    private let clearFocusButton = NSButton()
-    private let visibilityButton = NSButton()
-    private let highlightButton = NSButton()
+    private let consoleToggleButton = WorkspaceIconButton()
+    private let previewSettingsButton = WorkspaceIconButton()
+    private let resetViewButton = WorkspaceIconButton()
+    private let measureButton = WorkspaceIconButton()
+    private let colorPickerButton = WorkspaceIconButton()
+    private let diagnosticsButton = WorkspaceIconButton()
+    private let focusButton = WorkspaceIconButton()
+    private let clearFocusButton = WorkspaceIconButton()
+    private let visibilityButton = WorkspaceIconButton()
+    private let highlightButton = WorkspaceIconButton()
     private var settingsPopover: NSPopover?
     private var diagnosticsPopover: NSPopover?
     private var consoleHeightConstraint: Constraint?
@@ -167,6 +167,8 @@ final class PreviewPanelController: NSViewController {
 
     private func buildUI() {
         panelView.setTitle(L10n.canvasPreview)
+        // 预览标题栏全部留给工具按钮；聚焦节点名已在层级树标题中显示
+        panelView.isTitleHidden = true
         panelView.contentView.wantsLayer = true
         panelView.contentView.layer?.masksToBounds = true
         previewContainerView.wantsLayer = true
@@ -189,7 +191,9 @@ final class PreviewPanelController: NSViewController {
         configureToolbarButton(previewSettingsButton, symbolName: "slider.horizontal.3", toolTip: L10n.previewLayerSettings, action: #selector(showPreviewSettings(_:)))
         configureConsoleToggleButton()
 
-        zoomResetButton.bezelStyle = .texturedRounded
+        zoomResetButton.title = "100%"
+        zoomResetButton.imagePosition = .noImage
+        zoomResetButton.setContentCompressionResistancePriority(.required, for: .horizontal)
         zoomResetButton.target = self
         zoomResetButton.action = #selector(resetZoom(_:))
         zoomResetButton.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
@@ -201,13 +205,18 @@ final class PreviewPanelController: NSViewController {
         displayModeControl.setToolTip(L10n.previewDisplayFlat, forSegment: 0)
         displayModeControl.setToolTip(L10n.previewDisplayLayered, forSegment: 1)
 
-        [
-            zoomOutButton, zoomResetButton, zoomInButton, resetViewButton, displayModeControl,
-            measureButton, colorPickerButton, diagnosticsButton,
-            consoleToggleButton, previewSettingsButton, focusButton, clearFocusButton, visibilityButton, highlightButton
-        ].forEach {
-            panelView.accessoryStackView.addArrangedSubview($0)
-        }
+        // 固定段宽并禁止压缩，避免标题栏空间紧张时两个图标被挤叠在一起
+        displayModeControl.setWidth(30, forSegment: 0)
+        displayModeControl.setWidth(30, forSegment: 1)
+        displayModeControl.setContentCompressionResistancePriority(.required, for: .horizontal)
+        // 按功能分组：视图模式 / 缩放 / 检查工具 / 节点操作 / 面板与设置
+        panelView.setAccessoryGroups([
+            [displayModeControl],
+            [zoomOutButton, zoomResetButton, zoomInButton, resetViewButton],
+            [measureButton, colorPickerButton, diagnosticsButton],
+            [focusButton, clearFocusButton, visibilityButton, highlightButton],
+            [consoleToggleButton, previewSettingsButton]
+        ])
 
         panelView.contentView.addSubview(previewContainerView)
         panelView.contentView.addSubview(consoleHostView)
@@ -776,7 +785,6 @@ final class PreviewPanelController: NSViewController {
     // MARK: - 工具栏
 
     private func configureToolbarButton(_ button: NSButton, symbolName: String, toolTip: String, action: Selector) {
-        button.bezelStyle = .texturedRounded
         // NSButton() 默认标题是“Button/按钮”，纯图标按钮必须清空，否则切到 imageLeading 时会露出来
         button.title = ""
         button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
@@ -788,7 +796,6 @@ final class PreviewPanelController: NSViewController {
 
     private func configureConsoleToggleButton() {
         consoleToggleButton.setButtonType(.toggle)
-        consoleToggleButton.bezelStyle = .texturedRounded
         consoleToggleButton.imagePosition = .imageOnly
         consoleToggleButton.target = self
         consoleToggleButton.action = #selector(toggleConsolePanel(_:))

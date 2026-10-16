@@ -6,14 +6,15 @@ final class WorkspaceContentSplitViewController: NSViewController {
     private enum Layout {
         static let minimumTreeWidth: CGFloat = 240
         static let initialTreeWidth: CGFloat = 300
-        static let minimumPreviewWidth: CGFloat = 480
+        // 预览标题栏需要放下全部工具按钮
+        static let minimumPreviewWidth: CGFloat = 540
         static let autosaveKey = "workspace.contentSplit.treeWidth"
         static let legacySplitAutosaveKey = "NSSplitView Subview Frames workspace.contentSplit"
     }
 
     private let treeController: ViewTreePanelController
     private let previewController: PreviewPanelController
-    private let splitView = NSSplitView()
+    private let splitView = WorkspaceGapSplitView()
     private var didApplyInitialLayout = false
 
     init(store: WorkspaceStore) {
@@ -43,7 +44,7 @@ final class WorkspaceContentSplitViewController: NSViewController {
 
     private func buildUI() {
         splitView.isVertical = true
-        splitView.dividerStyle = .paneSplitter
+        splitView.dividerStyle = .thin
         splitView.delegate = self
 
         UserDefaults.standard.removeObject(forKey: Layout.legacySplitAutosaveKey)
@@ -128,5 +129,16 @@ extension WorkspaceContentSplitViewController: NSSplitViewDelegate {
     func splitViewDidResizeSubviews(_ notification: Notification) {
         guard didApplyInitialLayout else { return }
         UserDefaults.standard.set(Double(clampTreeWidth(currentTreeWidth)), forKey: Layout.autosaveKey)
+    }
+}
+
+/// 分隔条透明、宽度等于卡片间距的分栏视图，卡片之间只留空隙，仍可拖拽调整宽度。
+private final class WorkspaceGapSplitView: NSSplitView {
+    override var dividerThickness: CGFloat {
+        WorkspaceTheme.Metrics.panelGap
+    }
+
+    override func drawDivider(in rect: NSRect) {
+        // 不绘制分隔线
     }
 }
