@@ -74,7 +74,7 @@ xcodebuild \
 ### Swift Package Manager
 
 ```swift
-.package(url: "https://github.com/wangwanjie/ViewScope.git", from: "1.2.2")
+.package(url: "https://github.com/wangwanjie/ViewScope.git", from: "1.3.0")
 ```
 
 仓库根目录直接提供 `Package.swift`，Xcode / SwiftPM 可以直接依赖整个仓库 URL，无需指向 `ViewScopeServer/` 子目录。
@@ -121,7 +121,7 @@ iOS 与 macOS 共用同一个 `ViewScopeServer` product（iOS 13+；用 Xcode 27
 ### CocoaPods
 
 ```ruby
-pod 'ViewScopeServer', :git => 'https://github.com/wangwanjie/ViewScope.git', :tag => 'v1.2.2', :configurations => ['Debug']
+pod 'ViewScopeServer', :git => 'https://github.com/wangwanjie/ViewScope.git', :tag => 'v1.3.0', :configurations => ['Debug']
 或者
 pod 'ViewScopeServer', :git => 'https://github.com/wangwanjie/ViewScope.git', :branch => 'main', :configurations => ['Debug']
 ```
@@ -129,7 +129,7 @@ pod 'ViewScopeServer', :git => 'https://github.com/wangwanjie/ViewScope.git', :b
 ### Carthage
 
 ```ruby
-github "wangwanjie/ViewScope" ~> 1.2
+github "wangwanjie/ViewScope" ~> 1.3
 ```
 
 然后执行：
